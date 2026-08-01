@@ -54,15 +54,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
+      // Set loading to true on sign-in or session changes to prevent ProtectedRoute 
+      // from redirecting or rendering before the profile is loaded.
+      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+        setLoading(true);
+      }
+
       (async () => {
-        setSession(newSession);
-        if (newSession?.user) {
-          await loadProfile(newSession.user.id);
-        } else {
-          setProfile(null);
+        try {
+          setSession(newSession);
+          if (newSession?.user) {
+            await loadProfile(newSession.user.id);
+          } else {
+            setProfile(null);
+          }
+        } catch (error) {
+          console.error('Error in auth state change:', error);
+        } finally {
+          setLoading(false);
         }
-        setLoading(false);
       })();
     });
 
@@ -73,16 +84,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signUp = async (email: string, password: string, fullName: string) => {
+    setLoading(true);
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { full_name: fullName } },
     });
+    if (error) setLoading(false);
     return { error: error ? mapAuthError(error.message) : null };
   };
 
   const signIn = async (email: string, password: string) => {
+    setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) setLoading(false);
     return { error: error ? mapAuthError(error.message) : null };
   };
 
