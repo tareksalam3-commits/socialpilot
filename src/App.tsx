@@ -1,79 +1,87 @@
-import { useState } from 'react';
-import { AuthProvider, useAuthContext } from './contexts/AuthContext';
-import Layout from './components/Layout';
-import ToastContainer from './components/ToastContainer';
-import { useToast } from './hooks/useToast';
-import LoginPage from './pages/LoginPage';
-import DashboardPage from './pages/DashboardPage';
-import UsersPage from './pages/UsersPage';
-import ClientsPage from './pages/ClientsPage';
-import PoliciesPage from './pages/PoliciesPage';
-import CollectionsPage from './pages/CollectionsPage';
-import TargetsPage from './pages/TargetsPage';
-import ReportsPage from './pages/ReportsPage';
-import MonthlyClosingPage from './pages/MonthlyClosingPage';
-import ActivityLogsPage from './pages/ActivityLogsPage';
-import SettingsPage from './pages/SettingsPage';
-import ProfilePage from './pages/ProfilePage';
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AuthProvider } from '@/providers/AuthProvider';
+import { ThemeProvider } from '@/providers/ThemeProvider';
+import { ToastProvider } from '@/providers/ToastProvider';
+import { ProtectedRoute } from '@/layouts/ProtectedRoute';
+import { AppLayout } from '@/layouts/AppLayout';
+import { LoadingScreen } from '@/ui';
+import { CommandBar } from '@/features/ai/CommandBar';
 
-export type ToastContextType = {
-  showSuccess: (message: string) => void;
-  showError: (message: string) => void;
-};
-
-function AppContent() {
-  const { user, loading } = useAuthContext();
-  const [currentPage, setCurrentPage] = useState('dashboard');
-  const { toasts, addToast, removeToast } = useToast();
-
-  const showSuccess = (message: string) => addToast('success', message);
-  const showError = (message: string) => addToast('error', message);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-secondary-50 flex items-center justify-center">
-        <div className="animate-spin w-10 h-10 border-4 border-primary-600 border-t-transparent rounded-full" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <LoginPage />;
-  }
-
-  const renderPage = () => {
-    const pageProps = { showSuccess, showError };
-    switch (currentPage) {
-      case 'dashboard': return <DashboardPage {...pageProps} />;
-      case 'users': return <UsersPage {...pageProps} />;
-      case 'clients': return <ClientsPage {...pageProps} />;
-      case 'policies': return <PoliciesPage {...pageProps} />;
-      case 'collections': return <CollectionsPage {...pageProps} />;
-      case 'targets': return <TargetsPage {...pageProps} />;
-      case 'reports': return <ReportsPage {...pageProps} />;
-      case 'monthly-closing': return <MonthlyClosingPage {...pageProps} />;
-      case 'activity-logs': return <ActivityLogsPage {...pageProps} />;
-      case 'settings': return <SettingsPage {...pageProps} />;
-      case 'profile': return <ProfilePage {...pageProps} />;
-      default: return <DashboardPage {...pageProps} />;
-    }
-  };
-
-  return (
-    <>
-      <Layout currentPage={currentPage} onNavigate={setCurrentPage}>
-        {renderPage()}
-      </Layout>
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
-    </>
-  );
-}
+const LoginPage = lazy(() => import('@/features/auth/LoginPage').then((m) => ({ default: m.LoginPage })));
+const RegisterPage = lazy(() => import('@/features/auth/RegisterPage').then((m) => ({ default: m.RegisterPage })));
+const ForgotPasswordPage = lazy(() => import('@/features/auth/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import('@/features/auth/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })));
+const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })));
+const SettingsPage = lazy(() => import('@/features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const ConnectedAccountsPage = lazy(() => import('@/features/accounts/ConnectedAccountsPage').then((m) => ({ default: m.ConnectedAccountsPage })));
+const ScheduledPostsPage = lazy(() => import('@/features/posts/ScheduledPostsPage').then((m) => ({ default: m.ScheduledPostsPage })));
+const ContentCalendarPage = lazy(() => import('@/features/posts/ContentCalendarPage').then((m) => ({ default: m.ContentCalendarPage })));
+const MediaLibraryPage = lazy(() => import('@/features/media/MediaLibraryPage').then((m) => ({ default: m.MediaLibraryPage })));
+const InboxPage = lazy(() => import('@/features/inbox/InboxPage').then((m) => ({ default: m.InboxPage })));
+const NotificationsPage = lazy(() => import('@/features/notifications/NotificationsPage').then((m) => ({ default: m.NotificationsPage })));
+const AnalyticsPage = lazy(() => import('@/features/analytics/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage })));
+const GlobalSearchPage = lazy(() => import('@/features/search/GlobalSearchPage').then((m) => ({ default: m.GlobalSearchPage })));
+const WorkspacePage = lazy(() => import('@/features/workspace/WorkspacePage').then((m) => ({ default: m.WorkspacePage })));
+const AudiencePage = lazy(() => import('@/features/audience/AudiencePage').then((m) => ({ default: m.AudiencePage })));
+const PlaygroundPage = lazy(() => import('@/features/ai/PlaygroundPage').then((m) => ({ default: m.PlaygroundPage })));
+const ContentStudioPage = lazy(() => import('@/features/ai/ContentStudioPage').then((m) => ({ default: m.ContentStudioPage })));
+const PromptLibraryPage = lazy(() => import('@/features/ai/PromptLibraryPage').then((m) => ({ default: m.PromptLibraryPage })));
+const AIHistoryPage = lazy(() => import('@/features/ai/AIHistoryPage').then((m) => ({ default: m.AIHistoryPage })));
+const TokenAnalyticsPage = lazy(() => import('@/features/ai/TokenAnalyticsPage').then((m) => ({ default: m.TokenAnalyticsPage })));
+const AISettingsPage = lazy(() => import('@/features/ai/AISettingsPage').then((m) => ({ default: m.AISettingsPage })));
+const BrandVoicePage = lazy(() => import('@/features/ai/BrandVoicePage').then((m) => ({ default: m.BrandVoicePage })));
 
 function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <ToastProvider>
+          <BrowserRouter>
+            <CommandBar />
+            <Suspense fallback={<LoadingScreen />}>
+              <Routes>
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/register" element={<RegisterPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
+                <Route
+                  path="/app"
+                  element={
+                    <ProtectedRoute>
+                      <AppLayout />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route index element={<Navigate to="/app/dashboard" replace />} />
+                  <Route path="dashboard" element={<DashboardPage />} />
+                  <Route path="accounts" element={<ConnectedAccountsPage />} />
+                  <Route path="scheduled" element={<ScheduledPostsPage />} />
+                  <Route path="calendar" element={<ContentCalendarPage />} />
+                  <Route path="media" element={<MediaLibraryPage />} />
+                  <Route path="inbox" element={<InboxPage />} />
+                  <Route path="notifications" element={<NotificationsPage />} />
+                  <Route path="analytics" element={<AnalyticsPage />} />
+                  <Route path="search" element={<GlobalSearchPage />} />
+                  <Route path="workspace" element={<WorkspacePage />} />
+                  <Route path="audience" element={<AudiencePage />} />
+                  <Route path="playground" element={<PlaygroundPage />} />
+                  <Route path="studio" element={<ContentStudioPage />} />
+                  <Route path="prompts" element={<PromptLibraryPage />} />
+                  <Route path="ai-history" element={<AIHistoryPage />} />
+                  <Route path="token-analytics" element={<TokenAnalyticsPage />} />
+                  <Route path="ai-settings" element={<AISettingsPage />} />
+                  <Route path="brand-voice" element={<BrandVoicePage />} />
+                  <Route path="settings" element={<SettingsPage />} />
+                </Route>
+                <Route path="/" element={<Navigate to="/app/dashboard" replace />} />
+                <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
+              </Routes>
+            </Suspense>
+          </BrowserRouter>
+        </ToastProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 

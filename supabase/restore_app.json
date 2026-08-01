@@ -1,4 +1,0 @@
-{
-  "project_id": "mlhxcfxmqgegynzpofsr",
-  "query": "-- Disable RLS on all main tables to restore functionality\nALTER TABLE users DISABLE ROW LEVEL SECURITY;\nALTER TABLE clients DISABLE ROW LEVEL SECURITY;\nALTER TABLE policies DISABLE ROW LEVEL SECURITY;\nALTER TABLE installments DISABLE ROW LEVEL SECURITY;\nALTER TABLE collections DISABLE ROW LEVEL SECURITY;\nALTER TABLE activity_logs DISABLE ROW LEVEL SECURITY;\nALTER TABLE targets DISABLE ROW LEVEL SECURITY;\n\n-- Drop all policies to start fresh\nDROP POLICY IF EXISTS \"users_public_read\" ON users;\nDROP POLICY IF EXISTS \"users_auth_insert\" ON users;\nDROP POLICY IF EXISTS \"users_auth_update\" ON users;\nDROP POLICY IF EXISTS \"users_auth_delete\" ON users;\n"
-}
