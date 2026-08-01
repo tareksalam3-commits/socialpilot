@@ -28,46 +28,47 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/providers/AuthProvider';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { initials } from '@/utils/format';
 import { Dropdown, DropdownItem } from '@/ui';
 
 const navSections = [
   {
-    label: 'Overview',
+    labelKey: 'nav.section.overview',
     items: [
-      { to: '/app/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { to: '/app/analytics', label: 'Analytics', icon: BarChart3 },
-      { to: '/app/search', label: 'Search', icon: SearchIcon },
+      { to: '/app/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard },
+      { to: '/app/analytics', labelKey: 'nav.analytics', icon: BarChart3 },
+      { to: '/app/search', labelKey: 'nav.search', icon: SearchIcon },
     ],
   },
   {
-    label: 'Publishing',
+    labelKey: 'nav.section.publishing',
     items: [
-      { to: '/app/accounts', label: 'Accounts', icon: Link2 },
-      { to: '/app/scheduled', label: 'Posts', icon: CalendarClock },
-      { to: '/app/calendar', label: 'Calendar', icon: CalendarDays },
-      { to: '/app/media', label: 'Media Library', icon: ImageIcon },
-      { to: '/app/inbox', label: 'Inbox', icon: InboxIcon },
+      { to: '/app/accounts', labelKey: 'nav.accounts', icon: Link2 },
+      { to: '/app/scheduled', labelKey: 'nav.posts', icon: CalendarClock },
+      { to: '/app/calendar', labelKey: 'nav.calendar', icon: CalendarDays },
+      { to: '/app/media', labelKey: 'nav.mediaLibrary', icon: ImageIcon },
+      { to: '/app/inbox', labelKey: 'nav.inbox', icon: InboxIcon },
     ],
   },
   {
-    label: 'AI Studio',
+    labelKey: 'nav.section.aiStudio',
     items: [
-      { to: '/app/playground', label: 'Playground', icon: MessageSquare },
-      { to: '/app/studio', label: 'Content Studio', icon: Wand2 },
-      { to: '/app/prompts', label: 'Prompts', icon: Library },
-      { to: '/app/ai-history', label: 'AI History', icon: History },
-      { to: '/app/token-analytics', label: 'Token Analytics', icon: ZapIcon },
+      { to: '/app/playground', labelKey: 'nav.playground', icon: MessageSquare },
+      { to: '/app/studio', labelKey: 'nav.contentStudio', icon: Wand2 },
+      { to: '/app/prompts', labelKey: 'nav.prompts', icon: Library },
+      { to: '/app/ai-history', labelKey: 'nav.aiHistory', icon: History },
+      { to: '/app/token-analytics', labelKey: 'nav.tokenAnalytics', icon: ZapIcon },
     ],
   },
   {
-    label: 'Settings',
+    labelKey: 'nav.section.settings',
     items: [
-      { to: '/app/workspace', label: 'Workspace', icon: Users },
-      { to: '/app/notifications', label: 'Notifications', icon: BellIcon },
-      { to: '/app/brand-voice', label: 'Brand Voice', icon: Sparkles },
-      { to: '/app/ai-settings', label: 'AI Settings', icon: Settings },
-      { to: '/app/settings', label: 'Settings', icon: Settings },
+      { to: '/app/workspace', labelKey: 'nav.workspace', icon: Users },
+      { to: '/app/notifications', labelKey: 'nav.notifications', icon: BellIcon },
+      { to: '/app/brand-voice', labelKey: 'nav.brandVoice', icon: Sparkles },
+      { to: '/app/ai-settings', labelKey: 'nav.aiSettings', icon: Settings },
+      { to: '/app/settings', labelKey: 'nav.settings', icon: Settings },
     ],
   },
 ];
@@ -77,6 +78,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, profile, signOut } = useAuth();
   const { workspace } = useWorkspace();
+  const { t, dir } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -104,7 +106,11 @@ export function AppLayout({ children }: { children?: ReactNode }) {
           className="hidden rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 lg:block"
           aria-label="Toggle sidebar"
         >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          {(collapsed && dir === 'ltr') || (!collapsed && dir === 'rtl') ? (
+            <ChevronRight className="h-4 w-4" />
+          ) : (
+            <ChevronLeft className="h-4 w-4" />
+          )}
         </button>
         <button
           onClick={() => setMobileOpen(false)}
@@ -117,10 +123,10 @@ export function AppLayout({ children }: { children?: ReactNode }) {
 
       <nav className="flex-1 space-y-4 overflow-y-auto p-2">
         {navSections.map((section) => (
-          <div key={section.label}>
+          <div key={section.labelKey}>
             {!collapsed && (
               <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                {section.label}
+                {t(section.labelKey)}
               </p>
             )}
             <div className="space-y-1">
@@ -135,10 +141,10 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
                     }`
                   }
-                  title={collapsed ? item.label : undefined}
+                  title={collapsed ? t(item.labelKey) : undefined}
                 >
                   <item.icon className="h-4 w-4 shrink-0" />
-                  {!collapsed && <span>{item.label}</span>}
+                  {!collapsed && <span>{t(item.labelKey)}</span>}
                 </NavLink>
               ))}
             </div>
@@ -174,7 +180,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             <Settings className="h-4 w-4" /> Settings
           </DropdownItem>
           <DropdownItem onClick={handleSignOut}>
-            <LogOut className="h-4 w-4" /> Sign out
+            <LogOut className="h-4 w-4" /> {t('common.signOut')}
           </DropdownItem>
         </Dropdown>
       </div>

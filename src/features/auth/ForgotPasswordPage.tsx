@@ -5,10 +5,12 @@ import { AuthLayout } from '@/layouts/AuthLayout';
 import { Button, Input, SuccessAlert } from '@/ui';
 import { supabase } from '@/services/supabase';
 import { useToast } from '@/providers/ToastProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { validateEmail } from '@/utils/validation';
 
 export function ForgotPasswordPage() {
   const { push } = useToast();
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
@@ -26,7 +28,7 @@ export function ForgotPasswordPage() {
     });
     setLoading(false);
     if (error) {
-      push({ title: 'Request failed', description: error.message, variant: 'error' });
+      push({ title: t('auth.forgotPassword.toastFailed'), description: error.message, variant: 'error' });
       return;
     }
     setSent(true);
@@ -40,28 +42,28 @@ export function ForgotPasswordPage() {
         </div>
         <span className="text-lg font-semibold text-slate-900 dark:text-white">SocialPilot AI</span>
       </div>
-      <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Reset your password</h2>
+      <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{t('auth.forgotPassword.title')}</h2>
       <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-        Enter your email and we'll send you a link to reset your password.
+        {t('auth.forgotPassword.subtitle')}
       </p>
 
       {sent ? (
         <div className="mt-8 space-y-4">
           <SuccessAlert
-            title="Check your inbox"
-            description="If an account exists for that email, a reset link is on its way."
+            title={t('auth.forgotPassword.checkInbox')}
+            description={t('auth.forgotPassword.checkInboxDesc')}
           />
           <Link
             to="/login"
             className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
           >
-            <ArrowLeft className="h-4 w-4" /> Back to sign in
+            <ArrowLeft className="h-4 w-4" /> {t('auth.forgotPassword.backToSignIn')}
           </Link>
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="mt-8 space-y-4">
           <Input
-            label="Email"
+            label={t('auth.email')}
             type="email"
             name="email"
             autoComplete="email"
@@ -71,13 +73,13 @@ export function ForgotPasswordPage() {
             error={error}
           />
           <Button type="submit" loading={loading} className="w-full">
-            Send reset link
+            {t('auth.forgotPassword.sendButton')}
           </Button>
           <Link
             to="/login"
             className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
           >
-            <ArrowLeft className="h-4 w-4" /> Back to sign in
+            <ArrowLeft className="h-4 w-4" /> {t('auth.forgotPassword.backToSignIn')}
           </Link>
         </form>
       )}

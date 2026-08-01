@@ -5,11 +5,13 @@ import { AuthLayout } from '@/layouts/AuthLayout';
 import { Button, Input } from '@/ui';
 import { useAuth } from '@/providers/AuthProvider';
 import { useToast } from '@/providers/ToastProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { validateEmail, validatePassword } from '@/utils/validation';
 
 export function LoginPage() {
   const { signIn } = useAuth();
   const { push } = useToast();
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,10 +29,10 @@ export function LoginPage() {
     const { error } = await signIn(email, password);
     setLoading(false);
     if (error) {
-      push({ title: 'Sign in failed', description: error, variant: 'error' });
+      push({ title: t('auth.toast.signInFailed'), description: error, variant: 'error' });
       return;
     }
-    push({ title: 'Welcome back!', variant: 'success' });
+    push({ title: t('auth.toast.welcomeBack'), variant: 'success' });
     navigate('/app/dashboard');
   };
 
@@ -42,12 +44,12 @@ export function LoginPage() {
         </div>
         <span className="text-lg font-semibold text-slate-900 dark:text-white">SocialPilot AI</span>
       </div>
-      <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Sign in to your account</h2>
-      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Enter your credentials to access your workspace.</p>
+      <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{t('auth.login.title')}</h2>
+      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('auth.login.subtitle')}</p>
 
       <form onSubmit={handleSubmit} className="mt-8 space-y-4">
         <Input
-          label="Email"
+          label={t('auth.email')}
           type="email"
           name="email"
           autoComplete="email"
@@ -57,7 +59,7 @@ export function LoginPage() {
           error={errors.email}
         />
         <Input
-          label="Password"
+          label={t('auth.password')}
           type="password"
           name="password"
           autoComplete="current-password"
@@ -68,18 +70,18 @@ export function LoginPage() {
         />
         <div className="flex justify-end">
           <Link to="/forgot-password" className="text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white">
-            Forgot password?
+            {t('auth.login.forgotPassword')}
           </Link>
         </div>
         <Button type="submit" loading={loading} className="w-full">
-          Sign in
+          {t('auth.login.button')}
         </Button>
       </form>
 
       <p className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
-        Don't have an account?{' '}
+        {t('auth.login.noAccount')}{' '}
         <Link to="/register" className="font-semibold text-slate-900 hover:underline dark:text-white">
-          Create one
+          {t('auth.register.button')}
         </Link>
       </p>
     </AuthLayout>

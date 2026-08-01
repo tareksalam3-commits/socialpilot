@@ -5,11 +5,13 @@ import { AuthLayout } from '@/layouts/AuthLayout';
 import { Button, Input } from '@/ui';
 import { useAuth } from '@/providers/AuthProvider';
 import { useToast } from '@/providers/ToastProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { validateEmail, validatePassword, validateRequired, validateMatch } from '@/utils/validation';
 
 export function RegisterPage() {
   const { signUp } = useAuth();
   const { push } = useToast();
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -36,12 +38,12 @@ export function RegisterPage() {
     const { error } = await signUp(email, password, fullName);
     setLoading(false);
     if (error) {
-      push({ title: 'Sign up failed', description: error, variant: 'error' });
+      push({ title: t('auth.toast.signUpFailed'), description: error, variant: 'error' });
       return;
     }
     push({
-      title: 'Account created',
-      description: 'You are now signed in.',
+      title: t('auth.toast.accountCreated'),
+      description: t('auth.toast.accountCreatedDesc'),
       variant: 'success',
     });
     navigate('/app/dashboard');
@@ -55,12 +57,12 @@ export function RegisterPage() {
         </div>
         <span className="text-lg font-semibold text-slate-900 dark:text-white">SocialPilot AI</span>
       </div>
-      <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Create your account</h2>
-      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Start managing your social presence today.</p>
+      <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{t('auth.register.title')}</h2>
+      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('auth.register.subtitle')}</p>
 
       <form onSubmit={handleSubmit} className="mt-8 space-y-4">
         <Input
-          label="Full name"
+          label={t('auth.fullName')}
           name="fullName"
           autoComplete="name"
           placeholder="Jane Doe"
@@ -69,7 +71,7 @@ export function RegisterPage() {
           error={errors.fullName}
         />
         <Input
-          label="Email"
+          label={t('auth.email')}
           type="email"
           name="email"
           autoComplete="email"
@@ -79,7 +81,7 @@ export function RegisterPage() {
           error={errors.email}
         />
         <Input
-          label="Password"
+          label={t('auth.password')}
           type="password"
           name="password"
           autoComplete="new-password"
@@ -89,7 +91,7 @@ export function RegisterPage() {
           error={errors.password}
         />
         <Input
-          label="Confirm password"
+          label={t('auth.confirmPassword')}
           type="password"
           name="confirm"
           autoComplete="new-password"
@@ -99,14 +101,14 @@ export function RegisterPage() {
           error={errors.confirm}
         />
         <Button type="submit" loading={loading} className="w-full">
-          Create account
+          {t('auth.register.button')}
         </Button>
       </form>
 
       <p className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
-        Already have an account?{' '}
+        {t('auth.register.haveAccount')}{' '}
         <Link to="/login" className="font-semibold text-slate-900 hover:underline dark:text-white">
-          Sign in
+          {t('auth.login.button')}
         </Link>
       </p>
     </AuthLayout>

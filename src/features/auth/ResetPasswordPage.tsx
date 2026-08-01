@@ -5,10 +5,12 @@ import { AuthLayout } from '@/layouts/AuthLayout';
 import { Button, Input } from '@/ui';
 import { supabase } from '@/services/supabase';
 import { useToast } from '@/providers/ToastProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { validatePassword, validateMatch } from '@/utils/validation';
 
 export function ResetPasswordPage() {
   const { push } = useToast();
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -26,10 +28,10 @@ export function ResetPasswordPage() {
     const { error } = await supabase.auth.updateUser({ password });
     setLoading(false);
     if (error) {
-      push({ title: 'Reset failed', description: error.message, variant: 'error' });
+      push({ title: t('auth.resetPassword.toastFailed'), description: error.message, variant: 'error' });
       return;
     }
-    push({ title: 'Password updated', description: 'You can now sign in with your new password.', variant: 'success' });
+    push({ title: t('auth.resetPassword.toastSuccess'), description: t('auth.resetPassword.toastSuccessDesc'), variant: 'success' });
     navigate('/login');
   };
 
@@ -41,12 +43,12 @@ export function ResetPasswordPage() {
         </div>
         <span className="text-lg font-semibold text-slate-900 dark:text-white">SocialPilot AI</span>
       </div>
-      <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Set a new password</h2>
-      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose a strong password for your account.</p>
+      <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{t('auth.resetPassword.title')}</h2>
+      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('auth.resetPassword.subtitle')}</p>
 
       <form onSubmit={handleSubmit} className="mt-8 space-y-4">
         <Input
-          label="New password"
+          label={t('auth.resetPassword.newPassword')}
           type="password"
           name="password"
           autoComplete="new-password"
@@ -56,7 +58,7 @@ export function ResetPasswordPage() {
           error={errors.password}
         />
         <Input
-          label="Confirm new password"
+          label={t('auth.resetPassword.confirmNewPassword')}
           type="password"
           name="confirm"
           autoComplete="new-password"
@@ -66,7 +68,7 @@ export function ResetPasswordPage() {
           error={errors.confirm}
         />
         <Button type="submit" loading={loading} className="w-full">
-          Update password
+          {t('auth.resetPassword.button')}
         </Button>
       </form>
     </AuthLayout>

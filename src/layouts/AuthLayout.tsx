@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
 import { Sparkles } from 'lucide-react';
+import { useLanguage } from '@/providers/LanguageProvider';
 
 export function AuthLayout({ children }: { children: ReactNode }) {
+  const { t } = useLanguage();
   return (
     <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950">
       {/* Left brand panel */}
@@ -16,9 +18,9 @@ export function AuthLayout({ children }: { children: ReactNode }) {
           <span className="text-lg font-semibold">SocialPilot AI</span>
         </div>
         <div className="relative z-10">
-          <h1 className="text-3xl font-bold leading-tight">Plan, schedule, and grow your social presence.</h1>
+          <h1 className="text-3xl font-bold leading-tight">{t('authLayout.tagline')}</h1>
           <p className="mt-3 max-w-md text-slate-300">
-            The all-in-one workspace for managing your social media accounts, powered by AI.
+            {t('authLayout.description')}
           </p>
         </div>
         <p className="relative z-10 text-sm text-slate-400">© {new Date().getFullYear()} SocialPilot AI</p>

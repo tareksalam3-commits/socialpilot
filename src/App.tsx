@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from '@/providers/AuthProvider';
 import { ThemeProvider } from '@/providers/ThemeProvider';
+import { LanguageProvider } from '@/providers/LanguageProvider';
 import { ToastProvider } from '@/providers/ToastProvider';
 import { ProtectedRoute } from '@/layouts/ProtectedRoute';
 import { AppLayout } from '@/layouts/AppLayout';
@@ -34,6 +35,7 @@ const BrandVoicePage = lazy(() => import('@/features/ai/BrandVoicePage').then((m
 
 function App() {
   return (
+    <LanguageProvider>
     <ThemeProvider>
       <AuthProvider>
         <ToastProvider>
@@ -82,6 +84,7 @@ function App() {
         </ToastProvider>
       </AuthProvider>
     </ThemeProvider>
+    </LanguageProvider>
   );
 }
 
