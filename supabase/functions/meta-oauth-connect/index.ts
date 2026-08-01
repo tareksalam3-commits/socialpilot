@@ -1,0 +1,57 @@
+import { corsHeaders, errorResponse, getCallerId, jsonResponse, randomState, serviceClient } from '../_shared/oauth.ts';
+
+// Permissions needed to: list Pages, read/publish Page posts, and publish to
+// a linked Instagram Business account. `business_management` is required if
+// the Page is owned by a Business Manager rather than the user directly.
+const META_SCOPES = [
+  'pages_show_list',
+  'pages_read_engagement',
+  'pages_manage_posts',
+  'pages_manage_metadata',
+  'instagram_basic',
+  'instagram_content_publish',
+  'business_management',
+].join(',');
+
+Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
+  if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
+
+  const appId = Deno.env.get('META_APP_ID');
+  const functionsUrl = Deno.env.get('SUPABASE_URL')!.replace('.supabase.co', '.supabase.co/functions/v1');
+  if (!appId) return errorResponse('META_APP_ID is not configured', 500);
+
+  const supabase = serviceClient();
+  const callerId = await getCallerId(supabase, req);
+  if (!callerId) return errorResponse('Unauthorized', 401);
+
+  const { workspace_id } = await req.json().catch(() => ({}));
+  if (!workspace_id) return errorResponse('workspace_id is required', 400);
+
+  const { data: membership } = await supabase
+    .from('workspace_members')
+    .select('id')
+    .eq('workspace_id', workspace_id)
+    .eq('user_id', callerId)
+    .maybeSingle();
+  if (!membership) return errorResponse('Forbidden', 403);
+
+  const state = randomState();
+  const { error } = await supabase.from('oauth_states').insert({
+    state,
+    workspace_id,
+    user_id: callerId,
+    platform: 'meta',
+  });
+  if (error) return errorResponse('Could not start OAuth flow', 500);
+
+  const redirectUri = `${functionsUrl}/meta-oauth-callback`;
+  const authorizeUrl = new URL('https://www.facebook.com/v21.0/dialog/oauth');
+  authorizeUrl.searchParams.set('client_id', appId);
+  authorizeUrl.searchParams.set('redirect_uri', redirectUri);
+  authorizeUrl.searchParams.set('state', state);
+  authorizeUrl.searchParams.set('scope', META_SCOPES);
+  authorizeUrl.searchParams.set('response_type', 'code');
+
+  return jsonResponse({ url: authorizeUrl.toString() });
+});

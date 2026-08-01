@@ -26,9 +26,23 @@ export type PostPlatformTarget = {
   status: 'pending' | 'publishing' | 'published' | 'failed';
   error_message: string | null;
   published_at: string | null;
+  retry_count: number;
+  max_retries: number;
+  next_retry_at: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+};
+
+export type PublishingLog = {
+  id: string;
+  workspace_id: string;
+  post_id: string | null;
+  target_id: string | null;
+  platform: string | null;
+  event: 'queued' | 'attempt' | 'success' | 'failure' | 'retry_scheduled' | 'gave_up';
+  message: string | null;
+  created_at: string;
 };
 
 export type MediaFolder = {

@@ -38,7 +38,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     const raw = translations[language]?.[key] ?? translations[DEFAULT_LANGUAGE]?.[key] ?? key;
     if (!params) return raw;
     return Object.entries(params).reduce(
-      (acc, [k, v]) => acc.replaceAll(`{{${k}}}`, String(v)),
+      (acc, [k, v]) => acc.split(`{{${k}}}`).join(String(v)),
       raw,
     );
   };

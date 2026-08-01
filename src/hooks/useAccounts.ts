@@ -45,5 +45,20 @@ export function useAccounts() {
     }
   }, []);
 
-  return { accounts, loading, error, disconnect, remove, reload: load };
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
+
+  const refreshToken = useCallback(async (id: string) => {
+    setRefreshingId(id);
+    try {
+      await accountRepository.refreshMetaToken(id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to refresh token');
+      throw e;
+    } finally {
+      setRefreshingId(null);
+    }
+  }, [load]);
+
+  return { accounts, loading, error, disconnect, remove, reload: load, refreshToken, refreshingId };
 }

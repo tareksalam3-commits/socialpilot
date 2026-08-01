@@ -66,4 +66,61 @@ export const accountRepository = {
       .eq('id', id);
     if (error) throw error;
   },
+
+  /** Forces an immediate token refresh for a Facebook/Instagram account
+   * (they don't wait for the nightly cron sweep). Not applicable to
+   * LinkedIn, which uses a fixed-length token with no silent refresh. */
+  async refreshMetaToken(id: string): Promise<void> {
+    const { data, error } = await supabase.functions.invoke<{ refreshed: boolean }>('meta-token-refresh', {
+      body: { account_id: id },
+    });
+    if (error || !data?.refreshed) throw new Error(error?.message ?? 'Could not refresh this token');
+  },
+
+  async startMetaOAuth(workspaceId: string): Promise<string> {
+    const { data, error } = await supabase.functions.invoke<{ url: string }>('meta-oauth-connect', {
+      body: { workspace_id: workspaceId },
+    });
+    if (error || !data?.url) throw new Error(error?.message ?? 'Could not start Facebook login');
+    return data.url;
+  },
+
+  async startLinkedInOAuth(workspaceId: string): Promise<string> {
+    const { data, error } = await supabase.functions.invoke<{ url: string }>('linkedin-oauth-connect', {
+      body: { workspace_id: workspaceId },
+    });
+    if (error || !data?.url) throw new Error(error?.message ?? 'Could not start LinkedIn login');
+    return data.url;
+  },
+
+  async getPendingSelection(id: string): Promise<{ platform: 'meta' | 'linkedin'; options: OAuthOption[] }> {
+    const { data, error } = await supabase.functions.invoke<{ platform: 'meta' | 'linkedin'; options: OAuthOption[] }>(
+      `oauth-selection?id=${encodeURIComponent(id)}`,
+      { method: 'GET' },
+    );
+    if (error || !data) throw new Error(error?.message ?? 'Selection not found or expired');
+    return data;
+  },
+
+  async finalizeSelection(id: string, selected: Array<{ id: string; connect_instagram?: boolean }>): Promise<number> {
+    const { data, error } = await supabase.functions.invoke<{ connected: number }>('oauth-selection', {
+      body: { id, selected },
+    });
+    if (error || !data) throw new Error(error?.message ?? 'Could not connect the selected accounts');
+    return data.connected;
+  },
 };
+
+export type MetaOAuthOption = {
+  id: string;
+  name: string;
+  instagram: { id: string; username: string } | null;
+};
+
+export type LinkedInOAuthOption = {
+  type: 'personal' | 'organization';
+  id: string;
+  name: string;
+};
+
+export type OAuthOption = MetaOAuthOption | LinkedInOAuthOption;

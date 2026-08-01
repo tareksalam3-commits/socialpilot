@@ -1,12 +1,13 @@
-import { useState } from 'react';
-import { CalendarClock, Copy, Edit2, FileText, Plus, RotateCcw, Search, Send, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CalendarClock, Copy, Edit2, FileText, Plus, RefreshCw, RotateCcw, Search, Send, Trash2 } from 'lucide-react';
 import { usePosts } from '@/hooks/usePosts';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useToast } from '@/providers/ToastProvider';
+import { publishingLogRepository } from '@/repositories/publishingLogRepository';
 import { publishingService } from '@/services/publishingService';
 import { Badge, Button, Card, EmptyState, ErrorState, Input, Modal, Table, TableRow, TableCell } from '@/ui';
 import { formatDateTime } from '@/utils/format';
-import type { Post, PostStatus } from '@/types/social';
+import type { Post, PostStatus, PublishingLog } from '@/types/social';
 
 const statusOptions: PostStatus[] = ['draft', 'scheduled', 'publishing', 'published', 'failed', 'archived'];
 const platformOptions = ['facebook', 'instagram', 'linkedin', 'linkedin_page'];
@@ -155,6 +156,8 @@ export function ScheduledPostsPage() {
         </Card>
       )}
 
+      <PublishingLogPanel />
+
       <Modal open={showEditor} onClose={() => setShowEditor(false)} title={editing ? 'Edit Post' : 'New Post'} size="lg"
         footer={<><Button variant="outline" onClick={() => setShowEditor(false)}>Cancel</Button><Button onClick={handleSave}>{editing ? 'Save' : 'Create'}</Button></>}>
         <div className="space-y-4">
@@ -175,5 +178,77 @@ export function ScheduledPostsPage() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+const logEventLabel: Record<PublishingLog['event'], string> = {
+  queued: 'Queued',
+  attempt: 'Attempting',
+  success: 'Published',
+  failure: 'Failed',
+  retry_scheduled: 'Retry scheduled',
+  gave_up: 'Gave up',
+};
+
+const logEventVariant: Record<PublishingLog['event'], 'default' | 'success' | 'error' | 'warning' | 'info'> = {
+  queued: 'default',
+  attempt: 'info',
+  success: 'success',
+  failure: 'error',
+  retry_scheduled: 'warning',
+  gave_up: 'error',
+};
+
+/** Recent activity from the publishing engine — manual publishes, the cron
+ * scheduler picking up due scheduled posts, and automatic retries. */
+function PublishingLogPanel() {
+  const { workspace } = useWorkspace();
+  const [logs, setLogs] = useState<PublishingLog[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    if (!workspace) return;
+    setLoading(true);
+    try {
+      setLogs(await publishingLogRepository.list(workspace.id));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace]);
+
+  if (!workspace) return null;
+
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Publishing Log</h2>
+        <button onClick={load} disabled={loading} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title="Refresh">
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+      {logs.length === 0 ? (
+        <p className="text-sm text-slate-500 dark:text-slate-400">No publishing activity yet.</p>
+      ) : (
+        <div className="max-h-72 space-y-2 overflow-y-auto">
+          {logs.map((l) => (
+            <div key={l.id} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-2 text-xs last:border-0 dark:border-slate-800">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <Badge variant={logEventVariant[l.event]}>{logEventLabel[l.event]}</Badge>
+                  {l.platform && <span className="text-slate-500 dark:text-slate-400">{l.platform}</span>}
+                </div>
+                {l.message && <p className="mt-1 truncate text-slate-600 dark:text-slate-400" title={l.message}>{l.message}</p>}
+              </div>
+              <span className="shrink-0 text-slate-400 dark:text-slate-500">{formatDateTime(l.created_at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }

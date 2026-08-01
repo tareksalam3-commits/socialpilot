@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { CheckCircle2, Facebook, Instagram, Link2, Linkedin, Plus, Trash2, XCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { CheckCircle2, Facebook, Instagram, Link2, Linkedin, Loader2, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useToast } from '@/providers/ToastProvider';
-import { accountRepository } from '@/repositories/accountRepository';
+import { accountRepository, type LinkedInOAuthOption, type MetaOAuthOption, type OAuthOption } from '@/repositories/accountRepository';
 import { Badge, Button, Card, EmptyState, ErrorState, Modal, Input } from '@/ui';
 import { formatDate } from '@/utils/format';
 import type { ExtendedConnectedAccount } from '@/types/social';
@@ -16,12 +17,91 @@ const platforms = [
 ];
 
 export function ConnectedAccountsPage() {
-  const { accounts, loading, error, disconnect, remove, reload } = useAccounts();
+  const { accounts, loading, error, disconnect, remove, reload, refreshToken, refreshingId } = useAccounts();
   const { workspace } = useWorkspace();
   const { push } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [showConnect, setShowConnect] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connectForm, setConnectForm] = useState({ platform: 'facebook', handle: '', accessToken: '', providerAccountId: '' });
+
+  const [oauthLoading, setOauthLoading] = useState<'meta' | 'linkedin' | null>(null);
+  const [selection, setSelection] = useState<{ id: string; platform: 'meta' | 'linkedin'; options: OAuthOption[] } | null>(null);
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [igChecked, setIgChecked] = useState<Record<string, boolean>>({});
+  const [finalizing, setFinalizing] = useState(false);
+
+  // Resume an OAuth callback: the edge function redirects back here with
+  // either ?selection=<id>&platform=meta|linkedin or ?error=... on failure.
+  useEffect(() => {
+    const selectionId = searchParams.get('selection');
+    const platform = searchParams.get('platform') as 'meta' | 'linkedin' | null;
+    const oauthError = searchParams.get('error');
+
+    if (oauthError) {
+      push({ title: `${platform === 'linkedin' ? 'LinkedIn' : 'Facebook'} connection failed`, description: oauthError.replace(/_/g, ' '), variant: 'error' });
+      setSearchParams((p) => { p.delete('error'); p.delete('platform'); return p; }, { replace: true });
+      return;
+    }
+
+    if (selectionId && platform) {
+      accountRepository
+        .getPendingSelection(selectionId)
+        .then((data) => setSelection({ id: selectionId, platform: data.platform, options: data.options }))
+        .catch((e) => push({ title: 'Could not load accounts to select', description: e instanceof Error ? e.message : '', variant: 'error' }))
+        .finally(() => setSearchParams((p) => { p.delete('selection'); p.delete('platform'); return p; }, { replace: true }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleMetaConnect = async () => {
+    if (!workspace) return;
+    setOauthLoading('meta');
+    try {
+      const url = await accountRepository.startMetaOAuth(workspace.id);
+      window.location.href = url;
+    } catch (e) {
+      push({ title: 'Could not start Facebook login', description: e instanceof Error ? e.message : '', variant: 'error' });
+      setOauthLoading(null);
+    }
+  };
+
+  const handleLinkedInConnect = async () => {
+    if (!workspace) return;
+    setOauthLoading('linkedin');
+    try {
+      const url = await accountRepository.startLinkedInOAuth(workspace.id);
+      window.location.href = url;
+    } catch (e) {
+      push({ title: 'Could not start LinkedIn login', description: e instanceof Error ? e.message : '', variant: 'error' });
+      setOauthLoading(null);
+    }
+  };
+
+  const handleFinalizeSelection = async () => {
+    if (!selection) return;
+    const selected = Object.entries(checked)
+      .filter(([, v]) => v)
+      .map(([id]) => ({ id, connect_instagram: !!igChecked[id] }));
+    if (selected.length === 0) {
+      push({ title: 'Pick at least one account', variant: 'error' });
+      return;
+    }
+    setFinalizing(true);
+    try {
+      const count = await accountRepository.finalizeSelection(selection.id, selected);
+      push({ title: `${count} account${count === 1 ? '' : 's'} connected`, variant: 'success' });
+      setSelection(null);
+      setChecked({});
+      setIgChecked({});
+      reload();
+    } catch (e) {
+      push({ title: 'Could not connect the selected accounts', description: e instanceof Error ? e.message : '', variant: 'error' });
+    } finally {
+      setFinalizing(false);
+    }
+  };
 
   const handleConnect = async () => {
     if (!connectForm.accessToken.trim() || !connectForm.providerAccountId.trim()) {
@@ -54,83 +134,141 @@ export function ConnectedAccountsPage() {
     push({ title: 'Account disconnected', variant: 'success' });
   };
 
+  const handleRefreshToken = async (account: ExtendedConnectedAccount) => {
+    try {
+      await refreshToken(account.id);
+      push({ title: 'Token refreshed', description: `${platformLabel(account.platform)} will stay connected for longer.`, variant: 'success' });
+    } catch (e) {
+      push({ title: 'Could not refresh token', description: e instanceof Error ? e.message : '', variant: 'error' });
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Connected Accounts</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Manage your social media accounts and their health.</p>
         </div>
-        <Button onClick={() => setShowConnect(true)}>
-          <Plus className="h-4 w-4" /> Connect Account
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={handleMetaConnect} loading={oauthLoading === 'meta'} disabled={oauthLoading !== null}>
+            <Facebook className="h-4 w-4" /> Continue with Facebook
+          </Button>
+          <Button onClick={handleLinkedInConnect} loading={oauthLoading === 'linkedin'} disabled={oauthLoading !== null} variant="outline">
+            <Linkedin className="h-4 w-4" /> Continue with LinkedIn
+          </Button>
+          <Button variant="ghost" onClick={() => setShowConnect(true)}>
+            <Plus className="h-4 w-4" /> Manual
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {platforms.map((p) => {
-          const account = accounts.find((a) => a.platform === p.id);
-          return (
-            <Card key={p.id}>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800`}>
-                    <p.icon className={`h-5 w-5 ${p.color}`} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-white">{p.label}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">{account ? account.handle ?? 'Connected' : 'Not connected'}</p>
-                  </div>
+        {accounts.map((account) => (
+          <Card key={account.id}>
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                  <PlatformIcon platform={account.platform} />
                 </div>
-                {account && <HealthBadge status={account.health_status} />}
+                <div>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">{platformLabel(account.platform)}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{account.handle ?? 'Connected'}</p>
+                </div>
               </div>
-              {account ? (
-                <div className="mt-4 space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400">Status</span>
-                    <Badge variant={account.status === 'connected' ? 'success' : 'error'}>{account.status}</Badge>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400">Sync</span>
-                    <Badge variant={account.sync_status === 'synced' ? 'success' : account.sync_status === 'error' ? 'error' : 'default'}>{account.sync_status}</Badge>
-                  </div>
-                  {account.token_expires_at && (
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-500 dark:text-slate-400">Token expires</span>
-                      <span className="text-slate-700 dark:text-slate-300">{formatDate(account.token_expires_at)}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400">Connected</span>
-                    <span className="text-slate-700 dark:text-slate-300">{formatDate(account.created_at)}</span>
-                  </div>
-                  <div className="flex gap-2 pt-2">
-                    <Button size="sm" variant="outline" onClick={() => handleDisconnect(account)}>Disconnect</Button>
-                    <Button size="sm" variant="ghost" onClick={() => remove(account.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
-                  <Button size="sm" variant="outline" className="w-full" onClick={() => { setConnectForm({ ...connectForm, platform: p.id }); setShowConnect(true); }}>
-                    <Link2 className="h-3.5 w-3.5" /> Connect
-                  </Button>
+              <HealthBadge status={account.health_status} />
+            </div>
+            <div className="mt-4 space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500 dark:text-slate-400">Status</span>
+                <Badge variant={account.status === 'connected' ? 'success' : 'error'}>{account.status}</Badge>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500 dark:text-slate-400">Sync</span>
+                <Badge variant={account.sync_status === 'synced' ? 'success' : account.sync_status === 'error' ? 'error' : 'default'}>{account.sync_status}</Badge>
+              </div>
+              {account.token_expires_at && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-500 dark:text-slate-400">Token expires</span>
+                  <span className={isExpiringSoon(account.token_expires_at) ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}>
+                    {formatDate(account.token_expires_at)}
+                  </span>
                 </div>
               )}
-            </Card>
-          );
-        })}
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500 dark:text-slate-400">Connected</span>
+                <span className="text-slate-700 dark:text-slate-300">{formatDate(account.created_at)}</span>
+              </div>
+              <div className="flex flex-wrap gap-2 pt-2">
+                {(account.platform === 'facebook' || account.platform === 'instagram') && account.status === 'connected' && (
+                  <Button size="sm" variant="outline" onClick={() => handleRefreshToken(account)} loading={refreshingId === account.id}>
+                    <RefreshCw className="h-3.5 w-3.5" /> Refresh token
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={() => handleDisconnect(account)}>Disconnect</Button>
+                <Button size="sm" variant="ghost" onClick={() => remove(account.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+              </div>
+            </div>
+          </Card>
+        ))}
       </div>
 
       {error && <ErrorState description={error} />}
       {loading && accounts.length === 0 && <p className="text-center text-sm text-slate-500">Loading…</p>}
       {!loading && accounts.length === 0 && !error && (
-        <Card><EmptyState icon={<Link2 className="h-10 w-10" />} title="No accounts connected" description="Connect a social media account to start publishing." /></Card>
+        <Card><EmptyState icon={<Link2 className="h-10 w-10" />} title="No accounts connected" description="Connect a Facebook Page or LinkedIn account to start publishing." /></Card>
       )}
+
+      <Modal
+        open={!!selection}
+        onClose={() => setSelection(null)}
+        title={selection?.platform === 'linkedin' ? 'Select LinkedIn accounts' : 'Select Facebook Pages'}
+        description="Choose which accounts to connect to this workspace."
+        size="md"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setSelection(null)}>Cancel</Button>
+            <Button onClick={handleFinalizeSelection} loading={finalizing}>Connect selected</Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          {selection?.platform === 'meta' &&
+            (selection.options as MetaOAuthOption[]).map((page) => (
+              <div key={page.id} className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-white">
+                  <input type="checkbox" checked={!!checked[page.id]} onChange={(e) => setChecked({ ...checked, [page.id]: e.target.checked })} />
+                  {page.name}
+                </label>
+                {page.instagram && (
+                  <label className="mt-2 flex items-center gap-2 pl-6 text-xs text-slate-600 dark:text-slate-400">
+                    <input
+                      type="checkbox"
+                      disabled={!checked[page.id]}
+                      checked={!!igChecked[page.id]}
+                      onChange={(e) => setIgChecked({ ...igChecked, [page.id]: e.target.checked })}
+                    />
+                    Also connect Instagram @{page.instagram.username}
+                  </label>
+                )}
+              </div>
+            ))}
+          {selection?.platform === 'linkedin' &&
+            (selection.options as LinkedInOAuthOption[]).map((opt) => (
+              <label key={opt.id} className="flex items-center gap-2 rounded-lg border border-slate-200 p-3 text-sm font-medium text-slate-900 dark:border-slate-700 dark:text-white">
+                <input type="checkbox" checked={!!checked[opt.id]} onChange={(e) => setChecked({ ...checked, [opt.id]: e.target.checked })} />
+                {opt.name} <span className="text-xs font-normal text-slate-500">{opt.type === 'personal' ? '(Personal profile)' : '(Company Page)'}</span>
+              </label>
+            ))}
+          {selection && selection.options.length === 0 && <p className="text-sm text-slate-500">Nothing found to connect.</p>}
+        </div>
+      </Modal>
 
       <Modal
         open={showConnect}
         onClose={() => setShowConnect(false)}
-        title="Connect Social Account"
-        description="Enter your platform credentials to connect."
+        title="Connect Manually"
+        description="Advanced: paste an access token directly, for platforms without OAuth set up yet."
         size="md"
         footer={<><Button variant="outline" onClick={() => setShowConnect(false)}>Cancel</Button><Button onClick={handleConnect} loading={connecting}>Connect</Button></>}
       >
@@ -144,11 +282,26 @@ export function ConnectedAccountsPage() {
           <Input label="Handle (optional)" value={connectForm.handle} onChange={(e) => setConnectForm({ ...connectForm, handle: e.target.value })} placeholder="@yourbrand" />
           <Input label="Provider Account ID" value={connectForm.providerAccountId} onChange={(e) => setConnectForm({ ...connectForm, providerAccountId: e.target.value })} placeholder="123456789" />
           <Input label="Access Token" type="password" value={connectForm.accessToken} onChange={(e) => setConnectForm({ ...connectForm, accessToken: e.target.value })} placeholder="EAAB…" />
-          <p className="text-xs text-slate-500 dark:text-slate-400">Your access token is stored encrypted and never exposed to the browser.</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Your access token is stored server-side and never exposed back to the browser.</p>
         </div>
       </Modal>
     </div>
   );
+}
+
+function isExpiringSoon(expiresAt: string): boolean {
+  const msRemaining = new Date(expiresAt).getTime() - Date.now();
+  return msRemaining < 10 * 24 * 60 * 60 * 1000;
+}
+
+function platformLabel(platform: string): string {
+  return platforms.find((p) => p.id === platform)?.label ?? platform;
+}
+
+function PlatformIcon({ platform }: { platform: string }) {
+  const match = platforms.find((p) => p.id === platform);
+  const Icon = match?.icon ?? Loader2;
+  return <Icon className={`h-5 w-5 ${match?.color ?? 'text-slate-500'}`} />;
 }
 
 function HealthBadge({ status }: { status: string }) {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { postRepository } from '@/repositories/postRepository';
+import { supabase } from '@/services/supabase';
 import type { Post, PostStatus } from '@/types/social';
 
 export function usePosts() {
@@ -44,6 +45,20 @@ export function usePosts() {
       clearTimeout(handle);
     };
   }, [load, searchQuery]);
+
+  // Live updates: the background scheduler (cron) publishes scheduled posts
+  // and retries failed ones without any user action, so the list/calendar
+  // needs to reflect that without a manual refresh.
+  useEffect(() => {
+    if (!workspace) return;
+    const channel = supabase
+      .channel(`posts-${workspace.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts', filter: `workspace_id=eq.${workspace.id}` }, () => load())
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [workspace, load]);
 
   const create = useCallback(
     async (input: { title?: string; content: string; platforms: string[]; scheduled_for?: string | null; media_urls?: string[]; status?: PostStatus }) => {
