@@ -4,11 +4,13 @@ import { supabase } from '@/services/supabase';
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-gateway`;
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token ?? import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session) {
+    throw new Error('لازم تسجّل الدخول أولًا — لا توجد جلسة نشطة (No active Supabase session).');
+  }
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
+    Authorization: `Bearer ${data.session.access_token}`,
   };
 }
 
