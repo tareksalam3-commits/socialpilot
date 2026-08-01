@@ -3,6 +3,18 @@ import { Component, type ReactNode } from 'react';
 type Props = { children: ReactNode };
 type State = { error: Error | null };
 
+const RELOAD_FLAG = 'sp_stale_chunk_reload';
+
+function isStaleChunkError(error: Error): boolean {
+  const msg = error.message || '';
+  return (
+    /Failed to fetch dynamically imported module/i.test(msg) ||
+    /error loading dynamically imported module/i.test(msg) ||
+    /importing a module script failed/i.test(msg) ||
+    /Loading chunk .* failed/i.test(msg)
+  );
+}
+
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null };
 
@@ -12,10 +24,24 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: { componentStack?: string | null }) {
     console.error('App crashed:', error, info);
+
+    // A stale JS chunk (old filename hash no longer on the server after a new
+    // deploy) isn't a real app bug — the fix is just loading the fresh app
+    // shell. Reload once automatically instead of showing the crash screen;
+    // the sessionStorage flag stops a reload loop if it somehow keeps failing.
+    if (isStaleChunkError(error) && !sessionStorage.getItem(RELOAD_FLAG)) {
+      sessionStorage.setItem(RELOAD_FLAG, '1');
+      window.location.reload();
+    }
   }
 
   render() {
     if (this.state.error) {
+      if (isStaleChunkError(this.state.error) && typeof window !== 'undefined' && sessionStorage.getItem(RELOAD_FLAG)) {
+        // Reload already triggered in componentDidCatch — avoid flashing the crash screen.
+        return null;
+      }
+
       return (
         <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 dark:bg-slate-950">
           <div className="max-w-xl rounded-xl border border-rose-200 bg-white p-6 shadow-sm dark:border-rose-900/50 dark:bg-slate-900">

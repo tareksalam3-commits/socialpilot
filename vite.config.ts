@@ -41,6 +41,9 @@ export default defineConfig({
         // Precache the app shell (JS/CSS/HTML/fonts/icons) for instant loads + offline fallback.
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff,woff2}'],
         navigateFallback: '/index.html',
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.origin === 'https://fonts.googleapis.com',
