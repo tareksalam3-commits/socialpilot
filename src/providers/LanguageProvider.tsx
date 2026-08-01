@@ -5,7 +5,7 @@ type LanguageContextValue = {
   language: LanguageCode;
   dir: 'rtl' | 'ltr';
   setLanguage: (lang: LanguageCode) => void;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
 };
 
 const LanguageContext = createContext<LanguageContextValue | undefined>(undefined);
@@ -34,8 +34,13 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(STORAGE_KEY, lang);
   };
 
-  const t = (key: string): string => {
-    return translations[language]?.[key] ?? translations[DEFAULT_LANGUAGE]?.[key] ?? key;
+  const t = (key: string, params?: Record<string, string | number>): string => {
+    const raw = translations[language]?.[key] ?? translations[DEFAULT_LANGUAGE]?.[key] ?? key;
+    if (!params) return raw;
+    return Object.entries(params).reduce(
+      (acc, [k, v]) => acc.replaceAll(`{{${k}}}`, String(v)),
+      raw,
+    );
   };
 
   return (

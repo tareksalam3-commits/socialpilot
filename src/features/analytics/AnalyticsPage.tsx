@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Activity, BarChart3, CalendarClock, Eye, Link2, MousePointerClick, TrendingUp, Users, Zap } from 'lucide-react';
 import { useAnalytics } from '@/hooks/useAnalytics';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { Badge, Card, CardSkeleton, EmptyState, ErrorState } from '@/ui';
 import { formatDate } from '@/utils/format';
 
 export function AnalyticsPage() {
+  const { t } = useLanguage();
   const [days, setDays] = useState(30);
   const { summary, loading, error } = useAnalytics(days);
 
@@ -13,8 +15,8 @@ export function AnalyticsPage() {
   if (!summary || summary.totalPosts === 0) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between"><div><h1 className="text-2xl font-bold text-slate-900 dark:text-white">Analytics</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Track performance across your social accounts.</p></div></div>
-        <Card><EmptyState icon={<BarChart3 className="h-10 w-10" />} title="No data yet" description="Create and publish posts to see analytics here." /></Card>
+        <div className="flex items-center justify-between"><div><h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('analytics.title')}</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('analytics.subtitle')}</p></div></div>
+        <Card><EmptyState icon={<BarChart3 className="h-10 w-10" />} title={t('analytics.empty.title')} description={t('analytics.empty.description')} /></Card>
       </div>
     );
   }
@@ -25,29 +27,29 @@ export function AnalyticsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold text-slate-900 dark:text-white">Analytics</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Track performance across your social accounts.</p></div>
+        <div><h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('analytics.title')}</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('analytics.subtitle')}</p></div>
         <select value={days} onChange={(e) => setDays(parseInt(e.target.value, 10))} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
-          <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option>
+          <option value={7}>{t('analytics.range.7d')}</option><option value={30}>{t('analytics.range.30d')}</option><option value={90}>{t('analytics.range.90d')}</option>
         </select>
       </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={<CalendarClock className="h-5 w-5" />} label="Total Posts" value={summary.totalPosts} hint={`${summary.publishedPosts} published`} tone="sky" />
-        <StatCard icon={<Link2 className="h-5 w-5" />} label="Connected Accounts" value={summary.connectedAccounts} tone="emerald" />
-        <StatCard icon={<Eye className="h-5 w-5" />} label="Total Reach" value={summary.totalReach.toLocaleString()} tone="amber" />
-        <StatCard icon={<TrendingUp className="h-5 w-5" />} label="Engagement" value={summary.totalEngagement.toLocaleString()} tone="slate" />
+        <StatCard icon={<CalendarClock className="h-5 w-5" />} label={t('analytics.stat.totalPosts')} value={summary.totalPosts} hint={t('analytics.stat.published', { count: summary.publishedPosts })} tone="sky" />
+        <StatCard icon={<Link2 className="h-5 w-5" />} label={t('analytics.stat.connectedAccounts')} value={summary.connectedAccounts} tone="emerald" />
+        <StatCard icon={<Eye className="h-5 w-5" />} label={t('analytics.stat.totalReach')} value={summary.totalReach.toLocaleString()} tone="amber" />
+        <StatCard icon={<TrendingUp className="h-5 w-5" />} label={t('analytics.stat.engagement')} value={summary.totalEngagement.toLocaleString()} tone="slate" />
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={<Activity className="h-5 w-5" />} label="Impressions" value={summary.totalImpressions.toLocaleString()} tone="sky" />
-        <StatCard icon={<MousePointerClick className="h-5 w-5" />} label="Clicks" value={summary.totalClicks.toLocaleString()} tone="emerald" />
-        <StatCard icon={<Users className="h-5 w-5" />} label="Followers" value={summary.totalFollowers.toLocaleString()} hint={`${summary.followersGrowth >= 0 ? '+' : ''}${summary.followersGrowth} growth`} tone="amber" />
-        <StatCard icon={<Zap className="h-5 w-5" />} label="Failed Posts" value={summary.failedPosts} tone="slate" />
+        <StatCard icon={<Activity className="h-5 w-5" />} label={t('analytics.stat.impressions')} value={summary.totalImpressions.toLocaleString()} tone="sky" />
+        <StatCard icon={<MousePointerClick className="h-5 w-5" />} label={t('analytics.stat.clicks')} value={summary.totalClicks.toLocaleString()} tone="emerald" />
+        <StatCard icon={<Users className="h-5 w-5" />} label={t('analytics.stat.followers')} value={summary.totalFollowers.toLocaleString()} hint={t('analytics.stat.growth', { sign: summary.followersGrowth >= 0 ? '+' : '', growth: summary.followersGrowth })} tone="amber" />
+        <StatCard icon={<Zap className="h-5 w-5" />} label={t('analytics.stat.failedPosts')} value={summary.failedPosts} tone="slate" />
       </div>
 
       {/* Daily chart */}
-      <Card title="Daily Activity" description={`Posts and reach over the last ${days} days`}>
+      <Card title={t('analytics.dailyActivity.title')} description={t('analytics.dailyActivity.description', { days })}>
         <div className="space-y-2">
           {summary.dailyData.slice(-14).map((d) => (
             <div key={d.date} className="flex items-center gap-3">
@@ -70,8 +72,8 @@ export function AnalyticsPage() {
       </Card>
 
       {/* Top performing posts */}
-      <Card title="Top Performing Posts" description="Posts with the highest engagement">
-        {summary.topPosts.length === 0 ? <p className="py-4 text-center text-sm text-slate-500">No published posts yet.</p> : (
+      <Card title={t('analytics.topPosts.title')} description={t('analytics.topPosts.description')}>
+        {summary.topPosts.length === 0 ? <p className="py-4 text-center text-sm text-slate-500">{t('analytics.topPosts.empty')}</p> : (
           <div className="space-y-3">
             {summary.topPosts.map((p, i) => (
               <div key={p.post_id} className="flex items-start gap-3 rounded-lg border border-slate-100 p-3 dark:border-slate-800">
@@ -79,8 +81,8 @@ export function AnalyticsPage() {
                 <div className="flex-1">
                   <p className="text-sm font-medium text-slate-900 dark:text-white">{p.title ?? p.content.slice(0, 60) + '…'}</p>
                   <div className="mt-1 flex gap-3 text-xs text-slate-500 dark:text-slate-400">
-                    <span>{p.reach.toLocaleString()} reach</span>
-                    <span>{p.engagement.toLocaleString()} engagement</span>
+                    <span>{t('analytics.topPosts.reach', { count: p.reach.toLocaleString() })}</span>
+                    <span>{t('analytics.topPosts.engagement', { count: p.engagement.toLocaleString() })}</span>
                   </div>
                 </div>
                 <Badge variant="info">#{i + 1}</Badge>

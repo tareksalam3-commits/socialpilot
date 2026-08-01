@@ -26,6 +26,7 @@ import { useAISettings } from '@/hooks/useAISettings';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useAuth } from '@/providers/AuthProvider';
 import { useToast } from '@/providers/ToastProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { Button, Card, MarkdownRenderer, Badge, EmptyState } from '@/ui';
 
 type ActionType =
@@ -57,44 +58,44 @@ type GeneratorType =
   | 'content_ideas'
   | 'content_series';
 
-const actions: { id: ActionType; label: string; icon: typeof Wand2 }[] = [
-  { id: 'generate', label: 'Generate', icon: Sparkles },
-  { id: 'rewrite', label: 'Rewrite', icon: Repeat2 },
-  { id: 'expand', label: 'Expand', icon: Plus },
-  { id: 'shorten', label: 'Shorten', icon: Scissors },
-  { id: 'translate', label: 'Translate', icon: Type },
-  { id: 'improve', label: 'Improve', icon: Wand2 },
-  { id: 'grammar', label: 'Fix Grammar', icon: PencilLine },
+const actions: { id: ActionType; labelKey: string; icon: typeof Wand2 }[] = [
+  { id: 'generate', labelKey: 'ai.studio.action.generate', icon: Sparkles },
+  { id: 'rewrite', labelKey: 'ai.studio.action.rewrite', icon: Repeat2 },
+  { id: 'expand', labelKey: 'ai.studio.action.expand', icon: Plus },
+  { id: 'shorten', labelKey: 'ai.studio.action.shorten', icon: Scissors },
+  { id: 'translate', labelKey: 'ai.studio.action.translate', icon: Type },
+  { id: 'improve', labelKey: 'ai.studio.action.improve', icon: Wand2 },
+  { id: 'grammar', labelKey: 'ai.studio.action.grammar', icon: PencilLine },
 ];
 
-const tones: { id: ActionType; label: string; icon: typeof Megaphone }[] = [
-  { id: 'professional', label: 'Professional', icon: Megaphone },
-  { id: 'friendly', label: 'Friendly', icon: Megaphone },
-  { id: 'marketing', label: 'Marketing', icon: Megaphone },
-  { id: 'sales', label: 'Sales', icon: Megaphone },
-  { id: 'storytelling', label: 'Storytelling', icon: Megaphone },
+const tones: { id: ActionType; labelKey: string; icon: typeof Megaphone }[] = [
+  { id: 'professional', labelKey: 'ai.studio.tone.professional', icon: Megaphone },
+  { id: 'friendly', labelKey: 'ai.studio.tone.friendly', icon: Megaphone },
+  { id: 'marketing', labelKey: 'ai.studio.tone.marketing', icon: Megaphone },
+  { id: 'sales', labelKey: 'ai.studio.tone.sales', icon: Megaphone },
+  { id: 'storytelling', labelKey: 'ai.studio.tone.storytelling', icon: Megaphone },
 ];
 
 const platforms = [
-  { id: 'facebook', label: 'Facebook', icon: Facebook },
-  { id: 'instagram', label: 'Instagram', icon: Instagram },
-  { id: 'linkedin', label: 'LinkedIn', icon: Linkedin },
+  { id: 'facebook', labelKey: 'ai.studio.platform.facebook', icon: Facebook },
+  { id: 'instagram', labelKey: 'ai.studio.platform.instagram', icon: Instagram },
+  { id: 'linkedin', labelKey: 'ai.studio.platform.linkedin', icon: Linkedin },
 ];
 
-const generators: { id: GeneratorType; label: string; icon: typeof Lightbulb }[] = [
-  { id: 'hooks', label: 'Hooks', icon: Zap },
-  { id: 'cta', label: 'CTA', icon: Target },
-  { id: 'hashtags', label: 'Hashtags', icon: Hash },
-  { id: 'carousel_outline', label: 'Carousel Outline', icon: ListOrdered },
-  { id: 'carousel_slides', label: 'Carousel Slides', icon: ImageIcon },
-  { id: 'reel_script', label: 'Reel Script', icon: PencilLine },
-  { id: 'video_script', label: 'Video Script', icon: PencilLine },
-  { id: 'story_ideas', label: 'Story Ideas', icon: Lightbulb },
-  { id: 'poll_ideas', label: 'Poll Ideas', icon: ListChecks },
-  { id: 'monthly_calendar', label: 'Monthly Calendar', icon: ListOrdered },
-  { id: 'weekly_calendar', label: 'Weekly Calendar', icon: ListOrdered },
-  { id: 'content_ideas', label: 'Content Ideas', icon: Lightbulb },
-  { id: 'content_series', label: 'Content Series', icon: Lightbulb },
+const generators: { id: GeneratorType; labelKey: string; icon: typeof Lightbulb }[] = [
+  { id: 'hooks', labelKey: 'ai.studio.generator.hooks', icon: Zap },
+  { id: 'cta', labelKey: 'ai.studio.generator.cta', icon: Target },
+  { id: 'hashtags', labelKey: 'ai.studio.generator.hashtags', icon: Hash },
+  { id: 'carousel_outline', labelKey: 'ai.studio.generator.carouselOutline', icon: ListOrdered },
+  { id: 'carousel_slides', labelKey: 'ai.studio.generator.carouselSlides', icon: ImageIcon },
+  { id: 'reel_script', labelKey: 'ai.studio.generator.reelScript', icon: PencilLine },
+  { id: 'video_script', labelKey: 'ai.studio.generator.videoScript', icon: PencilLine },
+  { id: 'story_ideas', labelKey: 'ai.studio.generator.storyIdeas', icon: Lightbulb },
+  { id: 'poll_ideas', labelKey: 'ai.studio.generator.pollIdeas', icon: ListChecks },
+  { id: 'monthly_calendar', labelKey: 'ai.studio.generator.monthlyCalendar', icon: ListOrdered },
+  { id: 'weekly_calendar', labelKey: 'ai.studio.generator.weeklyCalendar', icon: ListOrdered },
+  { id: 'content_ideas', labelKey: 'ai.studio.generator.contentIdeas', icon: Lightbulb },
+  { id: 'content_series', labelKey: 'ai.studio.generator.contentSeries', icon: Lightbulb },
 ];
 
 const platformPrompts: Record<string, string> = {
@@ -135,6 +136,7 @@ const generatorPrompts: Record<GeneratorType, string> = {
 };
 
 export function ContentStudioPage() {
+  const { t } = useLanguage();
   const { workspace } = useWorkspace();
   const { user } = useAuth();
   const { generate, loading, model, tokensIn, tokensOut, responseTimeMs } = useAI();
@@ -147,7 +149,7 @@ export function ContentStudioPage() {
 
   const runAction = async (action: ActionType) => {
     if (!input.trim() || !workspace || !user) {
-      push({ title: 'Enter some content first', variant: 'error' });
+      push({ title: t('ai.studio.toast.enterContentFirst'), variant: 'error' });
       return;
     }
     setOutput('');
@@ -165,7 +167,7 @@ export function ContentStudioPage() {
     });
     setStreaming(false);
     if (res.error) {
-      push({ title: 'Generation failed', description: res.error, variant: 'error' });
+      push({ title: t('common.generationFailed'), description: res.error, variant: 'error' });
     } else {
       setOutput(res.result);
     }
@@ -173,7 +175,7 @@ export function ContentStudioPage() {
 
   const runGenerator = async (gen: GeneratorType) => {
     if (!input.trim() || !workspace || !user) {
-      push({ title: 'Enter a topic first', variant: 'error' });
+      push({ title: t('ai.studio.toast.enterTopicFirst'), variant: 'error' });
       return;
     }
     setOutput('');
@@ -191,7 +193,7 @@ export function ContentStudioPage() {
     });
     setStreaming(false);
     if (res.error) {
-      push({ title: 'Generation failed', description: res.error, variant: 'error' });
+      push({ title: t('common.generationFailed'), description: res.error, variant: 'error' });
     } else {
       setOutput(res.result);
     }
@@ -199,7 +201,7 @@ export function ContentStudioPage() {
 
   const handleCopy = () => {
     navigator.clipboard.writeText(output);
-    push({ title: 'Copied', variant: 'success' });
+    push({ title: t('ai.studio.toast.copied'), variant: 'success' });
   };
 
   const handleDownload = () => {
@@ -215,8 +217,8 @@ export function ContentStudioPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Content Studio</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Generate, transform, and optimize content for any platform.</p>
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('ai.studio.title')}</h1>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('ai.studio.subtitle')}</p>
       </div>
 
       {/* Platform selector */}
@@ -231,40 +233,40 @@ export function ContentStudioPage() {
                 : 'border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-400'
             }`}
           >
-            <p.icon className="h-4 w-4" /> {p.label}
+            <p.icon className="h-4 w-4" /> {t(p.labelKey)}
           </button>
         ))}
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Input */}
-        <Card title="Input" description="Write or paste your content here.">
+        <Card title={t('ai.studio.input.title')} description={t('ai.studio.input.description')}>
           <div className="space-y-4">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               rows={6}
-              placeholder="Enter your topic or content to generate, rewrite, expand, or transform…"
+              placeholder={t('ai.studio.input.placeholder')}
               className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             />
             {/* Actions */}
             <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Actions</p>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{t('ai.studio.actionsLabel')}</p>
               <div className="flex flex-wrap gap-2">
                 {actions.map((a) => (
                   <Button key={a.id} variant="outline" size="sm" onClick={() => runAction(a.id)} loading={loading && !streaming}>
-                    <a.icon className="h-3.5 w-3.5" /> {a.label}
+                    <a.icon className="h-3.5 w-3.5" /> {t(a.labelKey)}
                   </Button>
                 ))}
               </div>
             </div>
             {/* Tones */}
             <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Tones</p>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{t('ai.studio.tonesLabel')}</p>
               <div className="flex flex-wrap gap-2">
-                {tones.map((t) => (
-                  <Button key={t.id} variant="secondary" size="sm" onClick={() => runAction(t.id)} loading={loading && !streaming}>
-                    {t.label}
+                {tones.map((tn) => (
+                  <Button key={tn.id} variant="secondary" size="sm" onClick={() => runAction(tn.id)} loading={loading && !streaming}>
+                    {t(tn.labelKey)}
                   </Button>
                 ))}
               </div>
@@ -274,8 +276,8 @@ export function ContentStudioPage() {
 
         {/* Output */}
         <Card
-          title="Output"
-          description="AI-generated content"
+          title={t('ai.studio.output.title')}
+          description={t('ai.studio.output.description')}
           action={
             output && (
               <div className="flex gap-1">
@@ -293,16 +295,16 @@ export function ContentStudioPage() {
                 {!streaming && model && (
                   <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
                     <Badge variant="info">{model}</Badge>
-                    <span>{tokensIn + tokensOut} tokens</span>
-                    <span>{responseTimeMs}ms</span>
+                    <span>{t('ai.playground.tokens', { count: tokensIn + tokensOut })}</span>
+                    <span>{t('ai.playground.responseTimeMs', { ms: responseTimeMs })}</span>
                   </div>
                 )}
               </div>
             ) : (
               <EmptyState
                 icon={<Sparkles className="h-10 w-10" />}
-                title="No output yet"
-                description="Choose an action above to generate content."
+                title={t('ai.studio.output.empty.title')}
+                description={t('ai.studio.output.empty.description')}
               />
             )}
           </div>
@@ -310,7 +312,7 @@ export function ContentStudioPage() {
       </div>
 
       {/* Content Generators */}
-      <Card title="Content Generators" description="Generate specific types of content from your topic.">
+      <Card title={t('ai.studio.generators.title')} description={t('ai.studio.generators.description')}>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
           {generators.map((g) => (
             <button
@@ -320,7 +322,7 @@ export function ContentStudioPage() {
               className="flex flex-col items-center gap-2 rounded-lg border border-slate-200 p-3 text-center transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:hover:border-slate-600 dark:hover:bg-slate-800"
             >
               <g.icon className="h-5 w-5 text-slate-500 dark:text-slate-400" />
-              <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{g.label}</span>
+              <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{t(g.labelKey)}</span>
             </button>
           ))}
         </div>

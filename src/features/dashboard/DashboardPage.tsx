@@ -2,12 +2,14 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Activity as ActivityIcon, CalendarClock, Link2, Sparkles, TrendingUp, Zap } from 'lucide-react';
 import { useAuth } from '@/providers/AuthProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { Badge, Button, Card, CardSkeleton, EmptyState, ErrorState } from '@/ui';
 import { timeAgo } from '@/utils/format';
 
 export function DashboardPage() {
+  const { t } = useLanguage();
   const { user, profile } = useAuth();
   const { workspace, ensureWorkspace, loading: wsLoading } = useWorkspace();
   const navigate = useNavigate();
@@ -33,20 +35,20 @@ export function DashboardPage() {
       {/* Welcome */}
       <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-          Welcome back, {profile?.full_name ?? user?.email?.split('@')[0] ?? 'there'} 👋
+          {t('dashboard.welcomeBack', { name: profile?.full_name ?? user?.email?.split('@')[0] ?? 'there' })}
         </h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Here's what's happening in {workspace?.name ?? 'your workspace'} today.
+          {t('dashboard.subtitle', { workspace: workspace?.name ?? 'your workspace' })}
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Button size="sm" onClick={() => navigate('/app/scheduled')}>
-            <CalendarClock className="h-4 w-4" /> Schedule a post
+            <CalendarClock className="h-4 w-4" /> {t('dashboard.schedulePost')}
           </Button>
           <Button size="sm" variant="outline" onClick={() => navigate('/app/accounts')}>
-            <Link2 className="h-4 w-4" /> Connect account
+            <Link2 className="h-4 w-4" /> {t('dashboard.connectAccount')}
           </Button>
           <Button size="sm" variant="outline" onClick={() => navigate('/app/settings')}>
-            <Sparkles className="h-4 w-4" /> Workspace settings
+            <Sparkles className="h-4 w-4" /> {t('dashboard.workspaceSettings')}
           </Button>
         </div>
       </div>
@@ -62,30 +64,30 @@ export function DashboardPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
             icon={<Link2 className="h-5 w-5" />}
-            label="Connected Accounts"
+            label={t('dashboard.stat.connectedAccounts')}
             value={connectedCount}
-            hint={`${connectedAccounts.length} total`}
+            hint={t('dashboard.stat.total', { count: connectedAccounts.length })}
             tone="sky"
           />
           <StatCard
             icon={<CalendarClock className="h-5 w-5" />}
-            label="Scheduled Posts"
+            label={t('dashboard.stat.scheduledPosts')}
             value={scheduledCount}
-            hint={`${scheduledPosts.length} total`}
+            hint={t('dashboard.stat.total', { count: scheduledPosts.length })}
             tone="emerald"
           />
           <StatCard
             icon={<Zap className="h-5 w-5" />}
-            label="AI Credits Used"
+            label={t('dashboard.stat.aiCreditsUsed')}
             value={creditsUsed}
-            hint={`of ${creditsLimit} this period`}
+            hint={t('dashboard.stat.ofThisPeriod', { limit: creditsLimit })}
             tone="amber"
           />
           <StatCard
             icon={<TrendingUp className="h-5 w-5" />}
-            label="Recent Activity"
+            label={t('dashboard.stat.recentActivity')}
             value={recentActivity.length}
-            hint="last 30 days"
+            hint={t('dashboard.stat.last30Days')}
             tone="slate"
           />
         </div>
@@ -93,7 +95,7 @@ export function DashboardPage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Recent activity */}
-        <Card className="lg:col-span-2" title="Recent Activity" description="Latest events across your workspace">
+        <Card className="lg:col-span-2" title={t('dashboard.recentActivity.title')} description={t('dashboard.recentActivity.description')}>
           {error ? (
             <ErrorState description={error} />
           ) : loading ? (
@@ -111,8 +113,8 @@ export function DashboardPage() {
           ) : recentActivity.length === 0 ? (
             <EmptyState
               icon={<ActivityIcon className="h-10 w-10" />}
-              title="No activity yet"
-              description="As you connect accounts and schedule posts, recent activity will appear here."
+              title={t('dashboard.recentActivity.empty.title')}
+              description={t('dashboard.recentActivity.empty.description')}
             />
           ) : (
             <ul className="space-y-3">
@@ -134,7 +136,7 @@ export function DashboardPage() {
         </Card>
 
         {/* AI usage */}
-        <Card title="AI Usage" description="Credits consumed this period">
+        <Card title={t('dashboard.aiUsage.title')} description={t('dashboard.aiUsage.description')}>
           {error ? (
             <ErrorState description={error} />
           ) : loading ? (
@@ -146,7 +148,7 @@ export function DashboardPage() {
             <div className="space-y-4">
               <div className="flex items-baseline justify-between">
                 <span className="text-3xl font-bold text-slate-900 dark:text-white">{creditsUsed}</span>
-                <span className="text-sm text-slate-500 dark:text-slate-400">/ {creditsLimit} credits</span>
+                <span className="text-sm text-slate-500 dark:text-slate-400">{t('dashboard.aiUsage.ofCredits', { limit: creditsLimit })}</span>
               </div>
               <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                 <div
@@ -155,15 +157,15 @@ export function DashboardPage() {
                 />
               </div>
               <div className="flex items-center justify-between">
-                <Badge variant={creditsPct > 80 ? 'warning' : 'info'}>{creditsPct}% used</Badge>
+                <Badge variant={creditsPct > 80 ? 'warning' : 'info'}>{t('dashboard.aiUsage.percentUsed', { pct: creditsPct })}</Badge>
                 <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {aiUsage ? `Resets ${new Date(aiUsage.period_start).toLocaleDateString()}` : 'No usage recorded'}
+                  {aiUsage ? t('dashboard.aiUsage.resets', { date: new Date(aiUsage.period_start).toLocaleDateString() }) : t('dashboard.aiUsage.noUsage')}
                 </span>
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-800/50">
                 <p className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
                   <Sparkles className="h-3.5 w-3.5" />
-                  AI features are active. Visit the Playground or Content Studio to generate content.
+                  {t('dashboard.aiUsage.hint')}
                 </p>
               </div>
             </div>
@@ -172,12 +174,12 @@ export function DashboardPage() {
       </div>
 
       {/* Workspace info */}
-      <Card title="Workspace" description="Your current workspace details">
+      <Card title={t('dashboard.workspace.title')} description={t('dashboard.workspace.description')}>
         <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <InfoItem label="Name" value={workspace?.name ?? '—'} />
-          <InfoItem label="Brand Name" value={workspace?.brand_name ?? '—'} />
-          <InfoItem label="Time Zone" value={workspace?.timezone ?? 'UTC'} />
-          <InfoItem label="Language" value={workspace?.language ?? 'en'} />
+          <InfoItem label={t('dashboard.workspace.name')} value={workspace?.name ?? '—'} />
+          <InfoItem label={t('dashboard.workspace.brandName')} value={workspace?.brand_name ?? '—'} />
+          <InfoItem label={t('dashboard.workspace.timezone')} value={workspace?.timezone ?? 'UTC'} />
+          <InfoItem label={t('dashboard.workspace.language')} value={workspace?.language ?? 'en'} />
         </dl>
       </Card>
     </div>

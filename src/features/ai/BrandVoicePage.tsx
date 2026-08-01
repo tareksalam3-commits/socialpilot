@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { Save, Sparkles, X } from 'lucide-react';
 import { useBrandVoice } from '@/hooks/useBrandVoice';
 import { useToast } from '@/providers/ToastProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { Button, Card, Input } from '@/ui';
 
 export function BrandVoicePage() {
+  const { t } = useLanguage();
   const { brandVoice, loading, update } = useBrandVoice();
   const { push } = useToast();
   const [saving, setSaving] = useState(false);
@@ -57,9 +59,9 @@ export function BrandVoicePage() {
         keywords,
         negative_keywords: negativeKeywords,
       });
-      push({ title: 'Brand voice saved', description: 'AI will apply this voice in every generation.', variant: 'success' });
+      push({ title: t('ai.brandVoice.toast.saved'), description: t('ai.brandVoice.toast.savedDesc'), variant: 'success' });
     } catch (e) {
-      push({ title: 'Save failed', description: e instanceof Error ? e.message : '', variant: 'error' });
+      push({ title: t('ai.brandVoice.toast.saveFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
     } finally {
       setSaving(false);
     }
@@ -86,92 +88,92 @@ export function BrandVoicePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Brand Voice</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('ai.brandVoice.title')}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Define your brand personality. The AI automatically applies this voice in every generation.
+            {t('ai.brandVoice.subtitle')}
           </p>
         </div>
         <Button onClick={handleSave} loading={saving}>
-          <Save className="h-4 w-4" /> Save
+          <Save className="h-4 w-4" /> {t('ai.brandVoice.saveButton')}
         </Button>
       </div>
 
       <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 dark:border-sky-800 dark:bg-sky-950/50">
         <p className="flex items-center gap-2 text-sm text-sky-800 dark:text-sky-300">
           <Sparkles className="h-4 w-4" />
-          When you generate content in the Playground or Content Studio, the AI uses these settings to match your brand.
+          {t('ai.brandVoice.banner')}
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card title="Business Identity">
+        <Card title={t('ai.brandVoice.identity.title')}>
           <div className="space-y-4">
-            <Input label="Business Name" value={form.business_name} onChange={(e) => setForm({ ...form, business_name: e.target.value })} placeholder="Acme Inc." />
+            <Input label={t('ai.brandVoice.identity.businessName')} value={form.business_name} onChange={(e) => setForm({ ...form, business_name: e.target.value })} placeholder={t('ai.brandVoice.identity.businessNamePlaceholder')} />
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Description</label>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('ai.brandVoice.identity.description')}</label>
               <textarea
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
                 rows={3}
-                placeholder="What does your business do?"
+                placeholder={t('ai.brandVoice.identity.descriptionPlaceholder')}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
               />
             </div>
-            <Input label="Industry" value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} placeholder="Technology, SaaS, E-commerce…" />
-            <Input label="Target Audience" value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value })} placeholder="Small business owners, 25-45…" />
+            <Input label={t('ai.brandVoice.identity.industry')} value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} placeholder={t('ai.brandVoice.identity.industryPlaceholder')} />
+            <Input label={t('ai.brandVoice.identity.audience')} value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value })} placeholder={t('ai.brandVoice.identity.audiencePlaceholder')} />
           </div>
         </Card>
 
-        <Card title="Voice & Tone">
+        <Card title={t('ai.brandVoice.voice.title')}>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Writing Style</label>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('ai.brandVoice.voice.writingStyle')}</label>
                 <select
                   value={form.writing_style}
                   onChange={(e) => setForm({ ...form, writing_style: e.target.value })}
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 >
                   {['professional', 'casual', 'technical', 'conversational', 'formal'].map((s) => (
-                    <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                    <option key={s} value={s}>{t(`options.${s}`)}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Tone</label>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('ai.brandVoice.voice.tone')}</label>
                 <select
                   value={form.tone}
                   onChange={(e) => setForm({ ...form, tone: e.target.value })}
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 >
                   {['professional', 'friendly', 'authoritative', 'playful', 'empathetic', 'urgent'].map((s) => (
-                    <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                    <option key={s} value={s}>{t(`options.${s}`)}</option>
                   ))}
                 </select>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">CTA Style</label>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('ai.brandVoice.voice.ctaStyle')}</label>
                 <select
                   value={form.cta_style}
                   onChange={(e) => setForm({ ...form, cta_style: e.target.value })}
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 >
                   {['clear', 'urgent', 'soft', 'question', 'bold'].map((s) => (
-                    <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                    <option key={s} value={s}>{t(`options.${s}`)}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Emoji Style</label>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('ai.brandVoice.voice.emojiStyle')}</label>
                 <select
                   value={form.emoji_style}
                   onChange={(e) => setForm({ ...form, emoji_style: e.target.value })}
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 >
                   {['none', 'minimal', 'moderate', 'heavy'].map((s) => (
-                    <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                    <option key={s} value={s}>{t(`options.${s}`)}</option>
                   ))}
                 </select>
               </div>
@@ -179,12 +181,12 @@ export function BrandVoicePage() {
           </div>
         </Card>
 
-        <Card title="Keywords">
+        <Card title={t('ai.brandVoice.keywords.title')}>
           <div className="space-y-3">
-            <p className="text-xs text-slate-500 dark:text-slate-400">Keywords the AI should include in generated content.</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{t('ai.brandVoice.keywords.description')}</p>
             <div className="flex gap-2">
-              <Input value={keywordInput} onChange={(e) => setKeywordInput(e.target.value)} placeholder="Add a keyword…" onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addKeyword())} />
-              <Button variant="outline" onClick={addKeyword}>Add</Button>
+              <Input value={keywordInput} onChange={(e) => setKeywordInput(e.target.value)} placeholder={t('ai.brandVoice.keywords.placeholder')} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addKeyword())} />
+              <Button variant="outline" onClick={addKeyword}>{t('ai.brandVoice.keywords.addButton')}</Button>
             </div>
             <div className="flex flex-wrap gap-2">
               {keywords.map((k) => (
@@ -197,12 +199,12 @@ export function BrandVoicePage() {
           </div>
         </Card>
 
-        <Card title="Negative Keywords">
+        <Card title={t('ai.brandVoice.negKeywords.title')}>
           <div className="space-y-3">
-            <p className="text-xs text-slate-500 dark:text-slate-400">Words the AI should avoid using in generated content.</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{t('ai.brandVoice.negKeywords.description')}</p>
             <div className="flex gap-2">
-              <Input value={negKeywordInput} onChange={(e) => setNegKeywordInput(e.target.value)} placeholder="Add a word to avoid…" onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addNegKeyword())} />
-              <Button variant="outline" onClick={addNegKeyword}>Add</Button>
+              <Input value={negKeywordInput} onChange={(e) => setNegKeywordInput(e.target.value)} placeholder={t('ai.brandVoice.negKeywords.placeholder')} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addNegKeyword())} />
+              <Button variant="outline" onClick={addNegKeyword}>{t('ai.brandVoice.keywords.addButton')}</Button>
             </div>
             <div className="flex flex-wrap gap-2">
               {negativeKeywords.map((k) => (

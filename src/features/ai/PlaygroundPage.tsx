@@ -16,10 +16,12 @@ import { useAISettings } from '@/hooks/useAISettings';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useAuth } from '@/providers/AuthProvider';
 import { useToast } from '@/providers/ToastProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { MarkdownRenderer, Button, Input, Badge, EmptyState } from '@/ui';
 import type { Conversation } from '@/types/ai';
 
 export function PlaygroundPage() {
+  const { t } = useLanguage();
   const { workspace } = useWorkspace();
   const { user } = useAuth();
   const {
@@ -63,7 +65,7 @@ export function PlaygroundPage() {
 
     let convId = activeId;
     if (!convId) {
-      const conv = await createConversation(input.slice(0, 40) || 'New Conversation', settings?.default_model);
+      const conv = await createConversation(input.slice(0, 40) || t('ai.playground.newConversationTitle'), settings?.default_model);
       convId = conv?.id ?? null;
       if (!convId) return;
     }
@@ -97,12 +99,12 @@ export function PlaygroundPage() {
       });
     }
     if (result.error) {
-      push({ title: 'Generation failed', description: result.error, variant: 'error' });
+      push({ title: t('ai.playground.generationFailed'), description: result.error, variant: 'error' });
     }
   }, [input, workspace, user, activeId, messages, settings, createConversation, addMessage, generate, push]);
 
   const handleNewChat = () => {
-    createConversation('New Conversation', settings?.default_model);
+    createConversation(t('ai.playground.newConversationTitle'), settings?.default_model);
     setInput('');
     setStreamingContent('');
   };
@@ -116,7 +118,7 @@ export function PlaygroundPage() {
 
   const handleCopy = (content: string) => {
     navigator.clipboard.writeText(content);
-    push({ title: 'Copied to clipboard', variant: 'success' });
+    push({ title: t('ai.playground.copiedToClipboard'), variant: 'success' });
   };
 
   return (
@@ -125,22 +127,22 @@ export function PlaygroundPage() {
       <div className="flex w-64 flex-col rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <div className="border-b border-slate-200 p-3 dark:border-slate-800">
           <Button size="sm" className="w-full" onClick={handleNewChat}>
-            <Plus className="h-4 w-4" /> New Chat
+            <Plus className="h-4 w-4" /> {t('ai.playground.newChat')}
           </Button>
         </div>
         <div className="border-b border-slate-200 p-3 dark:border-slate-800">
           <Input
             type="search"
-            placeholder="Search conversations…"
+            placeholder={t('ai.playground.searchPlaceholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <div className="flex-1 space-y-1 overflow-y-auto p-2">
           {loading ? (
-            <p className="p-4 text-center text-sm text-slate-500">Loading…</p>
+            <p className="p-4 text-center text-sm text-slate-500">{t('ai.playground.loading')}</p>
           ) : conversations.length === 0 ? (
-            <p className="p-4 text-center text-sm text-slate-500">No conversations yet.</p>
+            <p className="p-4 text-center text-sm text-slate-500">{t('ai.playground.noConversations')}</p>
           ) : (
             conversations.map((conv) => (
               <ConversationItem
@@ -171,13 +173,13 @@ export function PlaygroundPage() {
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-slate-900 dark:text-white">
-              {conversations.find((c) => c.id === activeId)?.title ?? 'AI Playground'}
+              {conversations.find((c) => c.id === activeId)?.title ?? t('ai.playground.defaultTitle')}
             </span>
             {settings?.default_model && (
               <Badge variant="info">{settings.default_model}</Badge>
             )}
           </div>
-          {settings?.streaming && <Badge variant="success">Streaming</Badge>}
+          {settings?.streaming && <Badge variant="success">{t('ai.playground.streaming')}</Badge>}
         </div>
 
         {/* Messages */}
@@ -185,8 +187,8 @@ export function PlaygroundPage() {
           {messages.length === 0 && !streamingContent ? (
             <EmptyState
               icon={<MessageSquarePlus className="h-10 w-10" />}
-              title="Start a conversation"
-              description="Ask anything, or try generating content for your social media."
+              title={t('ai.playground.empty.title')}
+              description={t('ai.playground.empty.description')}
             />
           ) : (
             <div className="space-y-4">
@@ -223,7 +225,7 @@ export function PlaygroundPage() {
                   handleSend();
                 }
               }}
-              placeholder="Type your message… (Enter to send, Shift+Enter for newline)"
+              placeholder={t('ai.playground.inputPlaceholder')}
               rows={2}
               className="flex-1 resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             />
@@ -262,6 +264,7 @@ function ConversationItem({
   onToggleFav: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <div
       className={`group flex items-center gap-2 rounded-lg px-3 py-2 transition ${
@@ -286,13 +289,13 @@ function ConversationItem({
             {conv.title}
           </button>
           <div className="hidden gap-1 group-hover:flex">
-            <button onClick={onToggleFav} className="text-slate-400 hover:text-amber-500" title="Favorite">
+            <button onClick={onToggleFav} className="text-slate-400 hover:text-amber-500" title={t('ai.playground.favorite')}>
               <Star className={`h-3.5 w-3.5 ${conv.favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
             </button>
-            <button onClick={() => onEdit(conv.id, conv.title)} className="text-slate-400 hover:text-slate-600" title="Rename">
+            <button onClick={() => onEdit(conv.id, conv.title)} className="text-slate-400 hover:text-slate-600" title={t('ai.playground.rename')}>
               <Edit2 className="h-3.5 w-3.5" />
             </button>
-            <button onClick={onDelete} className="text-slate-400 hover:text-rose-500" title="Delete">
+            <button onClick={onDelete} className="text-slate-400 hover:text-rose-500" title={t('ai.playground.delete')}>
               <Trash2 className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -324,6 +327,7 @@ function MessageBubble({
   onCopy?: () => void;
   onToggleFav?: () => void;
 }) {
+  const { t } = useLanguage();
   const isUser = role === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -343,16 +347,16 @@ function MessageBubble({
         {!streaming && !isUser && (
           <div className="mt-2 flex items-center gap-3 border-t border-slate-200/50 pt-2 text-xs text-slate-500 dark:border-slate-700/50 dark:text-slate-400">
             {model && <span className="font-mono">{model}</span>}
-            {tokens ? <span>{tokens} tokens</span> : null}
-            {responseTime ? <span>{responseTime}ms</span> : null}
+            {tokens ? <span>{t('ai.playground.tokens', { count: tokens })}</span> : null}
+            {responseTime ? <span>{t('ai.playground.responseTimeMs', { ms: responseTime })}</span> : null}
             <div className="flex gap-2">
               {onCopy && (
-                <button onClick={onCopy} className="transition hover:text-slate-700 dark:hover:text-slate-200" title="Copy">
+                <button onClick={onCopy} className="transition hover:text-slate-700 dark:hover:text-slate-200" title={t('ai.playground.copy')}>
                   <Copy className="h-3 w-3" />
                 </button>
               )}
               {onToggleFav && (
-                <button onClick={onToggleFav} className="transition hover:text-amber-500" title="Favorite">
+                <button onClick={onToggleFav} className="transition hover:text-amber-500" title={t('ai.playground.favorite')}>
                   <Star className={`h-3 w-3 ${favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
                 </button>
               )}

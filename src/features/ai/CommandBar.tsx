@@ -20,11 +20,12 @@ import { useAISettings } from '@/hooks/useAISettings';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useAuth } from '@/providers/AuthProvider';
 import { useToast } from '@/providers/ToastProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { Badge } from '@/ui';
 
 type Command = {
   id: string;
-  label: string;
+  labelKey: string;
   description?: string;
   icon: typeof Sparkles;
   category: 'navigate' | 'generate' | 'action';
@@ -33,6 +34,7 @@ type Command = {
 };
 
 export function CommandBar() {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [result, setResult] = useState('');
@@ -57,34 +59,34 @@ export function CommandBar() {
   }, []);
 
   const navCommands: Command[] = [
-    { id: 'nav-dashboard', label: 'Go to Dashboard', icon: LayoutDashboard, category: 'navigate', action: () => navigate('/app/dashboard') },
-    { id: 'nav-playground', label: 'Open AI Playground', icon: MessageSquare, category: 'navigate', action: () => navigate('/app/playground') },
-    { id: 'nav-studio', label: 'Open Content Studio', icon: Wand2, category: 'navigate', action: () => navigate('/app/studio') },
-    { id: 'nav-prompts', label: 'Open Prompt Library', icon: Search, category: 'navigate', action: () => navigate('/app/prompts') },
-    { id: 'nav-history', label: 'Open AI History', icon: CalendarClock, category: 'navigate', action: () => navigate('/app/ai-history') },
-    { id: 'nav-analytics', label: 'Open Analytics', icon: BarChart3, category: 'navigate', action: () => navigate('/app/analytics') },
-    { id: 'nav-accounts', label: 'Open Connected Accounts', icon: Link2, category: 'navigate', action: () => navigate('/app/accounts') },
-    { id: 'nav-scheduled', label: 'Open Calendar', icon: CalendarDays, category: 'navigate', action: () => navigate('/app/scheduled') },
-    { id: 'nav-settings', label: 'Open Settings', icon: Settings, category: 'navigate', action: () => navigate('/app/settings') },
-    { id: 'nav-brand', label: 'Open Brand Voice', icon: Sparkles, category: 'navigate', action: () => navigate('/app/brand-voice') },
-    { id: 'nav-ai-settings', label: 'Open AI Settings', icon: Settings, category: 'navigate', action: () => navigate('/app/ai-settings') },
+    { id: 'nav-dashboard', labelKey: 'ai.commandBar.nav.dashboard', icon: LayoutDashboard, category: 'navigate', action: () => navigate('/app/dashboard') },
+    { id: 'nav-playground', labelKey: 'ai.commandBar.nav.playground', icon: MessageSquare, category: 'navigate', action: () => navigate('/app/playground') },
+    { id: 'nav-studio', labelKey: 'ai.commandBar.nav.studio', icon: Wand2, category: 'navigate', action: () => navigate('/app/studio') },
+    { id: 'nav-prompts', labelKey: 'ai.commandBar.nav.prompts', icon: Search, category: 'navigate', action: () => navigate('/app/prompts') },
+    { id: 'nav-history', labelKey: 'ai.commandBar.nav.history', icon: CalendarClock, category: 'navigate', action: () => navigate('/app/ai-history') },
+    { id: 'nav-analytics', labelKey: 'ai.commandBar.nav.analytics', icon: BarChart3, category: 'navigate', action: () => navigate('/app/analytics') },
+    { id: 'nav-accounts', labelKey: 'ai.commandBar.nav.accounts', icon: Link2, category: 'navigate', action: () => navigate('/app/accounts') },
+    { id: 'nav-scheduled', labelKey: 'ai.commandBar.nav.scheduled', icon: CalendarDays, category: 'navigate', action: () => navigate('/app/scheduled') },
+    { id: 'nav-settings', labelKey: 'ai.commandBar.nav.settings', icon: Settings, category: 'navigate', action: () => navigate('/app/settings') },
+    { id: 'nav-brand', labelKey: 'ai.commandBar.nav.brand', icon: Sparkles, category: 'navigate', action: () => navigate('/app/brand-voice') },
+    { id: 'nav-ai-settings', labelKey: 'ai.commandBar.nav.aiSettings', icon: Settings, category: 'navigate', action: () => navigate('/app/ai-settings') },
   ];
 
   const genCommands: Command[] = [
-    { id: 'gen-linkedin', label: 'Generate 10 LinkedIn posts', icon: PenSquare, category: 'generate', keywords: ['linkedin', 'posts', 'generate'], action: () => runGenerate('Generate 10 engaging LinkedIn posts about your business. Each post should have a hook, body, and CTA.') },
-    { id: 'gen-facebook', label: 'Create a Facebook post', icon: PenSquare, category: 'generate', keywords: ['facebook', 'post', 'create'], action: () => runGenerate('Create an engaging Facebook post with a clear hook, body, and call-to-action.') },
-    { id: 'gen-instagram', label: 'Create an Instagram post', icon: Image, category: 'generate', keywords: ['instagram', 'post', 'create'], action: () => runGenerate('Create an engaging Instagram post with emojis and relevant hashtags.') },
-    { id: 'gen-hashtags', label: 'Generate hashtags', icon: Hash, category: 'generate', keywords: ['hashtags', 'generate'], action: () => runGenerate('Generate 20 relevant and trending hashtags for social media content.') },
-    { id: 'gen-monthly', label: 'Create monthly content plan', icon: CalendarDays, category: 'generate', keywords: ['monthly', 'calendar', 'plan', 'content'], action: () => runGenerate('Create a monthly content plan with 4 weeks of daily post ideas.') },
-    { id: 'gen-rewrite', label: 'Rewrite last post', icon: Wand2, category: 'generate', keywords: ['rewrite', 'last', 'post'], action: () => runGenerate('Rewrite this content in a fresh, engaging way: ') },
-    { id: 'gen-schedule', label: 'Schedule tomorrow at 9 AM', icon: CalendarClock, category: 'action', keywords: ['schedule', 'tomorrow', '9am'], action: () => { push({ title: 'Scheduling', description: 'Connect a social account first to schedule posts.', variant: 'info' }); navigate('/app/scheduled'); } },
+    { id: 'gen-linkedin', labelKey: 'ai.commandBar.gen.linkedin', icon: PenSquare, category: 'generate', keywords: ['linkedin', 'posts', 'generate'], action: () => runGenerate('Generate 10 engaging LinkedIn posts about your business. Each post should have a hook, body, and CTA.') },
+    { id: 'gen-facebook', labelKey: 'ai.commandBar.gen.facebook', icon: PenSquare, category: 'generate', keywords: ['facebook', 'post', 'create'], action: () => runGenerate('Create an engaging Facebook post with a clear hook, body, and call-to-action.') },
+    { id: 'gen-instagram', labelKey: 'ai.commandBar.gen.instagram', icon: Image, category: 'generate', keywords: ['instagram', 'post', 'create'], action: () => runGenerate('Create an engaging Instagram post with emojis and relevant hashtags.') },
+    { id: 'gen-hashtags', labelKey: 'ai.commandBar.gen.hashtags', icon: Hash, category: 'generate', keywords: ['hashtags', 'generate'], action: () => runGenerate('Generate 20 relevant and trending hashtags for social media content.') },
+    { id: 'gen-monthly', labelKey: 'ai.commandBar.gen.monthly', icon: CalendarDays, category: 'generate', keywords: ['monthly', 'calendar', 'plan', 'content'], action: () => runGenerate('Create a monthly content plan with 4 weeks of daily post ideas.') },
+    { id: 'gen-rewrite', labelKey: 'ai.commandBar.gen.rewrite', icon: Wand2, category: 'generate', keywords: ['rewrite', 'last', 'post'], action: () => runGenerate('Rewrite this content in a fresh, engaging way: ') },
+    { id: 'gen-schedule', labelKey: 'ai.commandBar.gen.schedule', icon: CalendarClock, category: 'action', keywords: ['schedule', 'tomorrow', '9am'], action: () => { push({ title: t('ai.commandBar.toast.schedulingTitle'), description: t('ai.commandBar.toast.schedulingDesc'), variant: 'info' }); navigate('/app/scheduled'); } },
   ];
 
   const allCommands = [...navCommands, ...genCommands];
   const filtered = query
     ? allCommands.filter((c) => {
         const q = query.toLowerCase();
-        return c.label.toLowerCase().includes(q) || c.keywords?.some((k) => k.includes(q));
+        return t(c.labelKey).toLowerCase().includes(q) || c.keywords?.some((k) => k.includes(q));
       })
     : allCommands;
 
@@ -104,7 +106,7 @@ export function CommandBar() {
     });
     setGenerating(false);
     if (res.error) {
-      push({ title: 'Generation failed', description: res.error, variant: 'error' });
+      push({ title: t('ai.commandBar.toast.generationFailed'), description: res.error, variant: 'error' });
     }
   };
 
@@ -137,32 +139,32 @@ export function CommandBar() {
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Type a command or ask AI… (e.g. 'Generate 10 LinkedIn posts')"
+            placeholder={t('ai.commandBar.placeholder')}
             className="flex-1 bg-transparent text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-white"
           />
           <Badge variant="info">CTRL+K</Badge>
-          <button onClick={() => setOpen(false)} className="text-xs text-slate-400 hover:text-slate-600">ESC</button>
+          <button onClick={() => setOpen(false)} className="text-xs text-slate-400 hover:text-slate-600">{t('ai.commandBar.esc')}</button>
         </div>
 
         {result ? (
           <div className="max-h-96 overflow-y-auto p-4">
             <div className="mb-3 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-              <Sparkles className="h-3.5 w-3.5" /> AI Result
+              <Sparkles className="h-3.5 w-3.5" /> {t('ai.commandBar.aiResult')}
             </div>
             <div className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">
               {result}
               {generating && <span className="ml-1 inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
             </div>
             <div className="mt-4 flex gap-2">
-              <button onClick={() => navigate('/app/playground')} className="text-xs text-sky-600 hover:underline dark:text-sky-400">Continue in Playground →</button>
-              <button onClick={() => { navigator.clipboard.writeText(result); push({ title: 'Copied', variant: 'success' }); }} className="text-xs text-slate-500 hover:underline">Copy</button>
+              <button onClick={() => navigate('/app/playground')} className="text-xs text-sky-600 hover:underline dark:text-sky-400">{t('ai.commandBar.continueInPlayground')}</button>
+              <button onClick={() => { navigator.clipboard.writeText(result); push({ title: t('ai.commandBar.copied'), variant: 'success' }); }} className="text-xs text-slate-500 hover:underline">{t('ai.commandBar.copy')}</button>
             </div>
           </div>
         ) : (
           <div className="max-h-96 overflow-y-auto p-2">
             {filtered.length === 0 ? (
               <div className="py-8 text-center">
-                <p className="text-sm text-slate-500 dark:text-slate-400">No matching commands. Try: "Generate hashtags" or "Open Playground"</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">{t('ai.commandBar.noResults')}</p>
               </div>
             ) : (
               filtered.map((cmd) => (
@@ -175,11 +177,11 @@ export function CommandBar() {
                     <cmd.icon className="h-4 w-4" />
                   </div>
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-slate-900 dark:text-white">{cmd.label}</p>
+                    <p className="text-sm font-medium text-slate-900 dark:text-white">{t(cmd.labelKey)}</p>
                     {cmd.description && <p className="text-xs text-slate-500 dark:text-slate-400">{cmd.description}</p>}
                   </div>
                   <Badge variant={cmd.category === 'navigate' ? 'default' : cmd.category === 'generate' ? 'info' : 'warning'}>
-                    {cmd.category}
+                    {t(`ai.commandBar.category.${cmd.category}`)}
                   </Badge>
                 </button>
               ))
