@@ -368,9 +368,12 @@ Deno.serve(async (req: Request) => {
     // which fails closed sometimes and, when it doesn't, is fragile to depend on
     // as the only authorization check for a service-role client.
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) return errorResponse('Unauthorized', 401);
+    if (!authHeader?.startsWith('Bearer ')) return errorResponse('Unauthorized: no Authorization header sent', 401);
     const { data: authData, error: authError } = await supabase.auth.getUser(authHeader.slice(7));
-    if (authError || !authData.user) return errorResponse('Unauthorized', 401);
+    if (authError || !authData.user) {
+      console.error('ai-gateway auth check failed:', authError?.message, authError?.status, authError?.name);
+      return errorResponse(`Unauthorized: ${authError?.message ?? 'token did not resolve to a user'}`, 401);
+    }
     const callerId = authData.user.id;
 
     const url = new URL(req.url);
