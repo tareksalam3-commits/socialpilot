@@ -1,11 +1,14 @@
 import type { ChatMessage, ChatCompletionResult, ModelInfo } from '@/types/ai';
+import { supabase } from '@/services/supabase';
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-gateway`;
 
-function getAuthHeaders(): Record<string, string> {
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token ?? import.meta.env.VITE_SUPABASE_ANON_KEY;
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+    Authorization: `Bearer ${token}`,
   };
 }
 
@@ -25,7 +28,7 @@ export const aiGateway = {
   async generate(opts: GenerateOptions): Promise<ChatCompletionResult> {
     const res = await fetch(`${FUNCTION_URL}?action=chat`, {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         workspace_id: opts.workspaceId,
         messages: opts.messages,
@@ -79,7 +82,7 @@ export const aiGateway = {
   async stream(opts: GenerateOptions): Promise<ReadableStream<Uint8Array>> {
     const res = await fetch(`${FUNCTION_URL}?action=chat`, {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers: await getAuthHeaders(),
       body: JSON.stringify({
         workspace_id: opts.workspaceId,
         messages: opts.messages,
@@ -102,7 +105,7 @@ export const aiGateway = {
   async listModels(workspaceId: string): Promise<{ models: ModelInfo[]; free_count: number; total_count: number }> {
     const res = await fetch(`${FUNCTION_URL}?action=models`, {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers: await getAuthHeaders(),
       body: JSON.stringify({ workspace_id: workspaceId }),
     });
     if (!res.ok) {
@@ -115,7 +118,7 @@ export const aiGateway = {
   async testConnection(workspaceId: string): Promise<{ status: string; data?: unknown }> {
     const res = await fetch(`${FUNCTION_URL}?action=test`, {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers: await getAuthHeaders(),
       body: JSON.stringify({ workspace_id: workspaceId }),
     });
     if (!res.ok) {
