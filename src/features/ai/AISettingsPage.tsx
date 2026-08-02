@@ -5,7 +5,7 @@ import { useWorkspace } from '@/hooks/useWorkspace';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
 import { aiGateway } from '@/services/aiGateway';
-import { Badge, Button, Card, Input } from '@/ui';
+import { Badge, Button, Card, Input, Skeleton } from '@/ui';
 import type { ModelInfo } from '@/types/ai';
 
 type ConnState = 'idle' | 'testing' | 'connected' | 'failed';
@@ -76,7 +76,15 @@ export function AISettingsPage() {
   };
 
   if (loading) {
-    return <div className="space-y-6"><div className="h-32 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" /></div>;
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="rounded-xl border border-slate-200 p-5 dark:border-slate-800">
+          <Skeleton className="mb-3 h-4 w-32" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      </div>
+    );
   }
 
   const freeModels = models.filter((m) => m.is_free);

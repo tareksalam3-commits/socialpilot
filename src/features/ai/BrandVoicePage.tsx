@@ -3,7 +3,7 @@ import { Save, Sparkles, X } from 'lucide-react';
 import { useBrandVoice } from '@/hooks/useBrandVoice';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
-import { Button, Card, Input } from '@/ui';
+import { Button, Card, Input, Skeleton } from '@/ui';
 
 export function BrandVoicePage() {
   const { t } = useLanguage();
@@ -81,7 +81,15 @@ export function BrandVoicePage() {
   };
 
   if (loading) {
-    return <div className="h-32 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />;
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-56" />
+        <div className="rounded-xl border border-slate-200 p-5 dark:border-slate-800">
+          <Skeleton className="mb-4 h-4 w-40" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react';
+import { AlertTriangle } from 'lucide-react';
 
 type Props = { children: ReactNode };
 type State = { error: Error | null };
@@ -44,8 +45,11 @@ export class ErrorBoundary extends Component<Props, State> {
 
       return (
         <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 dark:bg-slate-950">
-          <div className="max-w-xl rounded-xl border border-rose-200 bg-white p-6 shadow-sm dark:border-rose-900/50 dark:bg-slate-900">
-            <h2 className="text-lg font-bold text-rose-600 dark:text-rose-400">حدث خطأ غير متوقع</h2>
+          <div className="w-full max-w-xl animate-slide-up rounded-xl border border-rose-200 bg-white p-6 shadow-card dark:border-rose-900/50 dark:bg-slate-900">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-rose-100 text-rose-500 dark:bg-rose-950 dark:text-rose-400">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <h2 className="mt-4 text-lg font-bold text-rose-600 dark:text-rose-400">حدث خطأ غير متوقع</h2>
             <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700 dark:text-slate-300">
               {this.state.error.message}
             </p>
@@ -54,7 +58,7 @@ export class ErrorBoundary extends Component<Props, State> {
             </pre>
             <button
               onClick={() => window.location.assign('/login')}
-              className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-slate-900"
+              className="press-effect mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-subtle transition-colors hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
             >
               العودة لتسجيل الدخول
             </button>

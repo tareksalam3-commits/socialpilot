@@ -3,7 +3,7 @@ import { Copy, Download, Plus, Search, Star, Trash2 } from 'lucide-react';
 import { useAIHistory } from '@/hooks/useAIHistory';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
-import { Badge, Button, Card, EmptyState, ErrorState } from '@/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, Skeleton } from '@/ui';
 import { MarkdownRenderer } from '@/ui';
 import { timeAgo } from '@/utils/format';
 import type { AiHistoryEntry } from '@/types/ai';
@@ -75,7 +75,7 @@ export function AIHistoryPage() {
       {error ? (
         <ErrorState description={error} />
       ) : loading ? (
-        <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />)}</div>
+        <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
       ) : filtered.length === 0 ? (
         <Card><EmptyState icon={<Search className="h-10 w-10" />} title={t('ai.history.empty.title')} description={t('ai.history.empty.description')} /></Card>
       ) : (

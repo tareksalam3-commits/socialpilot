@@ -25,13 +25,14 @@ import {
   X as XIcon,
   Zap as ZapIcon,
 } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/providers/AuthProvider';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useLanguage } from '@/providers/LanguageProvider';
 import { initials } from '@/utils/format';
 import { Dropdown, DropdownItem } from '@/ui';
+import { preloadByPath } from '@/routes/lazyPages';
 
 const navSections = [
   {
@@ -75,19 +76,53 @@ const navSections = [
   },
 ];
 
+// Warms a route's JS chunk the moment the pointer/focus lands on its nav
+// link, so the click that follows resolves near-instantly instead of
+// waiting on a fresh network fetch.
+const prefetchedPaths = new Set<string>();
+function prefetch(to: string) {
+  if (prefetchedPaths.has(to)) return;
+  const loader = preloadByPath[to];
+  if (!loader) return;
+  prefetchedPaths.add(to);
+  loader().catch(() => {
+    prefetchedPaths.delete(to);
+  });
+}
+
 export function AppLayout({ children }: { children?: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [drawerVisible, setDrawerVisible] = useState(false);
   const { user, profile, signOut } = useAuth();
   const { workspace } = useWorkspace();
   const { t, dir } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
+  const scrollRef = useRef<HTMLElement>(null);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
+
+  // Scroll the content area back to the top on every navigation, and reset
+  // it synchronously (no smooth-scroll) so the incoming page never flashes
+  // mid-scroll before jumping up.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [location.pathname]);
+
+  // Mount/unmount the drawer with a frame of delay so the slide-in
+  // transition has something to animate from (display:none -> flex would
+  // otherwise skip straight to the end state).
+  useEffect(() => {
+    if (mobileOpen) {
+      const raf = requestAnimationFrame(() => setDrawerVisible(true));
+      return () => cancelAnimationFrame(raf);
+    }
+    setDrawerVisible(false);
+  }, [mobileOpen]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -96,7 +131,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
 
   const sidebarContent = (
     <>
-      <div className="flex h-16 items-center justify-between border-b border-slate-200 px-4 dark:border-slate-800">
+      <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 px-4 dark:border-slate-800">
         <div className="flex items-center gap-2 overflow-hidden">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white dark:bg-white dark:text-slate-900">
             <Sparkles className="h-4 w-4" />
@@ -136,8 +171,10 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  onMouseEnter={() => prefetch(item.to)}
+                  onFocus={() => prefetch(item.to)}
                   className={({ isActive }) =>
-                    `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    `group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150 ${
                       isActive
                         ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white'
                         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
@@ -145,8 +182,15 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                   }
                   title={collapsed ? t(item.labelKey) : undefined}
                 >
-                  <item.icon className="h-4 w-4 shrink-0" />
-                  {!collapsed && <span>{t(item.labelKey)}</span>}
+                  {({ isActive }) => (
+                    <>
+                      {isActive && (
+                        <span className="absolute inset-y-1 start-0 w-0.5 rounded-full bg-slate-900 dark:bg-white" />
+                      )}
+                      <item.icon className="h-4 w-4 shrink-0 transition-transform duration-150 group-hover:scale-110" />
+                      {!collapsed && <span>{t(item.labelKey)}</span>}
+                    </>
+                  )}
                 </NavLink>
               ))}
             </div>
@@ -157,7 +201,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
       <div className="border-t border-slate-200 p-2 dark:border-slate-800">
         <Dropdown
           trigger={
-            <div className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-100 dark:hover:bg-slate-800">
+            <div className="flex items-center gap-2 rounded-lg px-2 py-2 transition-colors duration-150 hover:bg-slate-100 dark:hover:bg-slate-800">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
                 {initials(profile?.full_name ?? user?.email)}
               </div>
@@ -190,10 +234,10 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   );
 
   return (
-    <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950">
+    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950">
       {/* Desktop sidebar */}
       <aside
-        className={`hidden flex-col border-r border-slate-200 bg-white transition-all duration-200 dark:border-slate-800 dark:bg-slate-900 lg:flex ${
+        className={`hidden flex-col border-r border-slate-200 bg-white transition-[width] duration-250 ease-smooth dark:border-slate-800 dark:bg-slate-900 lg:flex ${
           collapsed ? 'w-16' : 'w-64'
         }`}
       >
@@ -203,8 +247,19 @@ export function AppLayout({ children }: { children?: ReactNode }) {
       {/* Mobile drawer */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-slate-900/50" onClick={() => setMobileOpen(false)} />
-          <aside className="relative flex h-full w-72 max-w-[85vw] flex-col bg-white dark:bg-slate-900">
+          <div
+            className={`absolute inset-0 bg-slate-900/50 transition-opacity duration-200 ${drawerVisible ? 'opacity-100' : 'opacity-0'}`}
+            onClick={() => setMobileOpen(false)}
+          />
+          <aside
+            className={`relative flex h-full w-72 max-w-[85vw] flex-col bg-white shadow-popover transition-transform duration-250 ease-smooth dark:bg-slate-900 ${
+              drawerVisible
+                ? 'translate-x-0'
+                : dir === 'rtl'
+                  ? 'translate-x-full'
+                  : '-translate-x-full'
+            }`}
+          >
             {sidebarContent}
           </aside>
         </div>
@@ -212,11 +267,11 @@ export function AppLayout({ children }: { children?: ReactNode }) {
 
       {/* Main content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex h-16 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900 sm:px-6">
+        <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setMobileOpen(true)}
-              className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 lg:hidden"
+              className="press-effect rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 lg:hidden"
               aria-label={t('sidebar.openMenu')}
             >
               <Menu className="h-5 w-5" />
@@ -243,9 +298,13 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             </div>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children ?? <Outlet />}</main>
+        <main ref={scrollRef} className="flex-1 overflow-y-auto p-4 sm:p-6">
+          {/* Keying on the pathname replays the fade/slide-up animation on every route change */}
+          <div key={location.pathname} className="page-transition">
+            {children ?? <Outlet />}
+          </div>
+        </main>
       </div>
     </div>
   );
 }
-

@@ -27,7 +27,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
       </div>
       {/* Right form panel */}
       <div className="flex w-full items-center justify-center p-6 lg:w-1/2">
-        <div className="w-full max-w-sm">{children}</div>
+        <div className="w-full max-w-sm animate-slide-up">{children}</div>
       </div>
     </div>
   );
