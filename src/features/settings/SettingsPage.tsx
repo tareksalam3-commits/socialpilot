@@ -548,6 +548,7 @@ function ApiKeysTab() {
 const CREDENTIAL_FIELDS: { key: CredentialKey; label: string; placeholder: string; secret: boolean; group: 'meta' | 'linkedin' | 'general' }[] = [
   { key: 'meta_app_id', label: 'Meta App ID', placeholder: 'e.g. 1234567890123456', secret: false, group: 'meta' },
   { key: 'meta_app_secret', label: 'Meta App Secret', placeholder: 'Paste the app secret from Meta for Developers', secret: true, group: 'meta' },
+  { key: 'meta_config_id', label: 'Meta Login Configuration ID (only if using Facebook Login for Business)', placeholder: 'e.g. 123456789012345', secret: false, group: 'meta' },
   { key: 'linkedin_client_id', label: 'LinkedIn Client ID', placeholder: 'e.g. 86abcxyz12345', secret: false, group: 'linkedin' },
   { key: 'linkedin_client_secret', label: 'LinkedIn Client Secret', placeholder: 'Paste the client secret from the LinkedIn app', secret: true, group: 'linkedin' },
   { key: 'app_url', label: 'App URL', placeholder: 'https://your-app-domain.com', secret: false, group: 'general' },
