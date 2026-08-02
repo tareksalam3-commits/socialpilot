@@ -1,7 +1,8 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
-import { getAccountForTarget, log, publishPost } from '../_shared/orchestrator.ts';
-import { nextRetryDelayMs, publishToPlatform } from '../_shared/publish.ts';
+import { log, publishPost, retryTarget } from '../_shared/orchestrator.ts';
 import { refreshMetaTokens } from '../_shared/metaRefresh.ts';
+import { refreshLinkedInTokens } from '../_shared/linkedinRefresh.ts';
+import { flagExpiringLinkedInAccounts } from '../_shared/accountHealth.ts';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -26,6 +27,15 @@ Deno.serve(async (req: Request) => {
   let retried = 0;
   let failed = 0;
 
+  // Workspaces that have paused unattended automation (Automation ›
+  // "Auto Publish" toggle). Manual actions (Publish Now, manual retry via
+  // automation-control) are unaffected — this only gates this background pass.
+  const { data: pausedWorkspaces } = await supabase
+    .from('workspaces')
+    .select('id')
+    .eq('auto_publish_enabled', false);
+  const pausedIds = new Set((pausedWorkspaces ?? []).map((w) => w.id as string));
+
   // 1) Due scheduled posts.
   const { data: duePosts } = await supabase
     .from('posts')
@@ -35,6 +45,7 @@ Deno.serve(async (req: Request) => {
     .limit(25);
 
   for (const post of duePosts ?? []) {
+    if (pausedIds.has(post.workspace_id as string)) continue;
     await supabase.from('posts').update({ status: 'publishing', updated_at: new Date().toISOString() }).eq('id', post.id);
     await log(supabase, { workspace_id: post.workspace_id, post_id: post.id, event: 'queued', message: 'Scheduled publish triggered by cron' });
     const status = await publishPost(supabase, post, null);
@@ -54,49 +65,11 @@ Deno.serve(async (req: Request) => {
   for (const target of dueTargets ?? []) {
     const { data: post } = await supabase.from('posts').select('*').eq('id', target.post_id).maybeSingle();
     if (!post) continue;
+    if (pausedIds.has(post.workspace_id as string)) continue;
 
-    await log(supabase, { workspace_id: post.workspace_id, post_id: post.id, target_id: target.id, platform: target.platform, event: 'attempt', message: `Retry #${target.retry_count}` });
-
-    try {
-      if (!target.account_id) throw new Error('No connected account for this platform');
-      const account = await getAccountForTarget(supabase, target.account_id, null);
-      if (!account?.access_token) throw new Error('No access token for this account');
-
-      const externalId = await publishToPlatform(target.platform, account.access_token, account.provider_account_id, post.content as string, post.media_urls as string[]);
-
-      await supabase.from('post_platform_targets').update({
-        status: 'published',
-        external_id: externalId,
-        published_at: new Date().toISOString(),
-        error_message: null,
-        next_retry_at: null,
-        updated_at: new Date().toISOString(),
-      }).eq('id', target.id);
-      await log(supabase, { workspace_id: post.workspace_id, post_id: post.id, target_id: target.id, platform: target.platform, event: 'success' });
-      retried++;
-
-      // If every target for this post is now published, flip the post itself.
-      const { data: siblings } = await supabase.from('post_platform_targets').select('status').eq('post_id', post.id);
-      if (siblings?.every((s) => s.status === 'published')) {
-        await supabase.from('posts').update({ status: 'published', published_at: new Date().toISOString(), error_message: null, updated_at: new Date().toISOString() }).eq('id', post.id);
-      }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'Unknown error';
-      const retryCount = (target.retry_count as number) ?? 0;
-      const maxRetries = (target.max_retries as number) ?? 3;
-      const canRetry = retryCount < maxRetries;
-
-      await supabase.from('post_platform_targets').update({
-        status: 'failed',
-        error_message: message,
-        retry_count: canRetry ? retryCount + 1 : retryCount,
-        next_retry_at: canRetry ? new Date(Date.now() + nextRetryDelayMs(retryCount)).toISOString() : null,
-        updated_at: new Date().toISOString(),
-      }).eq('id', target.id);
-
-      await log(supabase, { workspace_id: post.workspace_id, post_id: post.id, target_id: target.id, platform: target.platform, event: canRetry ? 'retry_scheduled' : 'gave_up', message });
-      failed++;
-    }
+    const ok = await retryTarget(supabase, target, post, null);
+    if (ok) retried++;
+    else failed++;
   }
 
   // 3) Proactively refresh Facebook/Instagram Page tokens nearing expiry so
@@ -104,12 +77,25 @@ Deno.serve(async (req: Request) => {
   // as publishing — no separate schedule to configure in Supabase.
   const metaRefresh = await refreshMetaTokens(supabase);
 
+  // 4) Same, for LinkedIn (personal + Company Page) accounts that have a
+  // refresh_token on file.
+  const linkedinRefresh = await refreshLinkedInTokens(supabase);
+
+  // 5) LinkedIn accounts with no refresh_token can't be silently refreshed —
+  // flag them warning/error as their token nears/passes expiry so the
+  // Connected Accounts page surfaces the need to reconnect before a
+  // scheduled post fails on it.
+  await flagExpiringLinkedInAccounts(supabase);
+
   return jsonResponse({
     published,
     retried,
     failed,
     meta_tokens_refreshed: metaRefresh.refreshed,
     meta_tokens_refresh_failed: metaRefresh.failed,
+    linkedin_tokens_refreshed: linkedinRefresh.refreshed,
+    linkedin_tokens_refresh_failed: linkedinRefresh.failed,
+    linkedin_tokens_skipped: linkedinRefresh.skipped,
     checked_at: now,
   });
 });

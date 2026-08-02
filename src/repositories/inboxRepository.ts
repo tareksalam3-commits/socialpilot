@@ -57,13 +57,13 @@ export const inboxRepository = {
 };
 
 export const notificationRepository = {
-  async list(userId: string, limit = 50): Promise<Notification[]> {
+  async list(userId: string, limit = 50, offset = 0): Promise<Notification[]> {
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .range(offset, offset + limit - 1);
     if (error) throw error;
     return (data ?? []) as Notification[];
   },

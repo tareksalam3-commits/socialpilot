@@ -20,8 +20,8 @@ export function LoginPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const emailErr = validateEmail(email);
-    const passErr = validatePassword(password);
+    const emailErr = validateEmail(email, t);
+    const passErr = validatePassword(password, t);
     setErrors({ email: emailErr.error, password: passErr.error });
     if (!emailErr.valid || !passErr.valid) return;
 

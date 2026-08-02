@@ -124,7 +124,7 @@ function ProfileTab() {
   const [loading, setLoading] = useState(false);
 
   const handleSave = async () => {
-    const nameErr = validateRequired(fullName, 'Full name');
+    const nameErr = validateRequired(fullName, t('settings.profile.fullName'), t);
     if (!nameErr.valid) {
       push({ title: t('settings.profile.toast.validationError'), description: nameErr.error!, variant: 'error' });
       return;
@@ -153,7 +153,7 @@ function ProfileTab() {
         </div>
       </div>
       <div className="mt-6 space-y-4">
-        <Input label={t('settings.profile.fullName')} value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Jane Doe" />
+        <Input label={t('settings.profile.fullName')} value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder={t('auth.fullNamePlaceholder')} />
         <Input
           label={t('settings.profile.avatarUrl')}
           value={avatarUrl}
@@ -183,7 +183,7 @@ function WorkspaceTab() {
   const { t } = useLanguage();
 
   const handleSave = async () => {
-    const nameErr = validateRequired(name, 'Workspace name');
+    const nameErr = validateRequired(name, t('settings.workspace.name'), t);
     if (!nameErr.valid) {
       push({ title: t('settings.workspace.toast.validationError'), description: nameErr.error!, variant: 'error' });
       return;
@@ -425,8 +425,8 @@ function ApiKeysTab() {
   }, [workspace?.id]);
 
   const handleCreate = async () => {
-    const labelErr = validateRequired(label, 'Label');
-    const valueErr = validateRequired(value, 'API key value');
+    const labelErr = validateRequired(label, t('settings.apikeys.label'), t);
+    const valueErr = validateRequired(value, t('settings.apikeys.keyValue'), t);
     if (!labelErr.valid || !valueErr.valid) {
       push({ title: t('settings.apikeys.toast.validationError'), description: labelErr.error ?? valueErr.error ?? '', variant: 'error' });
       return;
@@ -530,6 +530,7 @@ const CREDENTIAL_FIELDS: { key: CredentialKey; label: string; placeholder: strin
 
 function IntegrationsTab() {
   const { push } = useToast();
+  const { t } = useLanguage();
   const [status, setStatus] = useState<Record<CredentialKey, CredentialStatus> | null>(null);
   const [values, setValues] = useState<Partial<Record<CredentialKey, string>>>({});
   const [reveal, setReveal] = useState<Partial<Record<CredentialKey, boolean>>>({});
@@ -543,7 +544,7 @@ function IntegrationsTab() {
       setStatus(data);
       setValues((prev) => ({ ...prev, app_url: data.app_url?.value ?? prev.app_url ?? '' }));
     } catch (e) {
-      push({ title: 'Could not load integration status', description: e instanceof Error ? e.message : '', variant: 'error' });
+      push({ title: t('settings.integrations.loadError'), description: e instanceof Error ? e.message : '', variant: 'error' });
     } finally {
       setLoading(false);
     }
@@ -562,13 +563,13 @@ function IntegrationsTab() {
       if (v) payload[f.key] = v;
     }
     if (Object.keys(payload).length === 0) {
-      push({ title: 'Enter at least one value to save', variant: 'error' });
+      push({ title: t('settings.integrations.enterValue'), variant: 'error' });
       return;
     }
     setSavingGroup(group);
     try {
       await platformCredentialsRepository.save(payload);
-      push({ title: 'Saved to Supabase', description: 'Connect Accounts will use these credentials right away.', variant: 'success' });
+      push({ title: t('settings.integrations.savedTitle'), description: t('settings.integrations.savedDescription'), variant: 'success' });
       setValues((prev) => {
         const next = { ...prev };
         for (const f of fields) if (f.secret) next[f.key] = '';
@@ -576,7 +577,7 @@ function IntegrationsTab() {
       });
       await load();
     } catch (e) {
-      push({ title: 'Could not save credentials', description: e instanceof Error ? e.message : '', variant: 'error' });
+      push({ title: t('settings.integrations.saveError'), description: e instanceof Error ? e.message : '', variant: 'error' });
     } finally {
       setSavingGroup(null);
     }
@@ -588,14 +589,14 @@ function IntegrationsTab() {
       <div key={f.key} className="space-y-1.5">
         <div className="flex items-center justify-between">
           <label className="text-sm font-medium text-slate-700 dark:text-slate-300">{f.label}</label>
-          {configured && <Badge variant="success">Configured</Badge>}
+          {configured && <Badge variant="success">{t('settings.integrations.configured')}</Badge>}
         </div>
         <div className="relative">
           <Input
             type={f.secret && !reveal[f.key] ? 'password' : 'text'}
             value={values[f.key] ?? ''}
             onChange={(e) => setValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-            placeholder={configured ? '•••••••••••• (already set — enter a new value to replace it)' : f.placeholder}
+            placeholder={configured ? t('settings.integrations.alreadySet') : f.placeholder}
             className={f.secret ? 'pr-10' : undefined}
           />
           {f.secret && (
@@ -615,37 +616,37 @@ function IntegrationsTab() {
   return (
     <div className="space-y-6">
       <Card
-        title="Meta (Facebook & Instagram)"
-        description="Paste your Meta app credentials — they're saved straight into Supabase and used immediately by Connect Accounts, no redeploy needed."
+        title={t('settings.integrations.meta.title')}
+        description={t('settings.integrations.meta.description')}
       >
         {loading ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
         ) : (
           <div className="space-y-4">
             {CREDENTIAL_FIELDS.filter((f) => f.group === 'meta').map(renderField)}
-            <Button onClick={() => saveGroup('meta')} loading={savingGroup === 'meta'}>Save Meta credentials</Button>
+            <Button onClick={() => saveGroup('meta')} loading={savingGroup === 'meta'}>{t('settings.integrations.meta.save')}</Button>
           </div>
         )}
       </Card>
 
-      <Card title="LinkedIn" description="Paste your LinkedIn app credentials to enable LinkedIn OAuth and publishing.">
+      <Card title={t('settings.integrations.linkedin.title')} description={t('settings.integrations.linkedin.description')}>
         {loading ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
         ) : (
           <div className="space-y-4">
             {CREDENTIAL_FIELDS.filter((f) => f.group === 'linkedin').map(renderField)}
-            <Button onClick={() => saveGroup('linkedin')} loading={savingGroup === 'linkedin'}>Save LinkedIn credentials</Button>
+            <Button onClick={() => saveGroup('linkedin')} loading={savingGroup === 'linkedin'}>{t('settings.integrations.linkedin.save')}</Button>
           </div>
         )}
       </Card>
 
-      <Card title="App URL" description="Where OAuth redirects send people back after connecting an account.">
+      <Card title={t('settings.integrations.appUrl.title')} description={t('settings.integrations.appUrl.description')}>
         {loading ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
         ) : (
           <div className="space-y-4">
             {CREDENTIAL_FIELDS.filter((f) => f.group === 'general').map(renderField)}
-            <Button onClick={() => saveGroup('general')} loading={savingGroup === 'general'}>Save</Button>
+            <Button onClick={() => saveGroup('general')} loading={savingGroup === 'general'}>{t('common.save')}</Button>
           </div>
         )}
       </Card>

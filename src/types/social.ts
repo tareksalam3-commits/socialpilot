@@ -45,6 +45,15 @@ export type PublishingLog = {
   created_at: string;
 };
 
+export type SchedulerStatus = {
+  job_name: string;
+  schedule: string;
+  active: boolean;
+  last_run_at: string | null;
+  last_run_status: string | null;
+  last_run_return_message: string | null;
+};
+
 export type MediaFolder = {
   id: string;
   workspace_id: string;

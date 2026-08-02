@@ -17,6 +17,7 @@ const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage').th
 const SettingsPage = lazy(() => import('@/features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const ConnectedAccountsPage = lazy(() => import('@/features/accounts/ConnectedAccountsPage').then((m) => ({ default: m.ConnectedAccountsPage })));
 const ScheduledPostsPage = lazy(() => import('@/features/posts/ScheduledPostsPage').then((m) => ({ default: m.ScheduledPostsPage })));
+const AutomationPage = lazy(() => import('@/features/automation/AutomationPage').then((m) => ({ default: m.AutomationPage })));
 const ContentCalendarPage = lazy(() => import('@/features/posts/ContentCalendarPage').then((m) => ({ default: m.ContentCalendarPage })));
 const MediaLibraryPage = lazy(() => import('@/features/media/MediaLibraryPage').then((m) => ({ default: m.MediaLibraryPage })));
 const InboxPage = lazy(() => import('@/features/inbox/InboxPage').then((m) => ({ default: m.InboxPage })));
@@ -59,6 +60,7 @@ function App() {
                   <Route path="dashboard" element={<DashboardPage />} />
                   <Route path="accounts" element={<ConnectedAccountsPage />} />
                   <Route path="scheduled" element={<ScheduledPostsPage />} />
+                  <Route path="automation" element={<AutomationPage />} />
                   <Route path="calendar" element={<ContentCalendarPage />} />
                   <Route path="media" element={<MediaLibraryPage />} />
                   <Route path="inbox" element={<InboxPage />} />

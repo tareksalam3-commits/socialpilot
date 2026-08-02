@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Facebook, Instagram, Link2, Linkedin, Loader2, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react';
+import { CheckCircle2, Facebook, Instagram, Link2, Linkedin, Loader2, Plus, RefreshCw, RotateCw, Trash2, XCircle } from 'lucide-react';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useToast } from '@/providers/ToastProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { accountRepository, type LinkedInOAuthOption, type MetaOAuthOption, type OAuthOption } from '@/repositories/accountRepository';
 import { Badge, Button, Card, EmptyState, ErrorState, Modal, Input } from '@/ui';
 import { formatDate } from '@/utils/format';
@@ -17,9 +18,10 @@ const platforms = [
 ];
 
 export function ConnectedAccountsPage() {
-  const { accounts, loading, error, disconnect, remove, reload, refreshToken, refreshingId } = useAccounts();
+  const { accounts, loading, error, disconnect, remove, reload, refreshToken, refreshingId, syncAccount, syncingId, syncAll, syncingAll } = useAccounts();
   const { workspace } = useWorkspace();
   const { push } = useToast();
+  const { t } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [showConnect, setShowConnect] = useState(false);
@@ -40,7 +42,7 @@ export function ConnectedAccountsPage() {
     const oauthError = searchParams.get('error');
 
     if (oauthError) {
-      push({ title: `${platform === 'linkedin' ? 'LinkedIn' : 'Facebook'} connection failed`, description: oauthError.replace(/_/g, ' '), variant: 'error' });
+      push({ title: t('accounts.toast.oauthConnectionFailed', { platform: platform === 'linkedin' ? 'LinkedIn' : 'Facebook' }), description: oauthError.replace(/_/g, ' '), variant: 'error' });
       setSearchParams((p) => { p.delete('error'); p.delete('platform'); return p; }, { replace: true });
       return;
     }
@@ -49,7 +51,7 @@ export function ConnectedAccountsPage() {
       accountRepository
         .getPendingSelection(selectionId)
         .then((data) => setSelection({ id: selectionId, platform: data.platform, options: data.options }))
-        .catch((e) => push({ title: 'Could not load accounts to select', description: e instanceof Error ? e.message : '', variant: 'error' }))
+        .catch((e) => push({ title: t('accounts.toast.loadSelectionFailed'), description: e instanceof Error ? e.message : '', variant: 'error' }))
         .finally(() => setSearchParams((p) => { p.delete('selection'); p.delete('platform'); return p; }, { replace: true }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -62,7 +64,7 @@ export function ConnectedAccountsPage() {
       const url = await accountRepository.startMetaOAuth(workspace.id);
       window.location.href = url;
     } catch (e) {
-      push({ title: 'Could not start Facebook login', description: e instanceof Error ? e.message : '', variant: 'error' });
+      push({ title: t('accounts.toast.facebookLoginFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
       setOauthLoading(null);
     }
   };
@@ -74,7 +76,7 @@ export function ConnectedAccountsPage() {
       const url = await accountRepository.startLinkedInOAuth(workspace.id);
       window.location.href = url;
     } catch (e) {
-      push({ title: 'Could not start LinkedIn login', description: e instanceof Error ? e.message : '', variant: 'error' });
+      push({ title: t('accounts.toast.linkedinLoginFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
       setOauthLoading(null);
     }
   };
@@ -85,7 +87,7 @@ export function ConnectedAccountsPage() {
       .filter(([, v]) => v)
       .map(([id]) => ({ id, connect_instagram: !!igChecked[id] }));
     if (selected.length === 0) {
-      push({ title: 'Pick at least one account', variant: 'error' });
+      push({ title: t('accounts.toast.pickAtLeastOne'), variant: 'error' });
       return;
     }
     setFinalizing(true);
@@ -97,7 +99,7 @@ export function ConnectedAccountsPage() {
       setIgChecked({});
       reload();
     } catch (e) {
-      push({ title: 'Could not connect the selected accounts', description: e instanceof Error ? e.message : '', variant: 'error' });
+      push({ title: t('accounts.toast.connectSelectedFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
     } finally {
       setFinalizing(false);
     }
@@ -105,7 +107,7 @@ export function ConnectedAccountsPage() {
 
   const handleConnect = async () => {
     if (!connectForm.accessToken.trim() || !connectForm.providerAccountId.trim()) {
-      push({ title: 'Access token and Account ID are required', variant: 'error' });
+      push({ title: t('accounts.toast.tokenAndIdRequired'), variant: 'error' });
       return;
     }
     if (!workspace) return;
@@ -123,7 +125,7 @@ export function ConnectedAccountsPage() {
       setConnectForm({ platform: 'facebook', handle: '', accessToken: '', providerAccountId: '' });
       reload();
     } catch (e) {
-      push({ title: 'Connection failed', description: e instanceof Error ? e.message : '', variant: 'error' });
+      push({ title: t('accounts.toast.connectionFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
     } finally {
       setConnecting(false);
     }
@@ -136,10 +138,28 @@ export function ConnectedAccountsPage() {
 
   const handleRefreshToken = async (account: ExtendedConnectedAccount) => {
     try {
-      await refreshToken(account.id);
+      await refreshToken(account.id, account.platform);
       push({ title: 'Token refreshed', description: `${platformLabel(account.platform)} will stay connected for longer.`, variant: 'success' });
     } catch (e) {
-      push({ title: 'Could not refresh token', description: e instanceof Error ? e.message : '', variant: 'error' });
+      push({ title: t('accounts.toast.refreshFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
+    }
+  };
+
+  const handleSync = async (account: ExtendedConnectedAccount) => {
+    try {
+      await syncAccount(account.id);
+      push({ title: 'Account synced', description: `${platformLabel(account.platform)} status is up to date.`, variant: 'success' });
+    } catch (e) {
+      push({ title: t('accounts.toast.syncFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
+    }
+  };
+
+  const handleSyncAll = async () => {
+    try {
+      await syncAll();
+      push({ title: 'Accounts synced', variant: 'success' });
+    } catch (e) {
+      push({ title: t('accounts.toast.syncAllFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
     }
   };
 
@@ -151,6 +171,9 @@ export function ConnectedAccountsPage() {
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Manage your social media accounts and their health.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={handleSyncAll} loading={syncingAll} disabled={accounts.length === 0}>
+            <RotateCw className="h-4 w-4" /> Sync all
+          </Button>
           <Button onClick={handleMetaConnect} loading={oauthLoading === 'meta'} disabled={oauthLoading !== null}>
             <Facebook className="h-4 w-4" /> Continue with Facebook
           </Button>
@@ -200,9 +223,14 @@ export function ConnectedAccountsPage() {
                 <span className="text-slate-700 dark:text-slate-300">{formatDate(account.created_at)}</span>
               </div>
               <div className="flex flex-wrap gap-2 pt-2">
-                {(account.platform === 'facebook' || account.platform === 'instagram') && account.status === 'connected' && (
+                {account.status === 'connected' && (
                   <Button size="sm" variant="outline" onClick={() => handleRefreshToken(account)} loading={refreshingId === account.id}>
                     <RefreshCw className="h-3.5 w-3.5" /> Refresh token
+                  </Button>
+                )}
+                {account.status === 'connected' && (
+                  <Button size="sm" variant="outline" onClick={() => handleSync(account)} loading={syncingId === account.id}>
+                    <RotateCw className="h-3.5 w-3.5" /> Sync
                   </Button>
                 )}
                 <Button size="sm" variant="outline" onClick={() => handleDisconnect(account)}>Disconnect</Button>
@@ -214,7 +242,7 @@ export function ConnectedAccountsPage() {
       </div>
 
       {error && <ErrorState description={error} />}
-      {loading && accounts.length === 0 && <p className="text-center text-sm text-slate-500">Loading…</p>}
+      {loading && accounts.length === 0 && <p className="text-center text-sm text-slate-500">{t('accounts.loading')}</p>}
       {!loading && accounts.length === 0 && !error && (
         <Card><EmptyState icon={<Link2 className="h-10 w-10" />} title="No accounts connected" description="Connect a Facebook Page or LinkedIn account to start publishing." /></Card>
       )}

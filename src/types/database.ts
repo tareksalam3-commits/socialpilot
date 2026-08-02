@@ -6,6 +6,7 @@ export type Workspace = {
   timezone: string;
   language: string;
   owner_id: string;
+  auto_publish_enabled: boolean;
   created_at: string;
   updated_at: string;
 };

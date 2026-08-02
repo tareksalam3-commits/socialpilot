@@ -1,3 +1,5 @@
+import { useLanguage } from '@/providers/LanguageProvider';
+
 export function Spinner({ className = '' }: { className?: string }) {
   return (
     <svg className={`h-5 w-5 animate-spin ${className}`} viewBox="0 0 24 24" fill="none">
@@ -7,11 +9,12 @@ export function Spinner({ className = '' }: { className?: string }) {
   );
 }
 
-export function LoadingScreen({ label = 'Loading…' }: { label?: string }) {
+export function LoadingScreen({ label }: { label?: string }) {
+  const { t } = useLanguage();
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-slate-500 dark:text-slate-400">
       <Spinner className="h-8 w-8 text-slate-400" />
-      <p className="text-sm">{label}</p>
+      <p className="text-sm">{label ?? t('common.loading')}</p>
     </div>
   );
 }

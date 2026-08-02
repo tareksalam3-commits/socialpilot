@@ -67,14 +67,34 @@ export const accountRepository = {
     if (error) throw error;
   },
 
-  /** Forces an immediate token refresh for a Facebook/Instagram account
-   * (they don't wait for the nightly cron sweep). Not applicable to
-   * LinkedIn, which uses a fixed-length token with no silent refresh. */
-  async refreshMetaToken(id: string): Promise<void> {
-    const { data, error } = await supabase.functions.invoke<{ refreshed: boolean }>('meta-token-refresh', {
+  /** Forces an immediate token refresh for a connected account instead of
+   * waiting for the cron sweep. Facebook/Instagram Page tokens always
+   * support this; LinkedIn accounts do too as long as a refresh_token was
+   * captured at connect time (requires LinkedIn's "Programmatic Refresh
+   * Tokens" product) — otherwise the account needs reconnecting via OAuth. */
+  async refreshToken(id: string, platform: string): Promise<void> {
+    const fn = platform === 'linkedin' || platform === 'linkedin_page' ? 'linkedin-token-refresh' : 'meta-token-refresh';
+    const { data, error } = await supabase.functions.invoke<{ refreshed: boolean }>(fn, {
       body: { account_id: id },
     });
     if (error || !data?.refreshed) throw new Error(error?.message ?? 'Could not refresh this token');
+  },
+
+  /** Re-verifies a single account against the platform (token still valid?
+   * handle changed?) and updates its sync/health status accordingly. */
+  async sync(id: string): Promise<void> {
+    const { data, error } = await supabase.functions.invoke<{ synced: number }>('account-sync', {
+      body: { account_id: id },
+    });
+    if (error || !data) throw new Error(error?.message ?? 'Could not sync this account');
+  },
+
+  /** Re-verifies every connected account in the workspace in one pass. */
+  async syncAll(workspaceId: string): Promise<void> {
+    const { data, error } = await supabase.functions.invoke<{ synced: number }>('account-sync', {
+      body: { workspace_id: workspaceId },
+    });
+    if (error || !data) throw new Error(error?.message ?? 'Could not sync accounts');
   },
 
   async startMetaOAuth(workspaceId: string): Promise<string> {

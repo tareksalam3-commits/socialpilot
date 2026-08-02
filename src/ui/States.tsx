@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useLanguage } from '@/providers/LanguageProvider';
 
 export type EmptyStateProps = {
   icon?: ReactNode;
@@ -24,17 +25,18 @@ export type ErrorStateProps = {
   onRetry?: () => void;
 };
 
-export function ErrorState({ title = 'Something went wrong', description, onRetry }: ErrorStateProps) {
+export function ErrorState({ title, description, onRetry }: ErrorStateProps) {
+  const { t } = useLanguage();
   return (
     <div className="flex flex-col items-center justify-center rounded-lg border border-rose-200 bg-rose-50 py-12 text-center dark:border-rose-900 dark:bg-rose-950/50">
-      <h3 className="text-sm font-semibold text-rose-900 dark:text-rose-200">{title}</h3>
+      <h3 className="text-sm font-semibold text-rose-900 dark:text-rose-200">{title ?? t('common.error.title')}</h3>
       {description && <p className="mt-1 max-w-sm text-sm text-rose-700 dark:text-rose-300">{description}</p>}
       {onRetry && (
         <button
           onClick={onRetry}
           className="mt-4 rounded-md border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-700 transition hover:bg-rose-100 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-900"
         >
-          Try again
+          {t('common.tryAgain')}
         </button>
       )}
     </div>

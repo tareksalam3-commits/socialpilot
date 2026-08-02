@@ -22,10 +22,10 @@ export function RegisterPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const nameErr = validateRequired(fullName, 'Full name');
-    const emailErr = validateEmail(email);
-    const passErr = validatePassword(password);
-    const matchErr = validateMatch(password, confirm, 'Passwords');
+    const nameErr = validateRequired(fullName, t('auth.fullName'), t);
+    const emailErr = validateEmail(email, t);
+    const passErr = validatePassword(password, t);
+    const matchErr = validateMatch(password, confirm, t('auth.confirmPassword'), t);
     setErrors({
       fullName: nameErr.error,
       email: emailErr.error,
@@ -65,7 +65,7 @@ export function RegisterPage() {
           label={t('auth.fullName')}
           name="fullName"
           autoComplete="name"
-          placeholder="Jane Doe"
+          placeholder={t('auth.fullNamePlaceholder')}
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
           error={errors.fullName}
@@ -85,7 +85,7 @@ export function RegisterPage() {
           type="password"
           name="password"
           autoComplete="new-password"
-          placeholder="At least 6 characters"
+          placeholder={t('auth.passwordMinPlaceholder')}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           error={errors.password}
@@ -95,7 +95,7 @@ export function RegisterPage() {
           type="password"
           name="confirm"
           autoComplete="new-password"
-          placeholder="Re-enter your password"
+          placeholder={t('auth.confirmPasswordPlaceholder')}
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           error={errors.confirm}

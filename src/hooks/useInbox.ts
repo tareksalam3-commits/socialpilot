@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/providers/AuthProvider';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { supabase } from '@/services/supabase';
 import { inboxRepository, notificationRepository } from '@/repositories/inboxRepository';
 import type { InboxConversation, InboxMessage, Notification } from '@/types/social';
 
@@ -111,22 +112,29 @@ export function useInbox() {
   };
 }
 
+const NOTIFICATIONS_PAGE_SIZE = 50;
+
 export function useNotifications() {
   const { user } = useAuth();
   const { workspace } = useWorkspace();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   const load = useCallback(async () => {
     if (!user) return;
     try {
       setLoading(true);
-      const data = await notificationRepository.list(user.id);
+      setError(null);
+      const data = await notificationRepository.list(user.id, NOTIFICATIONS_PAGE_SIZE, 0);
       setNotifications(data);
-      setUnreadCount(data.filter((n) => !n.read).length);
-    } catch {
-      // best-effort
+      setHasMore(data.length === NOTIFICATIONS_PAGE_SIZE);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load notifications');
     } finally {
       setLoading(false);
     }
@@ -136,31 +144,76 @@ export function useNotifications() {
     load();
   }, [load]);
 
+  // Live updates via Supabase Realtime (postgres_changes on the `notifications` table).
   useEffect(() => {
     if (!user) return;
-    const sub = notificationRepository.subscribe(user.id, (payload) => {
+    const channel = notificationRepository.subscribe(user.id, (payload) => {
       if (payload.eventType === 'INSERT') {
-        setNotifications((prev) => [payload.new, ...prev]);
-        setUnreadCount((prev) => prev + 1);
+        setNotifications((prev) => (prev.some((n) => n.id === payload.new.id) ? prev : [payload.new, ...prev]));
+      } else if (payload.eventType === 'UPDATE') {
+        setNotifications((prev) => prev.map((n) => (n.id === payload.new.id ? payload.new : n)));
+      } else if (payload.eventType === 'DELETE') {
+        setNotifications((prev) => prev.filter((n) => n.id !== payload.old.id));
       }
     });
+    // Fully deregister the channel on unmount so React 18 StrictMode's
+    // mount/unmount/remount in dev doesn't leave duplicate subscriptions
+    // (channel.unsubscribe() alone closes the socket topic but keeps the
+    // channel tracked on the client, which can cause missed/duplicate events).
     return () => {
-      supabaseRemoveSubscription(sub);
+      supabase.removeChannel(channel);
     };
   }, [user]);
 
+  const loadMore = useCallback(async () => {
+    if (!user || loadingMore || !hasMore) return;
+    try {
+      setLoadingMore(true);
+      const data = await notificationRepository.list(user.id, NOTIFICATIONS_PAGE_SIZE, notifications.length);
+      setNotifications((prev) => {
+        const existingIds = new Set(prev.map((n) => n.id));
+        return [...prev, ...data.filter((n) => !existingIds.has(n.id))];
+      });
+      setHasMore(data.length === NOTIFICATIONS_PAGE_SIZE);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load more notifications');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [user, notifications.length, loadingMore, hasMore]);
+
   const markRead = useCallback(async (id: string) => {
-    await notificationRepository.markRead(id);
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
-    setUnreadCount((prev) => Math.max(0, prev - 1));
+    try {
+      await notificationRepository.markRead(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to mark notification as read');
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: false } : n)));
+    }
   }, []);
 
   const markAllRead = useCallback(async () => {
     if (!user) return;
-    await notificationRepository.markAllRead(user.id);
+    const previous = notifications;
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    setUnreadCount(0);
-  }, [user]);
+    try {
+      await notificationRepository.markAllRead(user.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to mark all notifications as read');
+      setNotifications(previous);
+    }
+  }, [user, notifications]);
+
+  const deleteNotification = useCallback(async (id: string) => {
+    const previous = notifications;
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    try {
+      await notificationRepository.remove(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete notification');
+      setNotifications(previous);
+    }
+  }, [notifications]);
 
   const create = useCallback(
     async (type: Notification['type'], title: string, message?: string) => {
@@ -170,9 +223,18 @@ export function useNotifications() {
     [workspace, user],
   );
 
-  return { notifications, loading, unreadCount, markRead, markAllRead, create, reload: load };
-}
-
-function supabaseRemoveSubscription(sub: { unsubscribe: () => void }) {
-  sub.unsubscribe();
+  return {
+    notifications,
+    loading,
+    loadingMore,
+    hasMore,
+    error,
+    unreadCount,
+    markRead,
+    markAllRead,
+    deleteNotification,
+    loadMore,
+    create,
+    reload: load,
+  };
 }

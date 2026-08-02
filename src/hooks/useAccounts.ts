@@ -47,10 +47,10 @@ export function useAccounts() {
 
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
-  const refreshToken = useCallback(async (id: string) => {
+  const refreshToken = useCallback(async (id: string, platform: string) => {
     setRefreshingId(id);
     try {
-      await accountRepository.refreshMetaToken(id);
+      await accountRepository.refreshToken(id, platform);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to refresh token');
@@ -60,5 +60,36 @@ export function useAccounts() {
     }
   }, [load]);
 
-  return { accounts, loading, error, disconnect, remove, reload: load, refreshToken, refreshingId };
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+
+  const syncAccount = useCallback(async (id: string) => {
+    setSyncingId(id);
+    try {
+      await accountRepository.sync(id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to sync account');
+      throw e;
+    } finally {
+      setSyncingId(null);
+    }
+  }, [load]);
+
+  const [syncingAll, setSyncingAll] = useState(false);
+
+  const syncAll = useCallback(async () => {
+    if (!workspace) return;
+    setSyncingAll(true);
+    try {
+      await accountRepository.syncAll(workspace.id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to sync accounts');
+      throw e;
+    } finally {
+      setSyncingAll(false);
+    }
+  }, [workspace, load]);
+
+  return { accounts, loading, error, disconnect, remove, reload: load, refreshToken, refreshingId, syncAccount, syncingId, syncAll, syncingAll };
 }

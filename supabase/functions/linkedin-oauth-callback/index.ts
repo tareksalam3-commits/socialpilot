@@ -7,6 +7,10 @@ type LinkedInOption = {
   name: string;
   access_token: string;
   expires_at: string;
+  // Only present when LinkedIn's "Programmatic Refresh Tokens" product is
+  // enabled on the app — lets us silently refresh instead of forcing the
+  // user back through the OAuth dialog every ~60 days.
+  refresh_token?: string;
 };
 
 async function exchangeCode(clientId: string, clientSecret: string, redirectUri: string, code: string) {
@@ -23,7 +27,7 @@ async function exchangeCode(clientId: string, clientSecret: string, redirectUri:
     body,
   });
   if (!res.ok) throw new Error(`token exchange failed: ${await res.text()}`);
-  return (await res.json()) as { access_token: string; expires_in: number; refresh_token?: string };
+  return (await res.json()) as { access_token: string; expires_in: number; refresh_token?: string; refresh_token_expires_in?: number };
 }
 
 async function fetchProfile(accessToken: string) {
@@ -96,6 +100,8 @@ Deno.serve(async (req: Request) => {
     const profile = await fetchProfile(token.access_token);
     const organizations = await fetchAdminOrganizations(token.access_token);
 
+    // Organizations post through the same 3-legged user token as the
+    // personal profile, so the same refresh_token applies to both.
     const options: LinkedInOption[] = [
       {
         type: 'personal',
@@ -103,8 +109,9 @@ Deno.serve(async (req: Request) => {
         name: profile.name,
         access_token: token.access_token,
         expires_at: expiresAt,
+        refresh_token: token.refresh_token,
       },
-      ...organizations.map((org) => ({ ...org, expires_at: expiresAt })),
+      ...organizations.map((org) => ({ ...org, expires_at: expiresAt, refresh_token: token.refresh_token })),
     ];
 
     const { data: selection, error } = await supabase

@@ -12,6 +12,76 @@ export async function getAccountForTarget(supabase: SupabaseClient, accountId: s
   return { provider_account_id: account.provider_account_id as string | null, access_token: (tokens as { access_token: string | null }).access_token };
 }
 
+/** Retries a single failed target immediately (used by the cron scheduler
+ * for due retries, and by the automation-control edge function for a
+ * manual "Retry" click). Mutates the target row and appends a publishing
+ * log entry; flips the parent post to 'published' if this was the last
+ * outstanding target. Returns true on success. */
+export async function retryTarget(
+  supabase: SupabaseClient,
+  target: Record<string, unknown>,
+  post: Record<string, unknown>,
+  callerId: string | null,
+): Promise<boolean> {
+  const workspaceId = post.workspace_id as string;
+  const targetId = target.id as string;
+
+  await log(supabase, {
+    workspace_id: workspaceId,
+    post_id: post.id as string,
+    target_id: targetId,
+    platform: target.platform as string,
+    event: 'attempt',
+    message: `Retry #${((target.retry_count as number) ?? 0) + 1}`,
+  });
+
+  try {
+    if (!target.account_id) throw new Error('No connected account for this platform');
+    const account = await getAccountForTarget(supabase, target.account_id as string, callerId);
+    if (!account?.access_token) throw new Error('No access token for this account');
+
+    const externalId = await publishToPlatform(
+      target.platform as string,
+      account.access_token,
+      account.provider_account_id,
+      post.content as string,
+      post.media_urls as string[],
+    );
+
+    await supabase.from('post_platform_targets').update({
+      status: 'published',
+      external_id: externalId,
+      published_at: new Date().toISOString(),
+      error_message: null,
+      next_retry_at: null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', targetId);
+    await log(supabase, { workspace_id: workspaceId, post_id: post.id as string, target_id: targetId, platform: target.platform as string, event: 'success' });
+
+    const { data: siblings } = await supabase.from('post_platform_targets').select('status').eq('post_id', post.id as string);
+    if (siblings?.every((s) => s.status === 'published')) {
+      await supabase.from('posts').update({ status: 'published', published_at: new Date().toISOString(), error_message: null, updated_at: new Date().toISOString() }).eq('id', post.id as string);
+    }
+    return true;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Unknown error';
+    const retryCount = (target.retry_count as number) ?? 0;
+    const maxRetries = (target.max_retries as number) ?? 3;
+    const canRetry = retryCount < maxRetries;
+
+    await supabase.from('post_platform_targets').update({
+      status: 'failed',
+      error_message: message,
+      retry_count: canRetry ? retryCount + 1 : retryCount,
+      next_retry_at: canRetry ? new Date(Date.now() + nextRetryDelayMs(retryCount)).toISOString() : null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', targetId);
+
+    await log(supabase, { workspace_id: workspaceId, post_id: post.id as string, target_id: targetId, platform: target.platform as string, event: canRetry ? 'retry_scheduled' : 'gave_up', message });
+    return false;
+  }
+}
+
 /** Publishes every pending/failed-but-retriable target of a post. Shared by
  * the manual "Publish Now" action (this function, with a real caller) and
  * the cron scheduler (run-scheduler, which passes callerId=null and relies
@@ -40,6 +110,12 @@ export async function publishPost(supabase: SupabaseClient, post: Record<string,
   let allSuccess = true;
 
   for (const target of allTargets ?? []) {
+    // Never re-publish a target that already succeeded — publishPost() is reused
+    // for the "Publish Now" retry action on a partially-failed post, so without
+    // this guard, retrying the one failed platform would duplicate-post to every
+    // platform that already succeeded.
+    if (target.status === 'published') continue;
+
     await log(supabase, { workspace_id: workspaceId, post_id: postId, target_id: target.id, platform: target.platform, event: 'attempt' });
     try {
       if (!target.account_id) throw new Error('No connected account for this platform');

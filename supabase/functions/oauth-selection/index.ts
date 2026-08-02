@@ -1,7 +1,7 @@
 import { corsHeaders, errorResponse, getCallerId, jsonResponse, serviceClient } from '../_shared/oauth.ts';
 
 type MetaOption = { id: string; name: string; access_token: string; instagram: { id: string; username: string } | null; expires_at: string | null };
-type LinkedInOption = { type: 'personal' | 'organization'; id: string; name: string; access_token: string; expires_at: string };
+type LinkedInOption = { type: 'personal' | 'organization'; id: string; name: string; access_token: string; expires_at: string; refresh_token?: string };
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
@@ -80,6 +80,7 @@ Deno.serve(async (req: Request) => {
           handle: opt.name,
           provider_account_id: opt.id,
           access_token_encrypted: opt.access_token,
+          refresh_token_encrypted: opt.refresh_token ?? null,
           token_expires_at: opt.expires_at || null,
           status: 'connected',
           sync_status: 'synced',

@@ -1,8 +1,9 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { useNotifications } from '@/hooks/useInbox';
+import { NotificationCenter } from '@/features/notifications/NotificationCenter';
 import {
   BarChart3,
   Bell as BellIcon,
+  Bot,
   CalendarClock,
   CalendarDays,
   ChevronLeft,
@@ -49,6 +50,7 @@ const navSections = [
       { to: '/app/calendar', labelKey: 'nav.calendar', icon: CalendarDays },
       { to: '/app/media', labelKey: 'nav.mediaLibrary', icon: ImageIcon },
       { to: '/app/inbox', labelKey: 'nav.inbox', icon: InboxIcon },
+      { to: '/app/automation', labelKey: 'nav.automation', icon: Bot },
     ],
   },
   {
@@ -104,7 +106,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
         <button
           onClick={() => setCollapsed((v) => !v)}
           className="hidden rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 lg:block"
-          aria-label="Toggle sidebar"
+          aria-label={t('sidebar.toggle')}
         >
           {(collapsed && dir === 'ltr') || (!collapsed && dir === 'rtl') ? (
             <ChevronRight className="h-4 w-4" />
@@ -115,7 +117,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
         <button
           onClick={() => setMobileOpen(false)}
           className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 lg:hidden"
-          aria-label="Close menu"
+          aria-label={t('sidebar.closeMenu')}
         >
           <XIcon className="h-5 w-5" />
         </button>
@@ -215,7 +217,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             <button
               onClick={() => setMobileOpen(true)}
               className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 lg:hidden"
-              aria-label="Open menu"
+              aria-label={t('sidebar.openMenu')}
             >
               <Menu className="h-5 w-5" />
             </button>
@@ -229,7 +231,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-3">
-            <NotificationBell />
+            <NotificationCenter />
             <div className="hidden text-right md:block">
               <p className="text-sm font-medium text-slate-900 dark:text-white">
                 {profile?.full_name ?? 'User'}
@@ -247,13 +249,3 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   );
 }
 
-function NotificationBell() {
-  const { unreadCount } = useNotifications();
-  const navigate = useNavigate();
-  return (
-    <button onClick={() => navigate('/app/notifications')} className="relative rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200" aria-label="Notifications">
-      <BellIcon className="h-5 w-5" />
-      {unreadCount > 0 && <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">{unreadCount > 9 ? '9+' : unreadCount}</span>}
-    </button>
-  );
-}

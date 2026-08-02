@@ -14,9 +14,10 @@ export const dashboardRepository = {
 
   async getScheduledPosts(workspaceId: string): Promise<ScheduledPost[]> {
     const { data, error } = await supabase
-      .from('scheduled_posts')
+      .from('posts')
       .select('*')
       .eq('workspace_id', workspaceId)
+      .eq('status', 'scheduled')
       .order('created_at', { ascending: false });
     if (error) throw error;
     return (data ?? []) as ScheduledPost[];
@@ -34,7 +35,7 @@ export const dashboardRepository = {
 
   async getRecentActivity(workspaceId: string, limit = 8): Promise<Activity[]> {
     const { data, error } = await supabase
-      .from('activity')
+      .from('activities')
       .select('*')
       .eq('workspace_id', workspaceId)
       .order('created_at', { ascending: false })

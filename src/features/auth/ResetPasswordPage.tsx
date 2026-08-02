@@ -19,8 +19,8 @@ export function ResetPasswordPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const passErr = validatePassword(password);
-    const matchErr = validateMatch(password, confirm, 'Passwords');
+    const passErr = validatePassword(password, t);
+    const matchErr = validateMatch(password, confirm, t('auth.resetPassword.confirmNewPassword'), t);
     setErrors({ password: passErr.error, confirm: matchErr.error });
     if (!passErr.valid || !matchErr.valid) return;
 
@@ -52,7 +52,7 @@ export function ResetPasswordPage() {
           type="password"
           name="password"
           autoComplete="new-password"
-          placeholder="At least 6 characters"
+          placeholder={t('auth.passwordMinPlaceholder')}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           error={errors.password}
@@ -62,7 +62,7 @@ export function ResetPasswordPage() {
           type="password"
           name="confirm"
           autoComplete="new-password"
-          placeholder="Re-enter your password"
+          placeholder={t('auth.confirmPasswordPlaceholder')}
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           error={errors.confirm}

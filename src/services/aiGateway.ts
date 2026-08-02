@@ -81,29 +81,6 @@ export const aiGateway = {
     };
   },
 
-  async stream(opts: GenerateOptions): Promise<ReadableStream<Uint8Array>> {
-    const res = await fetch(`${FUNCTION_URL}?action=chat`, {
-      method: 'POST',
-      headers: await getAuthHeaders(),
-      body: JSON.stringify({
-        workspace_id: opts.workspaceId,
-        messages: opts.messages,
-        model: opts.model,
-        temperature: opts.temperature,
-        max_tokens: opts.maxTokens,
-        stream: true,
-        free_only: opts.freeOnly,
-        brand_voice: opts.brandVoice,
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(err.error ?? `Request failed (${res.status})`);
-    }
-    if (!res.body) throw new Error('No response stream');
-    return res.body;
-  },
-
   async listModels(workspaceId: string): Promise<{ models: ModelInfo[]; free_count: number; total_count: number }> {
     const res = await fetch(`${FUNCTION_URL}?action=models`, {
       method: 'POST',
