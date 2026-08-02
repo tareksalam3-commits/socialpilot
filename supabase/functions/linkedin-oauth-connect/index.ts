@@ -9,9 +9,6 @@ const LINKEDIN_SCOPES = [
   'profile',
   'email',
   'w_member_social',
-  'r_organization_social',
-  'w_organization_social',
-  'rw_organization_admin',
 ].join(' ');
 
 Deno.serve(async (req: Request) => {
