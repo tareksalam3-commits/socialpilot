@@ -116,11 +116,18 @@ async function waitForContainerReady(containerId: string, accessToken: string, m
   throw new Error('Instagram media container timed out processing');
 }
 
-export async function publishToInstagram(accessToken: string, content: string, mediaUrls: string[]): Promise<string> {
+/** Instagram Graph API has no "/me" alias for content endpoints — every
+ * container/publish call must be scoped to the IG Business Account ID
+ * explicitly (`/{ig-user-id}/media`, `/{ig-user-id}/media_publish`). That ID
+ * is what's stored as provider_account_id for Instagram connected accounts
+ * (see oauth-selection, which sets it from the Page's linked
+ * instagram_business_account.id at connect time). */
+export async function publishToInstagram(accessToken: string, igUserId: string, content: string, mediaUrls: string[]): Promise<string> {
+  if (!igUserId) throw new Error('Missing Instagram Business Account ID for this account');
   if (mediaUrls.length === 0) throw new Error('Instagram requires at least one image or video');
   const video = isVideoUrl(mediaUrls[0]);
 
-  const containerRes = await fetch(`${GRAPH}/me/media`, {
+  const containerRes = await fetch(`${GRAPH}/${igUserId}/media`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(
@@ -134,7 +141,7 @@ export async function publishToInstagram(accessToken: string, content: string, m
 
   if (video) await waitForContainerReady(container.id, accessToken);
 
-  const publishRes = await fetch(`${GRAPH}/me/media_publish`, {
+  const publishRes = await fetch(`${GRAPH}/${igUserId}/media_publish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ creation_id: container.id, access_token: accessToken }),
@@ -151,7 +158,7 @@ export async function publishToPlatform(
   mediaUrls: string[],
 ): Promise<string> {
   if (platform === 'facebook') return publishToFacebook(accessToken, content, mediaUrls);
-  if (platform === 'instagram') return publishToInstagram(accessToken, content, mediaUrls);
+  if (platform === 'instagram') return publishToInstagram(accessToken, providerAccountId ?? '', content, mediaUrls);
   if (platform === 'linkedin' || platform === 'linkedin_page') {
     if (!providerAccountId) throw new Error('Missing LinkedIn author URN for this account');
     return publishToLinkedIn(accessToken, linkedInAuthorUrn(providerAccountId), content, mediaUrls);
