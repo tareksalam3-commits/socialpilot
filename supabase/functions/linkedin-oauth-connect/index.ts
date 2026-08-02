@@ -1,4 +1,5 @@
 import { corsHeaders, errorResponse, getCallerId, jsonResponse, randomState, serviceClient } from '../_shared/oauth.ts';
+import { getCredential } from '../_shared/credentials.ts';
 
 // `r_organization_social`/`w_organization_social`/`rw_organization_admin` require
 // LinkedIn's Community Management API product to be approved on the app;
@@ -17,11 +18,11 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
   if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
 
-  const clientId = Deno.env.get('LINKEDIN_CLIENT_ID');
   const functionsUrl = Deno.env.get('SUPABASE_URL')!.replace('.supabase.co', '.supabase.co/functions/v1');
-  if (!clientId) return errorResponse('LINKEDIN_CLIENT_ID is not configured', 500);
-
   const supabase = serviceClient();
+  const clientId = await getCredential(supabase, 'linkedin_client_id');
+  if (!clientId) return errorResponse('LinkedIn Client ID is not configured. Set it in Settings > Integrations.', 500);
+
   const callerId = await getCallerId(supabase, req);
   if (!callerId) return errorResponse('Unauthorized', 401);
 

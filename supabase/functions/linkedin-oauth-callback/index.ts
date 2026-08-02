@@ -1,4 +1,5 @@
 import { redirectToApp, serviceClient } from '../_shared/oauth.ts';
+import { getCredential } from '../_shared/credentials.ts';
 
 type LinkedInOption = {
   type: 'personal' | 'organization';
@@ -67,23 +68,22 @@ async function fetchAdminOrganizations(accessToken: string): Promise<LinkedInOpt
 }
 
 Deno.serve(async (req: Request) => {
+  const supabase = serviceClient();
   const url = new URL(req.url);
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   const oauthError = url.searchParams.get('error_description') ?? url.searchParams.get('error');
 
-  if (oauthError) return redirectToApp({ platform: 'linkedin', error: oauthError });
-  if (!code || !state) return redirectToApp({ platform: 'linkedin', error: 'missing_code_or_state' });
+  if (oauthError) return await redirectToApp(supabase, { platform: 'linkedin', error: oauthError });
+  if (!code || !state) return await redirectToApp(supabase, { platform: 'linkedin', error: 'missing_code_or_state' });
 
-  const clientId = Deno.env.get('LINKEDIN_CLIENT_ID');
-  const clientSecret = Deno.env.get('LINKEDIN_CLIENT_SECRET');
-  if (!clientId || !clientSecret) return redirectToApp({ platform: 'linkedin', error: 'server_not_configured' });
-
-  const supabase = serviceClient();
+  const clientId = await getCredential(supabase, 'linkedin_client_id');
+  const clientSecret = await getCredential(supabase, 'linkedin_client_secret');
+  if (!clientId || !clientSecret) return await redirectToApp(supabase, { platform: 'linkedin', error: 'server_not_configured' });
 
   const { data: stateRow } = await supabase.from('oauth_states').select('*').eq('state', state).eq('platform', 'linkedin').maybeSingle();
   if (!stateRow || new Date(stateRow.expires_at as string) < new Date()) {
-    return redirectToApp({ platform: 'linkedin', error: 'invalid_or_expired_state' });
+    return await redirectToApp(supabase, { platform: 'linkedin', error: 'invalid_or_expired_state' });
   }
   await supabase.from('oauth_states').delete().eq('id', stateRow.id as string);
 
@@ -119,8 +119,8 @@ Deno.serve(async (req: Request) => {
       .single();
     if (error || !selection) throw new Error('could not store selection');
 
-    return redirectToApp({ platform: 'linkedin', selection: selection.id as string });
+    return await redirectToApp(supabase, { platform: 'linkedin', selection: selection.id as string });
   } catch (e) {
-    return redirectToApp({ platform: 'linkedin', error: e instanceof Error ? e.message : 'unknown_error' });
+    return await redirectToApp(supabase, { platform: 'linkedin', error: e instanceof Error ? e.message : 'unknown_error' });
   }
 });

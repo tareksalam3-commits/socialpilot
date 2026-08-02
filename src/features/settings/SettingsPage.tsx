@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Eye, EyeOff, Globe, Key, Monitor, Moon, Shield, Sun, User as UserIcon, Wrench, Send, Bell } from 'lucide-react';
+import { Eye, EyeOff, Globe, Key, Monitor, Moon, Plug, Shield, Sun, User as UserIcon, Wrench, Send, Bell } from 'lucide-react';
 import { useAuth } from '@/providers/AuthProvider';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useToast } from '@/providers/ToastProvider';
@@ -10,12 +10,13 @@ import { Badge, Button, Card, Input, Tabs } from '@/ui';
 import { profileRepository } from '@/repositories/profileRepository';
 import { workspaceRepository } from '@/repositories/workspaceRepository';
 import { apiKeyRepository } from '@/repositories/apiKeyRepository';
+import { platformCredentialsRepository, type CredentialKey, type CredentialStatus } from '@/repositories/platformCredentialsRepository';
 import { supabase } from '@/services/supabase';
 import { validateRequired } from '@/utils/validation';
 import type { ApiKey } from '@/types/database';
 import { formatDate, initials } from '@/utils/format';
 
-type TabId = 'general' | 'profile' | 'workspace' | 'appearance' | 'language' | 'security' | 'apikeys' | 'publishing' | 'notifications';
+type TabId = 'general' | 'profile' | 'workspace' | 'appearance' | 'language' | 'security' | 'apikeys' | 'integrations' | 'publishing' | 'notifications';
 
 export function SettingsPage() {
   const [tab, setTab] = useState<TabId>('general');
@@ -28,6 +29,7 @@ export function SettingsPage() {
     { id: 'appearance' as TabId, label: t('settings.tab.appearance'), icon: <Monitor className="h-4 w-4" /> },
     { id: 'language' as TabId, label: t('settings.tab.language'), icon: <Globe className="h-4 w-4" /> },
     { id: 'publishing' as TabId, label: t('settings.tab.publishing'), icon: <Send className="h-4 w-4" /> },
+    { id: 'integrations' as TabId, label: t('settings.tab.integrations'), icon: <Plug className="h-4 w-4" /> },
     { id: 'notifications' as TabId, label: t('settings.tab.notifications'), icon: <Bell className="h-4 w-4" /> },
     { id: 'security' as TabId, label: t('settings.tab.security'), icon: <Shield className="h-4 w-4" /> },
     { id: 'apikeys' as TabId, label: t('settings.tab.apikeys'), icon: <Key className="h-4 w-4" /> },
@@ -48,6 +50,7 @@ export function SettingsPage() {
         {tab === 'language' && <LanguageTab />}
         {tab === 'security' && <SecurityTab />}
         {tab === 'apikeys' && <ApiKeysTab />}
+        {tab === 'integrations' && <IntegrationsTab />}
       </div>
     </div>
   );
@@ -510,6 +513,139 @@ function ApiKeysTab() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+const CREDENTIAL_FIELDS: { key: CredentialKey; label: string; placeholder: string; secret: boolean; group: 'meta' | 'linkedin' | 'general' }[] = [
+  { key: 'meta_app_id', label: 'Meta App ID', placeholder: 'e.g. 1234567890123456', secret: false, group: 'meta' },
+  { key: 'meta_app_secret', label: 'Meta App Secret', placeholder: 'Paste the app secret from Meta for Developers', secret: true, group: 'meta' },
+  { key: 'linkedin_client_id', label: 'LinkedIn Client ID', placeholder: 'e.g. 86abcxyz12345', secret: false, group: 'linkedin' },
+  { key: 'linkedin_client_secret', label: 'LinkedIn Client Secret', placeholder: 'Paste the client secret from the LinkedIn app', secret: true, group: 'linkedin' },
+  { key: 'app_url', label: 'App URL', placeholder: 'https://your-app-domain.com', secret: false, group: 'general' },
+];
+
+function IntegrationsTab() {
+  const { push } = useToast();
+  const [status, setStatus] = useState<Record<CredentialKey, CredentialStatus> | null>(null);
+  const [values, setValues] = useState<Partial<Record<CredentialKey, string>>>({});
+  const [reveal, setReveal] = useState<Partial<Record<CredentialKey, boolean>>>({});
+  const [loading, setLoading] = useState(true);
+  const [savingGroup, setSavingGroup] = useState<'meta' | 'linkedin' | 'general' | null>(null);
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      const data = await platformCredentialsRepository.list();
+      setStatus(data);
+      setValues((prev) => ({ ...prev, app_url: data.app_url?.value ?? prev.app_url ?? '' }));
+    } catch (e) {
+      push({ title: 'Could not load integration status', description: e instanceof Error ? e.message : '', variant: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const saveGroup = async (group: 'meta' | 'linkedin' | 'general') => {
+    const fields = CREDENTIAL_FIELDS.filter((f) => f.group === group);
+    const payload: Partial<Record<CredentialKey, string>> = {};
+    for (const f of fields) {
+      const v = values[f.key]?.trim();
+      if (v) payload[f.key] = v;
+    }
+    if (Object.keys(payload).length === 0) {
+      push({ title: 'Enter at least one value to save', variant: 'error' });
+      return;
+    }
+    setSavingGroup(group);
+    try {
+      await platformCredentialsRepository.save(payload);
+      push({ title: 'Saved to Supabase', description: 'Connect Accounts will use these credentials right away.', variant: 'success' });
+      setValues((prev) => {
+        const next = { ...prev };
+        for (const f of fields) if (f.secret) next[f.key] = '';
+        return next;
+      });
+      await load();
+    } catch (e) {
+      push({ title: 'Could not save credentials', description: e instanceof Error ? e.message : '', variant: 'error' });
+    } finally {
+      setSavingGroup(null);
+    }
+  };
+
+  const renderField = (f: (typeof CREDENTIAL_FIELDS)[number]) => {
+    const configured = status?.[f.key]?.configured;
+    return (
+      <div key={f.key} className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">{f.label}</label>
+          {configured && <Badge variant="success">Configured</Badge>}
+        </div>
+        <div className="relative">
+          <Input
+            type={f.secret && !reveal[f.key] ? 'password' : 'text'}
+            value={values[f.key] ?? ''}
+            onChange={(e) => setValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+            placeholder={configured ? '•••••••••••• (already set — enter a new value to replace it)' : f.placeholder}
+            className={f.secret ? 'pr-10' : undefined}
+          />
+          {f.secret && (
+            <button
+              type="button"
+              onClick={() => setReveal((prev) => ({ ...prev, [f.key]: !prev[f.key] }))}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            >
+              {reveal[f.key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card
+        title="Meta (Facebook & Instagram)"
+        description="Paste your Meta app credentials — they're saved straight into Supabase and used immediately by Connect Accounts, no redeploy needed."
+      >
+        {loading ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+        ) : (
+          <div className="space-y-4">
+            {CREDENTIAL_FIELDS.filter((f) => f.group === 'meta').map(renderField)}
+            <Button onClick={() => saveGroup('meta')} loading={savingGroup === 'meta'}>Save Meta credentials</Button>
+          </div>
+        )}
+      </Card>
+
+      <Card title="LinkedIn" description="Paste your LinkedIn app credentials to enable LinkedIn OAuth and publishing.">
+        {loading ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+        ) : (
+          <div className="space-y-4">
+            {CREDENTIAL_FIELDS.filter((f) => f.group === 'linkedin').map(renderField)}
+            <Button onClick={() => saveGroup('linkedin')} loading={savingGroup === 'linkedin'}>Save LinkedIn credentials</Button>
+          </div>
+        )}
+      </Card>
+
+      <Card title="App URL" description="Where OAuth redirects send people back after connecting an account.">
+        {loading ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+        ) : (
+          <div className="space-y-4">
+            {CREDENTIAL_FIELDS.filter((f) => f.group === 'general').map(renderField)}
+            <Button onClick={() => saveGroup('general')} loading={savingGroup === 'general'}>Save</Button>
           </div>
         )}
       </Card>

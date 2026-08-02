@@ -32,7 +32,51 @@ export async function publishToFacebook(accessToken: string, content: string, me
   return (await res.json()).post_id as string;
 }
 
-export async function publishToLinkedIn(accessToken: string, authorUrn: string, content: string): Promise<string> {
+/** Registers an image upload with LinkedIn and returns the URL to PUT the
+ * image bytes to plus the asset URN to reference in the post. */
+async function registerLinkedInImageUpload(accessToken: string, authorUrn: string): Promise<{ uploadUrl: string; asset: string }> {
+  const res = await fetch('https://api.linkedin.com/v2/assets?action=registerUpload', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'X-Restli-Protocol-Version': '2.0.0' },
+    body: JSON.stringify({
+      registerUploadRequest: {
+        recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
+        owner: authorUrn,
+        serviceRelationships: [{ relationshipType: 'OWNER', identifier: 'urn:li:userGeneratedContent' }],
+      },
+    }),
+  });
+  if (!res.ok) throw new Error(`LinkedIn image registration: ${res.status} ${await res.text()}`);
+  const body = await res.json();
+  const uploadUrl = body.value.uploadMechanism['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest'].uploadUrl as string;
+  const asset = body.value.asset as string;
+  return { uploadUrl, asset };
+}
+
+async function uploadLinkedInImage(accessToken: string, authorUrn: string, imageUrl: string): Promise<string> {
+  const imageRes = await fetch(imageUrl);
+  if (!imageRes.ok) throw new Error(`Could not fetch image to upload to LinkedIn: ${imageRes.status}`);
+  const imageBytes = await imageRes.arrayBuffer();
+
+  const { uploadUrl, asset } = await registerLinkedInImageUpload(accessToken, authorUrn);
+
+  const putRes = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: imageBytes,
+  });
+  if (!putRes.ok) throw new Error(`LinkedIn image upload: ${putRes.status} ${await putRes.text()}`);
+
+  return asset;
+}
+
+export async function publishToLinkedIn(accessToken: string, authorUrn: string, content: string, mediaUrls: string[] = []): Promise<string> {
+  // LinkedIn only accepts images through UGC posts (no direct video support
+  // via this endpoint) — anything else in mediaUrls is skipped rather than
+  // failing the whole post.
+  const imageUrl = mediaUrls.find((u) => !isVideoUrl(u));
+  const asset = imageUrl ? await uploadLinkedInImage(accessToken, authorUrn, imageUrl) : null;
+
   const res = await fetch('https://api.linkedin.com/v2/ugcPosts', {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'X-Restli-Protocol-Version': '2.0.0' },
@@ -42,7 +86,8 @@ export async function publishToLinkedIn(accessToken: string, authorUrn: string, 
       specificContent: {
         'com.linkedin.ugc.PostContent': {
           shareCommentary: { text: content },
-          shareMediaCategory: 'NONE',
+          shareMediaCategory: asset ? 'IMAGE' : 'NONE',
+          ...(asset ? { media: [{ status: 'READY', media: asset }] } : {}),
         },
       },
       visibility: { 'com.linkedin.ugc.MemberConnectionVisibility': 'PUBLIC' },
@@ -109,7 +154,7 @@ export async function publishToPlatform(
   if (platform === 'instagram') return publishToInstagram(accessToken, content, mediaUrls);
   if (platform === 'linkedin' || platform === 'linkedin_page') {
     if (!providerAccountId) throw new Error('Missing LinkedIn author URN for this account');
-    return publishToLinkedIn(accessToken, linkedInAuthorUrn(providerAccountId), content);
+    return publishToLinkedIn(accessToken, linkedInAuthorUrn(providerAccountId), content, mediaUrls);
   }
   throw new Error(`Unsupported platform: ${platform}`);
 }

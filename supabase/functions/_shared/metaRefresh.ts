@@ -1,4 +1,5 @@
 import { SupabaseClient } from 'npm:@supabase/supabase-js@2.57.4';
+import { getCredential } from './credentials.ts';
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
 
@@ -39,11 +40,11 @@ export type MetaRefreshResult = {
  * omit it to sweep every Facebook Page account nearing expiry (used by
  * the cron scheduler). */
 export async function refreshMetaTokens(supabase: SupabaseClient, opts: { accountId?: string } = {}): Promise<MetaRefreshResult> {
-  const appId = Deno.env.get('META_APP_ID');
-  const appSecret = Deno.env.get('META_APP_SECRET');
+  const appId = await getCredential(supabase, 'meta_app_id');
+  const appSecret = await getCredential(supabase, 'meta_app_secret');
   const result: MetaRefreshResult = { refreshed: 0, failed: 0, details: [] };
   if (!appId || !appSecret) {
-    result.details.push({ account_id: opts.accountId ?? 'n/a', ok: false, error: 'META_APP_ID/META_APP_SECRET not configured' });
+    result.details.push({ account_id: opts.accountId ?? 'n/a', ok: false, error: 'Meta App ID/Secret not configured' });
     return result;
   }
 

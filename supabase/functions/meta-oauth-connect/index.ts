@@ -1,4 +1,5 @@
 import { corsHeaders, errorResponse, getCallerId, jsonResponse, randomState, serviceClient } from '../_shared/oauth.ts';
+import { getCredential } from '../_shared/credentials.ts';
 
 // Permissions needed to: list Pages, read/publish Page posts, and publish to
 // a linked Instagram Business account. `business_management` is required if
@@ -17,11 +18,11 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
   if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
 
-  const appId = Deno.env.get('META_APP_ID');
   const functionsUrl = Deno.env.get('SUPABASE_URL')!.replace('.supabase.co', '.supabase.co/functions/v1');
-  if (!appId) return errorResponse('META_APP_ID is not configured', 500);
-
   const supabase = serviceClient();
+  const appId = await getCredential(supabase, 'meta_app_id');
+  if (!appId) return errorResponse('Meta App ID is not configured. Set it in Settings > Integrations.', 500);
+
   const callerId = await getCallerId(supabase, req);
   if (!callerId) return errorResponse('Unauthorized', 401);
 

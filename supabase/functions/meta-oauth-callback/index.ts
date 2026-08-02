@@ -1,4 +1,5 @@
 import { redirectToApp, serviceClient } from '../_shared/oauth.ts';
+import { getCredential } from '../_shared/credentials.ts';
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
 
@@ -62,23 +63,22 @@ async function fetchPages(userToken: string, userTokenExpiresInSeconds: number |
 }
 
 Deno.serve(async (req: Request) => {
+  const supabase = serviceClient();
   const url = new URL(req.url);
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   const oauthError = url.searchParams.get('error_description') ?? url.searchParams.get('error');
 
-  if (oauthError) return redirectToApp({ platform: 'meta', error: oauthError });
-  if (!code || !state) return redirectToApp({ platform: 'meta', error: 'missing_code_or_state' });
+  if (oauthError) return await redirectToApp(supabase, { platform: 'meta', error: oauthError });
+  if (!code || !state) return await redirectToApp(supabase, { platform: 'meta', error: 'missing_code_or_state' });
 
-  const appId = Deno.env.get('META_APP_ID');
-  const appSecret = Deno.env.get('META_APP_SECRET');
-  if (!appId || !appSecret) return redirectToApp({ platform: 'meta', error: 'server_not_configured' });
-
-  const supabase = serviceClient();
+  const appId = await getCredential(supabase, 'meta_app_id');
+  const appSecret = await getCredential(supabase, 'meta_app_secret');
+  if (!appId || !appSecret) return await redirectToApp(supabase, { platform: 'meta', error: 'server_not_configured' });
 
   const { data: stateRow } = await supabase.from('oauth_states').select('*').eq('state', state).eq('platform', 'meta').maybeSingle();
   if (!stateRow || new Date(stateRow.expires_at as string) < new Date()) {
-    return redirectToApp({ platform: 'meta', error: 'invalid_or_expired_state' });
+    return await redirectToApp(supabase, { platform: 'meta', error: 'invalid_or_expired_state' });
   }
   await supabase.from('oauth_states').delete().eq('id', stateRow.id as string);
 
@@ -91,7 +91,7 @@ Deno.serve(async (req: Request) => {
     const pages = await fetchPages(longLived.access_token, longLived.expires_in);
 
     if (pages.length === 0) {
-      return redirectToApp({ platform: 'meta', error: 'no_pages_found' });
+      return await redirectToApp(supabase, { platform: 'meta', error: 'no_pages_found' });
     }
 
     const { data: selection, error } = await supabase
@@ -106,8 +106,8 @@ Deno.serve(async (req: Request) => {
       .single();
     if (error || !selection) throw new Error('could not store selection');
 
-    return redirectToApp({ platform: 'meta', selection: selection.id as string });
+    return await redirectToApp(supabase, { platform: 'meta', selection: selection.id as string });
   } catch (e) {
-    return redirectToApp({ platform: 'meta', error: e instanceof Error ? e.message : 'unknown_error' });
+    return await redirectToApp(supabase, { platform: 'meta', error: e instanceof Error ? e.message : 'unknown_error' });
   }
 });

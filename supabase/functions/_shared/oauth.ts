@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from 'npm:@supabase/supabase-js@2.57.4';
+import { getCredential } from './credentials.ts';
 
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -17,9 +18,11 @@ export function errorResponse(message: string, status = 400): Response {
   return jsonResponse({ error: message }, status);
 }
 
-/** Redirect back into the app's Connected Accounts page with an outcome. */
-export function redirectToApp(params: Record<string, string>): Response {
-  const appUrl = Deno.env.get('APP_URL') ?? '';
+/** Redirect back into the app's Connected Accounts page with an outcome.
+ * Resolves the base URL from Settings > Integrations first, falling back
+ * to the APP_URL env var if nothing's been saved there yet. */
+export async function redirectToApp(supabase: SupabaseClient, params: Record<string, string>): Promise<Response> {
+  const appUrl = (await getCredential(supabase, 'app_url')) ?? '';
   const url = new URL(`${appUrl.replace(/\/$/, '')}/accounts`);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   return new Response(null, { status: 302, headers: { Location: url.toString() } });
