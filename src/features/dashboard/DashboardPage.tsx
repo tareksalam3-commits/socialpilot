@@ -175,11 +175,10 @@ export function DashboardPage() {
 
       {/* Workspace info */}
       <Card title={t('dashboard.workspace.title')} description={t('dashboard.workspace.description')}>
-        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <InfoItem label={t('dashboard.workspace.name')} value={workspace?.name ?? '—'} />
           <InfoItem label={t('dashboard.workspace.brandName')} value={workspace?.brand_name ?? '—'} />
-          <InfoItem label={t('dashboard.workspace.timezone')} value={workspace?.timezone ?? 'UTC'} />
-          <InfoItem label={t('dashboard.workspace.language')} value={workspace?.language ?? 'en'} />
+          <InfoItem label={t('dashboard.workspace.language')} value={workspace?.language ?? 'ar'} />
         </dl>
       </Card>
     </div>
