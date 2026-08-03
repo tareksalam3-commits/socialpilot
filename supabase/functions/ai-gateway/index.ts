@@ -221,6 +221,83 @@ function isTransientFailure(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+type StreamProbeResult =
+  | { ok: true; leadingChunks: Uint8Array[] }
+  | { ok: false; error: string };
+
+const STREAM_PROBE_MAX_CHUNKS = 60;
+const STREAM_PROBE_TIMEOUT_MS = 12_000;
+
+// A provider can return HTTP 200 and still hand back nothing usable — an
+// empty stream, a stream that only ever emits an embedded `error` object, or
+// one that stalls forever. Read a bounded number of leading chunks (or until
+// we see real content/reasoning) before deciding this attempt actually
+// worked. Chunks consumed here are buffered and replayed to the client once
+// we commit to this attempt, so nothing is lost — the user never sees the
+// provider(s) that failed silently underneath.
+async function probeStream(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<StreamProbeResult> {
+  const leadingChunks: Uint8Array[] = [];
+  const probeDecoder = new TextDecoder();
+  let buffer = '';
+  let sawContent = false;
+  let sawReasoning = false;
+  const deadline = Date.now() + STREAM_PROBE_TIMEOUT_MS;
+
+  for (let i = 0; i < STREAM_PROBE_MAX_CHUNKS; i++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+
+    let done: boolean;
+    let value: Uint8Array | undefined;
+    try {
+      const timeoutMarker = Symbol('timeout');
+      const result = await Promise.race([
+        reader.read(),
+        new Promise<typeof timeoutMarker>((resolve) => setTimeout(() => resolve(timeoutMarker), remaining)),
+      ]);
+      if (result === timeoutMarker) break;
+      ({ done, value } = result as ReadableStreamReadResult<Uint8Array>);
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'stream read error' };
+    }
+
+    if (done) break;
+    if (!value) continue;
+
+    leadingChunks.push(value);
+    buffer += probeDecoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === '[DONE]' || payload === '') continue;
+      try {
+        const json = JSON.parse(payload);
+        if (json.error) {
+          return { ok: false, error: typeof json.error === 'string' ? json.error : JSON.stringify(json.error) };
+        }
+        const delta = json.choices?.[0]?.delta;
+        if (delta?.content) sawContent = true;
+        if (delta?.reasoning) sawReasoning = true;
+      } catch {
+        // partial JSON split across chunk boundary — wait for more
+      }
+    }
+
+    if (sawContent) return { ok: true, leadingChunks };
+  }
+
+  // The model was actively reasoning within the probe window but hadn't
+  // produced visible content yet — that's a working provider, just a slow
+  // one. Let it keep streaming rather than false-failing it.
+  if (sawReasoning) return { ok: true, leadingChunks };
+
+  return { ok: false, error: 'No content received from provider within probe window' };
+}
+
 async function handleChatCompletion(
   supabase: ReturnType<typeof createClient>,
   body: ChatRequestBody,
@@ -294,12 +371,22 @@ async function handleChatCompletion(
 
     for (const currentModel of attempts) {
       try {
+        const requestBody: Record<string, unknown> = { model: currentModel, messages, temperature, max_tokens: maxTokens, stream };
+        // OpenRouter itself fronts several upstream hosts for most models.
+        // allow_fallbacks defaults to true, but we set it explicitly so this
+        // stays correct even if OpenRouter's default ever changes: if the
+        // upstream host currently serving this model errors out, OpenRouter
+        // silently retries the next host for the same model before we ever
+        // see a failure here.
+        if (providerId === 'openrouter') {
+          requestBody.provider = { allow_fallbacks: true };
+        }
         const res = await fetchWithTimeout(
           `${keyRow.base_url || entry.base_url}/chat/completions`,
           {
             method: 'POST',
             headers: authHeaders(entry, keyRow.api_key_encrypted!),
-            body: JSON.stringify({ model: currentModel, messages, temperature, max_tokens: maxTokens, stream }),
+            body: JSON.stringify(requestBody),
           },
           REQUEST_TIMEOUT_MS,
         );
@@ -318,12 +405,33 @@ async function handleChatCompletion(
         const responseTime = Date.now() - startTime;
 
         if (stream) {
+          const reader = res.body!.getReader();
+          const probe = await probeStream(reader);
+
+          if (!probe.ok) {
+            // Looked fine at the HTTP level but produced nothing usable —
+            // abandon this attempt and fall through to the next model /
+            // provider exactly like a hard HTTP failure would. The client
+            // never received a byte of this attempt.
+            try {
+              await reader.cancel();
+            } catch {
+              // already closed — fine
+            }
+            lastError = `${entry.label} ${currentModel}: ${probe.error}`;
+            await delay(RETRY_DELAY_MS);
+            continue;
+          }
+
           const readableStream = new ReadableStream({
             async start(controller) {
-              const reader = res.body!.getReader();
               const decoder = new TextDecoder();
               let totalContent = '';
               try {
+                for (const chunk of probe.leadingChunks) {
+                  totalContent += decoder.decode(chunk, { stream: true });
+                  controller.enqueue(chunk);
+                }
                 while (true) {
                   const { done, value } = await reader.read();
                   if (done) break;
@@ -363,6 +471,14 @@ async function handleChatCompletion(
 
         const json = await res.json();
         const content = json.choices?.[0]?.message?.content ?? '';
+
+        if (!content.trim()) {
+          // 200 OK but nothing usable in it — same story as the streaming
+          // path: don't hand this back as a "success", try the next model.
+          lastError = `${entry.label} ${currentModel}: empty response content`;
+          await delay(RETRY_DELAY_MS);
+          continue;
+        }
         const tokensIn = json.usage?.prompt_tokens ?? estimateTokens(JSON.stringify(messages));
         const tokensOut = json.usage?.completion_tokens ?? estimateTokens(content);
         await updateLastSuccessful(supabase, body.workspace_id, providerId, currentModel);
