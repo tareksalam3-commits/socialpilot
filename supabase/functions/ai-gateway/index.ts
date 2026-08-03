@@ -317,6 +317,10 @@ async function handleChatCompletion(
   const stream = body.stream ?? settings?.streaming ?? true;
   const freeOnly = body.free_only ?? settings?.free_only_mode ?? true;
 
+  const languageRule =
+    'Language rule: reply in the same language the user\'s content/topic is written in. ' +
+    'Only switch languages if the task explicitly asks for a translation or explicitly names a different output language — follow that explicit instruction in that case instead.';
+
   let messages = body.messages;
   if (body.brand_voice) {
     const bv = body.brand_voice as Record<string, string | string[]>;
@@ -330,8 +334,12 @@ async function handleChatCompletion(
 - Keywords to include: ${Array.isArray(bv.keywords) ? bv.keywords.join(', ') : 'none'}
 - Keywords to avoid: ${Array.isArray(bv.negative_keywords) ? bv.negative_keywords.join(', ') : 'none'}
 - CTA style: ${bv.cta_style ?? 'clear'}
-- Emoji style: ${bv.emoji_style ?? 'minimal'}`;
+- Emoji style: ${bv.emoji_style ?? 'minimal'}
+
+${languageRule}`;
     messages = [{ role: 'system', content: systemContent }, ...messages];
+  } else {
+    messages = [{ role: 'system', content: languageRule }, ...messages];
   }
 
   const startTime = Date.now();
