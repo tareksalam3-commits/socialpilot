@@ -54,13 +54,38 @@ export const aiGateway = {
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let fullContent = '';
+      let buffer = '';
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        fullContent += chunk;
-        opts.onChunk(chunk);
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? ''; // last line may be split across chunks — keep it for next read
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+
+          const payload = trimmed.slice(5).trim();
+          if (payload === '[DONE]' || payload === '') continue;
+
+          try {
+            const json = JSON.parse(payload);
+            const delta = json.choices?.[0]?.delta;
+            // reasoning tokens (model "thinking") are intentionally skipped —
+            // only the actual generated text goes to the caller
+            if (delta?.content) {
+              fullContent += delta.content;
+              opts.onChunk(delta.content);
+            }
+          } catch {
+            // JSON split across a chunk boundary — will complete on a later read
+          }
+        }
       }
+
       return {
         content: fullContent,
         model: res.headers.get('X-Model') ?? '',
