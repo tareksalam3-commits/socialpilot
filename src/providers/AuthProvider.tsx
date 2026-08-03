@@ -48,15 +48,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
-      if (data.session?.user) {
-        loadProfile(data.session.user.id).finally(() => mounted && setLoading(false));
-      } else {
-        setLoading(false);
-      }
-    });
+    // Safety net: on a slow/flaky connection getSession() can hang (or
+    // reject) indefinitely, leaving the app stuck on "checking session"
+    // forever. Force loading to resolve after 10s no matter what.
+    const timeout = setTimeout(() => {
+      if (mounted) setLoading(false);
+    }, 10000);
+
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        setSession(data.session);
+        if (data.session?.user) {
+          loadProfile(data.session.user.id).finally(() => {
+            clearTimeout(timeout);
+            if (mounted) setLoading(false);
+          });
+        } else {
+          clearTimeout(timeout);
+          setLoading(false);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to get session:', error);
+        clearTimeout(timeout);
+        if (mounted) setLoading(false);
+      });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       (async () => {
@@ -72,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       mounted = false;
+      clearTimeout(timeout);
       sub.subscription.unsubscribe();
     };
   }, []);
