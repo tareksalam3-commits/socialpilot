@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Eye, EyeOff, Globe, Key, Monitor, Moon, Plug, Shield, Sun, User as UserIcon, Wrench } from 'lucide-react';
+import { Eye, EyeOff, Globe, Monitor, Moon, Plug, Shield, Sun, User as UserIcon, Wrench } from 'lucide-react';
 import { useAuth } from '@/providers/AuthProvider';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useToast } from '@/providers/ToastProvider';
@@ -9,14 +9,12 @@ import { LANGUAGES } from '@/i18n/translations';
 import { Badge, Button, Card, Input, Tabs } from '@/ui';
 import { profileRepository } from '@/repositories/profileRepository';
 import { workspaceRepository } from '@/repositories/workspaceRepository';
-import { apiKeyRepository } from '@/repositories/apiKeyRepository';
 import { platformCredentialsRepository, type CredentialKey, type CredentialStatus } from '@/repositories/platformCredentialsRepository';
 import { supabase } from '@/services/supabase';
 import { validateRequired } from '@/utils/validation';
-import type { ApiKey } from '@/types/database';
 import { formatDate, initials } from '@/utils/format';
 
-type TabId = 'general' | 'profile' | 'workspace' | 'appearance' | 'language' | 'security' | 'apikeys' | 'integrations';
+type TabId = 'general' | 'profile' | 'workspace' | 'appearance' | 'language' | 'security' | 'integrations';
 
 export function SettingsPage() {
   const [tab, setTab] = useState<TabId>('general');
@@ -30,12 +28,11 @@ export function SettingsPage() {
     language: { label: t('settings.tab.language'), icon: <Globe className="h-4 w-4" /> },
     integrations: { label: t('settings.tab.integrations'), icon: <Plug className="h-4 w-4" /> },
     security: { label: t('settings.tab.security'), icon: <Shield className="h-4 w-4" /> },
-    apikeys: { label: t('settings.tab.apikeys'), icon: <Key className="h-4 w-4" /> },
   };
 
   const groups: { title: string; tabs: TabId[] }[] = [
     { title: t('settings.group.workspace'), tabs: ['general', 'workspace', 'language'] },
-    { title: t('settings.group.account'), tabs: ['profile', 'security', 'apikeys'] },
+    { title: t('settings.group.account'), tabs: ['profile', 'security'] },
     { title: t('settings.group.appearance'), tabs: ['appearance'] },
     { title: t('settings.group.publishing'), tabs: ['integrations'] },
   ];
@@ -91,7 +88,6 @@ export function SettingsPage() {
           {tab === 'appearance' && <AppearanceTab />}
           {tab === 'language' && <LanguageTab />}
           {tab === 'security' && <SecurityTab />}
-          {tab === 'apikeys' && <ApiKeysTab />}
           {tab === 'integrations' && <IntegrationsTab />}
         </div>
       </div>
@@ -415,131 +411,6 @@ function SecurityTab() {
             <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{user?.id}</span>
           </div>
         </div>
-      </Card>
-    </div>
-  );
-}
-
-function ApiKeysTab() {
-  const { workspace } = useWorkspace();
-  const { push } = useToast();
-  const { t } = useLanguage();
-  const [keys, setKeys] = useState<ApiKey[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [label, setLabel] = useState('');
-  const [value, setValue] = useState('');
-  const [creating, setCreating] = useState(false);
-
-  const load = async () => {
-    if (!workspace) return;
-    try {
-      setLoading(true);
-      const data = await apiKeyRepository.list(workspace.id);
-      setKeys(data);
-    } catch (e) {
-      push({ title: t('settings.apikeys.toast.loadFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // load on mount / when workspace changes
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace?.id]);
-
-  const handleCreate = async () => {
-    const labelErr = validateRequired(label, t('settings.apikeys.label'), t);
-    const valueErr = validateRequired(value, t('settings.apikeys.keyValue'), t);
-    if (!labelErr.valid || !valueErr.valid) {
-      push({ title: t('settings.apikeys.toast.validationError'), description: labelErr.error ?? valueErr.error ?? '', variant: 'error' });
-      return;
-    }
-    if (!workspace) return;
-    setCreating(true);
-    try {
-      const masked = value.length > 8 ? `${value.slice(0, 4)}••••${value.slice(-4)}` : '••••';
-      const created = await apiKeyRepository.create({
-        workspace_id: workspace.id,
-        label,
-        masked_value: masked,
-      });
-      setKeys((prev) => [created, ...prev]);
-      setLabel('');
-      setValue('');
-      push({ title: t('settings.apikeys.toast.added'), variant: 'success' });
-    } catch (e) {
-      push({ title: t('settings.apikeys.toast.addFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const handleRevoke = async (id: string) => {
-    try {
-      await apiKeyRepository.revoke(id);
-      setKeys((prev) => prev.map((k) => (k.id === id ? { ...k, status: 'revoked' } : k)));
-      push({ title: t('settings.apikeys.toast.revoked'), variant: 'success' });
-    } catch (e) {
-      push({ title: t('settings.apikeys.toast.revokeFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <Card title={t('settings.apikeys.title')} description={t('settings.apikeys.description')}>
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Input label={t('settings.apikeys.label')} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="OpenAI" />
-            <Input
-              label={t('settings.apikeys.keyValue')}
-              type="password"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder="sk-…"
-            />
-            <div className="flex items-end">
-              <Button onClick={handleCreate} loading={creating} className="w-full">
-                {t('settings.apikeys.addKey')}
-              </Button>
-            </div>
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {t('settings.apikeys.note')}
-          </p>
-        </div>
-      </Card>
-
-      <Card title={t('settings.apikeys.storedKeys')}>
-        {loading ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
-        ) : keys.length === 0 ? (
-          <p className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">{t('settings.apikeys.none')}</p>
-        ) : (
-          <div className="space-y-2">
-            {keys.map((k) => (
-              <div
-                key={k.id}
-                className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3 dark:border-slate-800"
-              >
-                <div>
-                  <p className="text-sm font-medium text-slate-900 dark:text-white">{k.label}</p>
-                  <p className="font-mono text-xs text-slate-500 dark:text-slate-400">{k.masked_value}</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">{formatDate(k.created_at)}</span>
-                  <Badge variant={k.status === 'active' ? 'success' : 'error'}>{k.status}</Badge>
-                  {k.status === 'active' && (
-                    <Button size="sm" variant="ghost" onClick={() => handleRevoke(k.id)}>
-                      {t('settings.apikeys.revoke')}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </Card>
     </div>
   );
