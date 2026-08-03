@@ -17,18 +17,36 @@ export const providerKeysRepository = {
     apiKey: string,
     extra?: { baseUrl?: string | null; accountId?: string | null },
   ): Promise<void> {
-    const { error } = await supabase.from('ai_provider_keys').upsert(
-      {
+    // Every workspace already has a row for every supported provider (seeded on
+    // workspace creation), so a plain UPDATE is enough — and unlike an upsert with
+    // ON CONFLICT, it doesn't require table-level SELECT privilege on this table,
+    // which is intentionally not granted so the raw key can never be read back.
+    const { error, count } = await supabase
+      .from('ai_provider_keys')
+      .update(
+        {
+          api_key_encrypted: apiKey,
+          base_url: extra?.baseUrl ?? null,
+          account_id: extra?.accountId ?? null,
+          updated_at: new Date().toISOString(),
+        },
+        { count: 'exact' },
+      )
+      .eq('workspace_id', workspaceId)
+      .eq('provider', provider);
+    if (error) throw error;
+    if (!count) {
+      // Defensive fallback in case the row is somehow missing (e.g. a workspace
+      // created before the seeding trigger existed).
+      const { error: insertError } = await supabase.from('ai_provider_keys').insert({
         workspace_id: workspaceId,
         provider,
         api_key_encrypted: apiKey,
         base_url: extra?.baseUrl ?? null,
         account_id: extra?.accountId ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'workspace_id,provider' },
-    );
-    if (error) throw error;
+      });
+      if (insertError) throw insertError;
+    }
   },
 
   async clearKey(workspaceId: string, provider: AiProvider): Promise<void> {
