@@ -38,6 +38,7 @@ const navSections = [
   {
     labelKey: 'nav.section.overview',
     items: [
+      { to: '/app/assistant', labelKey: 'nav.assistant', icon: Bot },
       { to: '/app/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard },
       { to: '/app/analytics', labelKey: 'nav.analytics', icon: BarChart3 },
       { to: '/app/search', labelKey: 'nav.search', icon: SearchIcon },

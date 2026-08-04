@@ -19,6 +19,7 @@ export const pages = {
   forgotPassword: page(() => import('@/features/auth/ForgotPasswordPage'), 'ForgotPasswordPage'),
   resetPassword: page(() => import('@/features/auth/ResetPasswordPage'), 'ResetPasswordPage'),
   dashboard: page(() => import('@/features/dashboard/DashboardPage'), 'DashboardPage'),
+  assistant: page(() => import('@/features/assistant/AIAssistantPage'), 'AIAssistantPage'),
   settings: page(() => import('@/features/settings/SettingsPage'), 'SettingsPage'),
   accounts: page(() => import('@/features/accounts/ConnectedAccountsPage'), 'ConnectedAccountsPage'),
   scheduled: page(() => import('@/features/posts/ScheduledPostsPage'), 'ScheduledPostsPage'),
@@ -42,6 +43,7 @@ export const pages = {
 
 /** Maps each `/app/*` route path to its preload function, for hover-prefetching from the sidebar. */
 export const preloadByPath: Record<string, () => Promise<unknown>> = {
+  '/app/assistant': pages.assistant.preload,
   '/app/dashboard': pages.dashboard.preload,
   '/app/analytics': pages.analytics.preload,
   '/app/search': pages.search.preload,
@@ -68,6 +70,7 @@ let warmed = false;
 export function warmCommonPages() {
   if (warmed) return;
   warmed = true;
+  pages.assistant.preload().catch(() => {});
   pages.dashboard.preload().catch(() => {});
   pages.scheduled.preload().catch(() => {});
   pages.analytics.preload().catch(() => {});

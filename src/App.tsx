@@ -16,6 +16,7 @@ const {
   forgotPassword: { Component: ForgotPasswordPage },
   resetPassword: { Component: ResetPasswordPage },
   dashboard: { Component: DashboardPage },
+  assistant: { Component: AIAssistantPage },
   settings: { Component: SettingsPage },
   accounts: { Component: ConnectedAccountsPage },
   scheduled: { Component: ScheduledPostsPage },
@@ -67,7 +68,8 @@ function App() {
                     </ProtectedRoute>
                   }
                 >
-                  <Route index element={<Navigate to="/app/dashboard" replace />} />
+                  <Route index element={<Navigate to="/app/assistant" replace />} />
+                  <Route path="assistant" element={<AIAssistantPage />} />
                   <Route path="dashboard" element={<DashboardPage />} />
                   <Route path="accounts" element={<ConnectedAccountsPage />} />
                   <Route path="scheduled" element={<ScheduledPostsPage />} />
@@ -89,8 +91,8 @@ function App() {
                   <Route path="brand-voice" element={<BrandVoicePage />} />
                   <Route path="settings" element={<SettingsPage />} />
                 </Route>
-                <Route path="/" element={<Navigate to="/app/dashboard" replace />} />
-                <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
+                <Route path="/" element={<Navigate to="/app/assistant" replace />} />
+                <Route path="*" element={<Navigate to="/app/assistant" replace />} />
               </Routes>
             </Suspense>
           </BrowserRouter>
