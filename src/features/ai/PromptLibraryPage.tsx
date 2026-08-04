@@ -122,15 +122,15 @@ export function PromptLibraryPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('ai.prompts.title')}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('ai.prompts.subtitle')}</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowFolderModal(true)}><FolderPlus className="h-4 w-4" /> {t('ai.prompts.folderButton')}</Button>
-          <Button variant="outline" onClick={handleExport}>{t('ai.prompts.exportButton')}</Button>
-          <Button onClick={handleNew}><Plus className="h-4 w-4" /> {t('ai.prompts.newPromptButton')}</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setShowFolderModal(true)}><FolderPlus className="h-4 w-4" /> {t('ai.prompts.folderButton')}</Button>
+          <Button className="flex-1 sm:flex-none" variant="outline" onClick={handleExport}>{t('ai.prompts.exportButton')}</Button>
+          <Button className="w-full sm:w-auto" onClick={handleNew}><Plus className="h-4 w-4" /> {t('ai.prompts.newPromptButton')}</Button>
         </div>
       </div>
 
@@ -181,7 +181,7 @@ export function PromptLibraryPage() {
             <div key={f.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm dark:border-slate-700">
               <span className="text-slate-700 dark:text-slate-300">{f.name}</span>
               <span className="text-xs text-slate-400">({prompts.filter((p) => p.folder_id === f.id).length})</span>
-              <button onClick={() => deleteFolder(f.id)} className="text-slate-400 hover:text-rose-500"><X className="h-3 w-3" /></button>
+              <button onClick={() => deleteFolder(f.id)} className="flex h-9 w-9 items-center justify-center text-slate-400 hover:text-rose-500 sm:h-6 sm:w-6"><X className="h-3.5 w-3.5" /></button>
             </div>
           ))}
         </div>
@@ -200,7 +200,7 @@ export function PromptLibraryPage() {
             <div key={p.id} className="group rounded-xl border border-slate-200 bg-white p-4 transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-start justify-between">
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{p.title}</h3>
-                <button onClick={() => toggleFavorite(p.id, !p.favorite)} className="text-slate-400 hover:text-amber-500">
+                <button onClick={() => toggleFavorite(p.id, !p.favorite)} className="-me-1.5 -mt-1.5 flex h-9 w-9 shrink-0 items-center justify-center text-slate-400 hover:text-amber-500">
                   <Star className={`h-4 w-4 ${p.favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
                 </button>
               </div>
@@ -211,11 +211,11 @@ export function PromptLibraryPage() {
               </div>
               <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 dark:border-slate-800">
                 <span className="text-xs text-slate-400">{timeAgo(p.updated_at)}</span>
-                <div className="flex gap-1">
-                  <button onClick={() => handleCopy(p.content)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('ai.prompts.copy')}><Copy className="h-3.5 w-3.5" /></button>
-                  <button onClick={() => handleEdit(p)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('ai.prompts.edit')}><Edit2 className="h-3.5 w-3.5" /></button>
-                  <button onClick={() => handleDuplicate(p)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('ai.prompts.duplicate')}><Plus className="h-3.5 w-3.5" /></button>
-                  <button onClick={() => deletePrompt(p.id)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-500 dark:hover:bg-slate-800" title={t('ai.prompts.delete')}><Trash2 className="h-3.5 w-3.5" /></button>
+                <div className="-me-1 flex gap-0.5">
+                  <button onClick={() => handleCopy(p.content)} className="flex h-9 w-9 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('ai.prompts.copy')}><Copy className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => handleEdit(p)} className="flex h-9 w-9 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('ai.prompts.edit')}><Edit2 className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => handleDuplicate(p)} className="flex h-9 w-9 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('ai.prompts.duplicate')}><Plus className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => deletePrompt(p.id)} className="flex h-9 w-9 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-rose-500 dark:hover:bg-slate-800" title={t('ai.prompts.delete')}><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               </div>
             </div>
@@ -248,7 +248,7 @@ export function PromptLibraryPage() {
               className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('ai.prompts.modal.categoryLabel')}</label>
               <select

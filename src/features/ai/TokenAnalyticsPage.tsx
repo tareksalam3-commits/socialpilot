@@ -25,7 +25,7 @@ export function TokenAnalyticsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('ai.tokenAnalytics.title')}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('ai.tokenAnalytics.subtitle')}</p>
@@ -33,7 +33,7 @@ export function TokenAnalyticsPage() {
         <select
           value={days}
           onChange={(e) => setDays(parseInt(e.target.value, 10))}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 sm:w-auto"
         >
           <option value={7}>{t('analytics.range.7d')}</option>
           <option value={30}>{t('analytics.range.30d')}</option>

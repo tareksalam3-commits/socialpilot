@@ -170,17 +170,17 @@ export function ConnectedAccountsPage() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Connected Accounts</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Manage your social media accounts and their health.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={handleSyncAll} loading={syncingAll} disabled={accounts.length === 0}>
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          <Button className="col-span-2 sm:col-span-1" variant="outline" onClick={handleSyncAll} loading={syncingAll} disabled={accounts.length === 0}>
             <RotateCw className="h-4 w-4" /> Sync all
           </Button>
-          <Button onClick={handleMetaConnect} loading={oauthLoading === 'meta'} disabled={oauthLoading !== null}>
+          <Button className="col-span-2 sm:col-span-1" onClick={handleMetaConnect} loading={oauthLoading === 'meta'} disabled={oauthLoading !== null}>
             <Facebook className="h-4 w-4" /> Continue with Facebook
           </Button>
-          <Button onClick={handleLinkedInConnect} loading={oauthLoading === 'linkedin'} disabled={oauthLoading !== null} variant="outline">
+          <Button className="col-span-2 sm:col-span-1" onClick={handleLinkedInConnect} loading={oauthLoading === 'linkedin'} disabled={oauthLoading !== null} variant="outline">
             <Linkedin className="h-4 w-4" /> Continue with LinkedIn
           </Button>
-          <Button variant="ghost" onClick={() => setShowConnect(true)}>
+          <Button className="col-span-2 sm:col-span-1" variant="ghost" onClick={() => setShowConnect(true)}>
             <Plus className="h-4 w-4" /> Manual
           </Button>
         </div>

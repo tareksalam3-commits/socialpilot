@@ -239,7 +239,7 @@ export function ContentStudioPage() {
       </div>
 
       {/* Platform selector */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {platforms.map((p) => (
           <button
             key={p.id}
@@ -258,7 +258,7 @@ export function ContentStudioPage() {
       {/* Audience selector */}
       <div>
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{t('ai.studio.audienceLabel')}</p>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {audiences.map((a) => (
             <button
               key={a.id}

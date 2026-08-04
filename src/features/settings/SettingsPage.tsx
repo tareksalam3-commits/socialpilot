@@ -200,7 +200,7 @@ function ProfileTab() {
           hint={t('settings.profile.avatarUrlHint')}
         />
         <div className="flex justify-end">
-          <Button onClick={handleSave} loading={loading}>
+          <Button className="w-full sm:w-auto" onClick={handleSave} loading={loading}>
             {t('settings.profile.saveChanges')}
           </Button>
         </div>
@@ -272,7 +272,7 @@ function WorkspaceTab() {
           </select>
         </div>
         <div className="flex justify-end">
-          <Button onClick={handleSave} loading={loading}>
+          <Button className="w-full sm:w-auto" onClick={handleSave} loading={loading}>
             {t('settings.workspace.saveChanges')}
           </Button>
         </div>
@@ -385,16 +385,16 @@ function SecurityTab() {
             onChange={(e) => setConfirm(e.target.value)}
             placeholder="Re-enter new password"
           />
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
               onClick={() => setShow((v) => !v)}
-              className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+              className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
             >
               {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               {show ? t('settings.security.hidePasswords') : t('settings.security.showPasswords')}
             </button>
-            <Button onClick={handleChange} loading={loading}>
+            <Button className="w-full sm:w-auto" onClick={handleChange} loading={loading}>
               {t('settings.security.updatePassword')}
             </Button>
           </div>
@@ -402,13 +402,13 @@ function SecurityTab() {
       </Card>
       <Card title={t('settings.security.account')} description={t('settings.security.accountDesc')}>
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-sm text-slate-500 dark:text-slate-400">{t('settings.security.email')}</span>
-            <span className="text-sm font-medium text-slate-900 dark:text-white">{user?.email}</span>
+            <span className="text-sm font-medium text-slate-900 dark:text-white break-all">{user?.email}</span>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-sm text-slate-500 dark:text-slate-400">{t('settings.security.userId')}</span>
-            <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{user?.id}</span>
+            <span className="font-mono text-xs text-slate-600 dark:text-slate-400 break-all">{user?.id}</span>
           </div>
         </div>
       </Card>
@@ -500,7 +500,7 @@ function IntegrationsTab() {
             <button
               type="button"
               onClick={() => setReveal((prev) => ({ ...prev, [f.key]: !prev[f.key] }))}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
             >
               {reveal[f.key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>

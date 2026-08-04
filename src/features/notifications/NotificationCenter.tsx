@@ -45,7 +45,7 @@ export function NotificationCenter() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="press-effect relative rounded-lg p-2 text-slate-500 transition-colors duration-150 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+        className="press-effect relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors duration-150 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
         aria-label="Notifications"
         aria-expanded={open}
       >
@@ -103,7 +103,7 @@ export function NotificationCenter() {
                     </button>
                     <button
                       onClick={() => deleteNotification(n.id)}
-                      className="shrink-0 rounded p-1 text-slate-300 opacity-0 transition hover:bg-slate-100 hover:text-rose-500 group-hover:opacity-100 dark:hover:bg-slate-800"
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded text-slate-300 opacity-100 transition hover:bg-slate-100 hover:text-rose-500 dark:hover:bg-slate-800 sm:opacity-0 sm:group-hover:opacity-100"
                       aria-label="Delete notification"
                     >
                       <Trash2 className="h-3.5 w-3.5" />

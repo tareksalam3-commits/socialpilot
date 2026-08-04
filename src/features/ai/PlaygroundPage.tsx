@@ -4,6 +4,7 @@ import {
   Copy,
   Edit2,
   MessageSquarePlus,
+  Menu,
   Plus,
   Send,
   Star,
@@ -21,7 +22,7 @@ import { MarkdownRenderer, Button, Input, Badge, EmptyState } from '@/ui';
 import type { Conversation } from '@/types/ai';
 
 export function PlaygroundPage() {
-  const { t } = useLanguage();
+  const { t, dir } = useLanguage();
   const { workspace } = useWorkspace();
   const { user } = useAuth();
   const {
@@ -47,6 +48,7 @@ export function PlaygroundPage() {
   const [streamingContent, setStreamingContent] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -121,69 +123,106 @@ export function PlaygroundPage() {
     push({ title: t('ai.playground.copiedToClipboard'), variant: 'success' });
   };
 
+  const sidebarContent = (
+    <>
+      <div className="flex items-center gap-2 border-b border-slate-200 p-3 dark:border-slate-800">
+        <Button size="sm" className="w-full" onClick={handleNewChat}>
+          <Plus className="h-4 w-4" /> {t('ai.playground.newChat')}
+        </Button>
+        <button
+          onClick={() => setSidebarOpen(false)}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 lg:hidden"
+          aria-label={t('sidebar.closeMenu')}
+        >
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+      <div className="border-b border-slate-200 p-3 dark:border-slate-800">
+        <Input
+          type="search"
+          placeholder={t('ai.playground.searchPlaceholder')}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+      <div className="flex-1 space-y-1 overflow-y-auto p-2">
+        {loading ? (
+          <p className="p-4 text-center text-sm text-slate-500">{t('ai.playground.loading')}</p>
+        ) : conversations.length === 0 ? (
+          <p className="p-4 text-center text-sm text-slate-500">{t('ai.playground.noConversations')}</p>
+        ) : (
+          conversations.map((conv) => (
+            <ConversationItem
+              key={conv.id}
+              conv={conv}
+              active={conv.id === activeId}
+              editing={editingId === conv.id}
+              editTitle={editTitle}
+              onEditTitle={setEditTitle}
+              onEdit={(id, title) => {
+                setEditingId(id);
+                setEditTitle(title);
+              }}
+              onSaveEdit={() => handleRename(conv.id)}
+              onCancelEdit={() => setEditingId(null)}
+              onClick={() => {
+                loadMessages(conv.id);
+                setSidebarOpen(false);
+              }}
+              onToggleFav={() => toggleFavorite(conv.id, !conv.favorite)}
+              onDelete={() => deleteConversation(conv.id)}
+            />
+          ))
+        )}
+      </div>
+    </>
+  );
+
   return (
-    <div className="flex h-[calc(100vh-8rem)] gap-4">
-      {/* Sidebar: conversations */}
-      <div className="flex w-64 flex-col rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="border-b border-slate-200 p-3 dark:border-slate-800">
-          <Button size="sm" className="w-full" onClick={handleNewChat}>
-            <Plus className="h-4 w-4" /> {t('ai.playground.newChat')}
-          </Button>
-        </div>
-        <div className="border-b border-slate-200 p-3 dark:border-slate-800">
-          <Input
-            type="search"
-            placeholder={t('ai.playground.searchPlaceholder')}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="flex-1 space-y-1 overflow-y-auto p-2">
-          {loading ? (
-            <p className="p-4 text-center text-sm text-slate-500">{t('ai.playground.loading')}</p>
-          ) : conversations.length === 0 ? (
-            <p className="p-4 text-center text-sm text-slate-500">{t('ai.playground.noConversations')}</p>
-          ) : (
-            conversations.map((conv) => (
-              <ConversationItem
-                key={conv.id}
-                conv={conv}
-                active={conv.id === activeId}
-                editing={editingId === conv.id}
-                editTitle={editTitle}
-                onEditTitle={setEditTitle}
-                onEdit={(id, title) => {
-                  setEditingId(id);
-                  setEditTitle(title);
-                }}
-                onSaveEdit={() => handleRename(conv.id)}
-                onCancelEdit={() => setEditingId(null)}
-                onClick={() => loadMessages(conv.id)}
-                onToggleFav={() => toggleFavorite(conv.id, !conv.favorite)}
-                onDelete={() => deleteConversation(conv.id)}
-              />
-            ))
-          )}
-        </div>
+    <div className="relative flex h-[calc(100vh-8rem)] gap-4">
+      {/* Sidebar: conversations (desktop) */}
+      <div className="hidden w-64 shrink-0 flex-col rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 lg:flex">
+        {sidebarContent}
       </div>
 
+      {/* Sidebar: conversations (mobile drawer) */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-slate-900/50" onClick={() => setSidebarOpen(false)} />
+          <div
+            className={`absolute inset-y-0 flex w-72 max-w-[85vw] flex-col bg-white shadow-popover dark:bg-slate-900 ${
+              dir === 'rtl' ? 'right-0' : 'left-0'
+            }`}
+          >
+            {sidebarContent}
+          </div>
+        </div>
+      )}
+
       {/* Main: chat area */}
-      <div className="flex flex-1 flex-col rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex min-w-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-slate-900 dark:text-white">
+        <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-3 dark:border-slate-800 sm:px-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 lg:hidden"
+              aria-label={t('sidebar.openMenu')}
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+            <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">
               {conversations.find((c) => c.id === activeId)?.title ?? t('ai.playground.defaultTitle')}
             </span>
             {settings?.default_model && (
-              <Badge variant="info">{settings.default_model}</Badge>
+              <span className="hidden sm:inline-block"><Badge variant="info">{settings.default_model}</Badge></span>
             )}
           </div>
-          {settings?.streaming && <Badge variant="success">{t('ai.playground.streaming')}</Badge>}
+          {settings?.streaming && <Badge variant="success" className="shrink-0">{t('ai.playground.streaming')}</Badge>}
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4">
           {messages.length === 0 && !streamingContent ? (
             <EmptyState
               icon={<MessageSquarePlus className="h-10 w-10" />}
@@ -214,7 +253,7 @@ export function PlaygroundPage() {
         </div>
 
         {/* Input */}
-        <div className="border-t border-slate-200 p-4 dark:border-slate-800">
+        <div className="border-t border-slate-200 p-3 dark:border-slate-800 sm:p-4">
           <div className="flex items-end gap-2">
             <textarea
               value={input}
@@ -280,26 +319,26 @@ function ConversationItem({
             className="flex-1 rounded border border-slate-300 bg-white px-2 py-0.5 text-xs dark:border-slate-700 dark:bg-slate-900"
             autoFocus
           />
-          <button onClick={onSaveEdit}><Check className="h-3.5 w-3.5 text-emerald-500" /></button>
-          <button onClick={onCancelEdit}><X className="h-3.5 w-3.5 text-slate-400" /></button>
+          <button onClick={onSaveEdit} className="flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-slate-100 dark:hover:bg-slate-800"><Check className="h-3.5 w-3.5 text-emerald-500" /></button>
+          <button onClick={onCancelEdit} className="flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-slate-100 dark:hover:bg-slate-800"><X className="h-3.5 w-3.5 text-slate-400" /></button>
         </div>
       ) : (
         <>
           <button onClick={onClick} className="flex-1 truncate text-left text-sm text-slate-700 dark:text-slate-300">
             {conv.title}
           </button>
-          <div className="hidden gap-1 group-hover:flex">
-            <button onClick={onToggleFav} className="text-slate-400 hover:text-amber-500" title={t('ai.playground.favorite')}>
+          <div className="flex gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+            <button onClick={onToggleFav} className="flex h-8 w-8 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-amber-500 dark:hover:bg-slate-800" title={t('ai.playground.favorite')}>
               <Star className={`h-3.5 w-3.5 ${conv.favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
             </button>
-            <button onClick={() => onEdit(conv.id, conv.title)} className="text-slate-400 hover:text-slate-600" title={t('ai.playground.rename')}>
+            <button onClick={() => onEdit(conv.id, conv.title)} className="flex h-8 w-8 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('ai.playground.rename')}>
               <Edit2 className="h-3.5 w-3.5" />
             </button>
-            <button onClick={onDelete} className="text-slate-400 hover:text-rose-500" title={t('ai.playground.delete')}>
+            <button onClick={onDelete} className="flex h-8 w-8 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-rose-500 dark:hover:bg-slate-800" title={t('ai.playground.delete')}>
               <Trash2 className="h-3.5 w-3.5" />
             </button>
           </div>
-          {conv.favorite && <Star className="h-3 w-3 fill-amber-400 text-amber-400 group-hover:hidden" />}
+          {conv.favorite && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400 sm:group-hover:hidden" />}
         </>
       )}
     </div>
@@ -332,7 +371,7 @@ function MessageBubble({
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[80%] rounded-lg px-4 py-3 ${
+        className={`max-w-[90%] rounded-lg px-4 py-3 sm:max-w-[80%] ${
           isUser
             ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
             : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200'
@@ -349,15 +388,15 @@ function MessageBubble({
             {model && <span className="font-mono">{model}</span>}
             {tokens ? <span>{t('ai.playground.tokens', { count: tokens })}</span> : null}
             {responseTime ? <span>{t('ai.playground.responseTimeMs', { ms: responseTime })}</span> : null}
-            <div className="flex gap-2">
+            <div className="flex gap-0.5">
               {onCopy && (
-                <button onClick={onCopy} className="transition hover:text-slate-700 dark:hover:text-slate-200" title={t('ai.playground.copy')}>
-                  <Copy className="h-3 w-3" />
+                <button onClick={onCopy} className="flex h-8 w-8 items-center justify-center rounded transition hover:bg-black/5 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-slate-200" title={t('ai.playground.copy')}>
+                  <Copy className="h-3.5 w-3.5" />
                 </button>
               )}
               {onToggleFav && (
-                <button onClick={onToggleFav} className="transition hover:text-amber-500" title={t('ai.playground.favorite')}>
-                  <Star className={`h-3 w-3 ${favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
+                <button onClick={onToggleFav} className="flex h-8 w-8 items-center justify-center rounded transition hover:bg-black/5 hover:text-amber-500 dark:hover:bg-white/10" title={t('ai.playground.favorite')}>
+                  <Star className={`h-3.5 w-3.5 ${favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
                 </button>
               )}
             </div>

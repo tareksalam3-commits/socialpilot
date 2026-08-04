@@ -94,14 +94,14 @@ export function BrandVoicePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('ai.brandVoice.title')}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             {t('ai.brandVoice.subtitle')}
           </p>
         </div>
-        <Button onClick={handleSave} loading={saving}>
+        <Button className="w-full sm:w-auto" onClick={handleSave} loading={saving}>
           <Save className="h-4 w-4" /> {t('ai.brandVoice.saveButton')}
         </Button>
       </div>
@@ -200,7 +200,7 @@ export function BrandVoicePage() {
               {keywords.map((k) => (
                 <span key={k} className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
                   {k}
-                  <button onClick={() => setKeywords(keywords.filter((x) => x !== k))}><X className="h-3 w-3" /></button>
+                  <button onClick={() => setKeywords(keywords.filter((x) => x !== k))} className="p-1 -m-0.5"><X className="h-3 w-3" /></button>
                 </span>
               ))}
             </div>
@@ -218,7 +218,7 @@ export function BrandVoicePage() {
               {negativeKeywords.map((k) => (
                 <span key={k} className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-0.5 text-xs text-rose-700 dark:bg-rose-950 dark:text-rose-300">
                   {k}
-                  <button onClick={() => setNegativeKeywords(negativeKeywords.filter((x) => x !== k))}><X className="h-3 w-3" /></button>
+                  <button onClick={() => setNegativeKeywords(negativeKeywords.filter((x) => x !== k))} className="p-1 -m-0.5"><X className="h-3 w-3" /></button>
                 </span>
               ))}
             </div>

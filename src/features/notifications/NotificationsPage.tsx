@@ -106,31 +106,33 @@ export function NotificationsPage() {
               return (
                 <div
                   key={n.id}
-                  className={`group flex items-start gap-3 rounded-xl border p-4 transition ${
+                  className={`group flex flex-col gap-2 rounded-xl border p-4 transition sm:flex-row sm:items-start sm:gap-3 ${
                     n.read ? 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900' : 'border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/50'
                   }`}
                 >
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${cfg.color}`}>
-                    <Bell className="h-4 w-4" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{n.title}</p>
-                      <Badge variant="default">{cfg.label}</Badge>
-                      {!n.read && <span className="h-2 w-2 rounded-full bg-sky-500" />}
+                  <div className="flex items-start gap-3">
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${cfg.color}`}>
+                      <Bell className="h-4 w-4" />
                     </div>
-                    {n.message && <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">{n.message}</p>}
-                    <p className="mt-1 text-xs text-slate-400">{timeAgo(n.created_at)}</p>
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">{n.title}</p>
+                        <Badge variant="default">{cfg.label}</Badge>
+                        {!n.read && <span className="h-2 w-2 shrink-0 rounded-full bg-sky-500" />}
+                      </div>
+                      {n.message && <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">{n.message}</p>}
+                      <p className="mt-1 text-xs text-slate-400">{timeAgo(n.created_at)}</p>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-3">
+                  <div className="flex shrink-0 items-center gap-1">
                     {!n.read && (
-                      <button onClick={() => markRead(n.id)} className="text-xs text-sky-600 hover:underline dark:text-sky-400">
+                      <button onClick={() => markRead(n.id)} className="flex h-9 items-center px-2 text-xs text-sky-600 hover:underline dark:text-sky-400">
                         Mark read
                       </button>
                     )}
                     <button
                       onClick={() => deleteNotification(n.id)}
-                      className="rounded p-1 text-slate-300 opacity-0 transition hover:bg-slate-100 hover:text-rose-500 group-hover:opacity-100 dark:hover:bg-slate-800"
+                      className="flex h-9 w-9 items-center justify-center rounded text-slate-300 opacity-100 transition hover:bg-slate-100 hover:text-rose-500 dark:hover:bg-slate-800 sm:opacity-0 sm:group-hover:opacity-100"
                       aria-label="Delete notification"
                     >
                       <Trash2 className="h-4 w-4" />

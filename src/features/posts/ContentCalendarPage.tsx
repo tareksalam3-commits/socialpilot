@@ -106,24 +106,26 @@ export function ContentCalendarPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('calendar.title')}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('calendar.subtitle')}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-lg border border-slate-200 dark:border-slate-800">
             {(['month', 'week', 'day'] as ViewMode[]).map((m) => (
               <button key={m} onClick={() => setView(m)} className={`px-3 py-1.5 text-xs font-medium transition ${view === m ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'text-slate-600 dark:text-slate-400'}`}>{viewLabels[m]}</button>
             ))}
           </div>
-          <Button variant="outline" size="sm" onClick={() => navigate(-1)}><ChevronLeft className="h-4 w-4" /></Button>
-          <Button variant="outline" size="sm" onClick={() => navigate(1)}><ChevronRight className="h-4 w-4" /></Button>
-          <Button variant="outline" size="sm" onClick={() => setCurrentDate(new Date())}>{t('calendar.today')}</Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate(-1)}><ChevronLeft className="h-4 w-4" /></Button>
+            <Button variant="outline" size="sm" onClick={() => navigate(1)}><ChevronRight className="h-4 w-4" /></Button>
+            <Button variant="outline" size="sm" onClick={() => setCurrentDate(new Date())}>{t('calendar.today')}</Button>
+          </div>
         </div>
       </div>
 
-      <p className="text-lg font-semibold text-slate-900 dark:text-white">{view === 'month' ? monthLabel : view === 'week' ? weekLabel : dayLabel}</p>
+      <p className="text-base font-semibold text-slate-900 dark:text-white sm:text-lg">{view === 'month' ? monthLabel : view === 'week' ? weekLabel : dayLabel}</p>
 
       {view === 'day' ? (
         <div className="space-y-3">
@@ -135,35 +137,37 @@ export function ContentCalendarPage() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-7 gap-1">
-          {weekdayLabels.map((d) => (
-            <div key={d} className="pb-1 text-center text-xs font-semibold uppercase text-slate-400">{d}</div>
-          ))}
-          {days.map((d) => {
-            const dateStr = d.toISOString().slice(0, 10);
-            const dayPosts = postsByDate.get(dateStr) ?? [];
-            const isToday = dateStr === new Date().toISOString().slice(0, 10);
-            const isCurrentMonth = view === 'week' || d.getMonth() === currentDate.getMonth();
-            return (
-              <div
-                key={dateStr}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); handleDrop(id, dateStr); }}
-                className={`min-h-[80px] rounded-lg border p-1.5 ${isToday ? 'border-slate-400 dark:border-slate-500' : 'border-slate-200 dark:border-slate-800'} ${!isCurrentMonth ? 'opacity-40' : ''}`}
-              >
-                <p className={`mb-1 text-xs font-medium ${isToday ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>{d.getDate()}</p>
-                <div className="space-y-1">
-                  {dayPosts.slice(0, 3).map((p) => (
-                    <div key={p.id} draggable onDragStart={(e) => e.dataTransfer.setData('text/plain', p.id)} onClick={() => setSelectedPost(p)} className={`cursor-move rounded border px-1.5 py-1 text-xs ${statusColors[p.status] ?? statusColors.draft}`}>
-                      <p className="truncate">{p.title ?? (p.content.slice(0, 30) || t('calendar.untitled'))}</p>
-                      {p.platforms.slice(0, 2).map((pl) => <span key={pl} className={`mr-1 inline-block rounded px-1 text-[10px] ${platformColors[pl] ?? ''}`}>{pl.slice(0, 2)}</span>)}
-                    </div>
-                  ))}
-                  {dayPosts.length > 3 && <p className="text-xs text-slate-400">{t('calendar.morePosts', { count: dayPosts.length - 3 })}</p>}
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:overflow-visible sm:px-0">
+          <div className="grid min-w-[560px] grid-cols-7 gap-1 sm:min-w-0">
+            {weekdayLabels.map((d) => (
+              <div key={d} className="pb-1 text-center text-xs font-semibold uppercase text-slate-400">{d}</div>
+            ))}
+            {days.map((d) => {
+              const dateStr = d.toISOString().slice(0, 10);
+              const dayPosts = postsByDate.get(dateStr) ?? [];
+              const isToday = dateStr === new Date().toISOString().slice(0, 10);
+              const isCurrentMonth = view === 'week' || d.getMonth() === currentDate.getMonth();
+              return (
+                <div
+                  key={dateStr}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); handleDrop(id, dateStr); }}
+                  className={`min-h-[70px] rounded-lg border p-1.5 sm:min-h-[80px] ${isToday ? 'border-slate-400 dark:border-slate-500' : 'border-slate-200 dark:border-slate-800'} ${!isCurrentMonth ? 'opacity-40' : ''}`}
+                >
+                  <p className={`mb-1 text-xs font-medium ${isToday ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>{d.getDate()}</p>
+                  <div className="space-y-1">
+                    {dayPosts.slice(0, 3).map((p) => (
+                      <div key={p.id} draggable onDragStart={(e) => e.dataTransfer.setData('text/plain', p.id)} onClick={() => setSelectedPost(p)} className={`cursor-move rounded border px-1.5 py-1 text-xs ${statusColors[p.status] ?? statusColors.draft}`}>
+                        <p className="truncate">{p.title ?? (p.content.slice(0, 30) || t('calendar.untitled'))}</p>
+                        {p.platforms.slice(0, 2).map((pl) => <span key={pl} className={`mr-1 inline-block rounded px-1 text-[10px] ${platformColors[pl] ?? ''}`}>{pl.slice(0, 2)}</span>)}
+                      </div>
+                    ))}
+                    {dayPosts.length > 3 && <p className="text-xs text-slate-400">{t('calendar.morePosts', { count: dayPosts.length - 3 })}</p>}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 

@@ -104,31 +104,33 @@ export function AutomationPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('automation.title')}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('automation.subtitle')}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
           <button
             onClick={handleToggleAutoPublish}
             disabled={togglingAutoPublish}
-            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition disabled:opacity-50 ${
+            className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition disabled:opacity-50 ${
               workspace.auto_publish_enabled
                 ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
                 : 'border-slate-300 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400'
             }`}
             title={t('automation.autoPublish.tooltip')}
           >
-            <span className={`h-2 w-2 rounded-full ${workspace.auto_publish_enabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+            <span className={`h-2 w-2 shrink-0 rounded-full ${workspace.auto_publish_enabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
             {t('automation.autoPublish.label')} {workspace.auto_publish_enabled ? t('automation.autoPublish.on') : t('automation.autoPublish.off')}
           </button>
-          <Button variant="outline" onClick={() => reload()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> {t('automation.refresh')}
-          </Button>
-          <Button onClick={handleRunNow} disabled={actioningId === 'run_now'}>
-            <Play className="h-4 w-4" /> {t('automation.runJobsNow')}
-          </Button>
+          <div className="flex gap-2">
+            <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => reload()} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> {t('automation.refresh')}
+            </Button>
+            <Button className="flex-1 sm:flex-none" onClick={handleRunNow} disabled={actioningId === 'run_now'}>
+              <Play className="h-4 w-4" /> {t('automation.runJobsNow')}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -222,7 +224,7 @@ export function AutomationPage() {
 
       {/* Failed Queue */}
       <Card>
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-rose-500" />
             <h2 className="text-sm font-semibold text-slate-900 dark:text-white">{t('automation.failedQueue.title')}</h2>
@@ -248,7 +250,7 @@ export function AutomationPage() {
                   <button
                     onClick={() => handleRetryTarget(tgt.id)}
                     disabled={actioningId === tgt.id}
-                    className="flex items-center gap-1 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-emerald-600 disabled:opacity-50 dark:hover:bg-slate-800"
+                    className="flex min-h-[36px] items-center gap-1 rounded px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-emerald-600 disabled:opacity-50 dark:hover:bg-slate-800"
                     title={t('automation.failedQueue.retryNow')}
                   >
                     <RotateCcw className="h-3.5 w-3.5" /> {t('automation.failedQueue.retryButton')}

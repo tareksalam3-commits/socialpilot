@@ -260,7 +260,7 @@ export function AISettingsPage() {
               placeholder="openrouter/auto"
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
                 {t('ai.settings.model.temperatureLabel')} <span className="font-mono">{settings?.temperature ?? 0.7}</span>

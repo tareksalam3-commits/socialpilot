@@ -141,7 +141,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
         </div>
         <button
           onClick={() => setCollapsed((v) => !v)}
-          className="hidden rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 lg:block"
+          className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 lg:flex"
           aria-label={t('sidebar.toggle')}
         >
           {(collapsed && dir === 'ltr') || (!collapsed && dir === 'rtl') ? (
@@ -152,7 +152,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
         </button>
         <button
           onClick={() => setMobileOpen(false)}
-          className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 lg:hidden"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 lg:hidden"
           aria-label={t('sidebar.closeMenu')}
         >
           <XIcon className="h-5 w-5" />
@@ -175,7 +175,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                   onMouseEnter={() => prefetch(item.to)}
                   onFocus={() => prefetch(item.to)}
                   className={({ isActive }) =>
-                    `group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+                    `group relative flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150 ${
                       isActive
                         ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white'
                         : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
@@ -272,7 +272,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
           <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setMobileOpen(true)}
-              className="press-effect rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 lg:hidden"
+              className="press-effect flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 lg:hidden"
               aria-label={t('sidebar.openMenu')}
             >
               <Menu className="h-5 w-5" />

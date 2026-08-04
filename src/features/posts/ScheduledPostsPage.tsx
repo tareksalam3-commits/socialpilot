@@ -96,27 +96,29 @@ export function ScheduledPostsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('posts.title')}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('posts.subtitle')}</p>
         </div>
-        <Button onClick={handleNew}><Plus className="h-4 w-4" /> {t('posts.newPost')}</Button>
+        <Button onClick={handleNew} className="w-full sm:w-auto"><Plus className="h-4 w-4" /> {t('posts.newPost')}</Button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative max-w-xs flex-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="relative sm:max-w-xs sm:flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input type="search" placeholder={t('posts.searchPlaceholder')} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
         </div>
-        <select value={filterStatus ?? ''} onChange={(e) => setFilterStatus(e.target.value as PostStatus || null)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
-          <option value="">{t('posts.filter.allStatuses')}</option>
-          {statusOptions.map((s) => <option key={s} value={s}>{t(`post.status.${s}`)}</option>)}
-        </select>
-        <select value={filterPlatform ?? ''} onChange={(e) => setFilterPlatform(e.target.value || null)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
-          <option value="">{t('posts.filter.allPlatforms')}</option>
-          {platformOptions.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <select value={filterStatus ?? ''} onChange={(e) => setFilterStatus(e.target.value as PostStatus || null)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 sm:w-auto">
+            <option value="">{t('posts.filter.allStatuses')}</option>
+            {statusOptions.map((s) => <option key={s} value={s}>{t(`post.status.${s}`)}</option>)}
+          </select>
+          <select value={filterPlatform ?? ''} onChange={(e) => setFilterPlatform(e.target.value || null)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 sm:w-auto">
+            <option value="">{t('posts.filter.allPlatforms')}</option>
+            {platformOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
       </div>
 
       {error ? (
@@ -138,18 +140,18 @@ export function ScheduledPostsPage() {
                 <TableCell className="text-xs text-slate-500 dark:text-slate-400">{p.platforms.length > 0 ? p.platforms.join(', ') : '—'}</TableCell>
                 <TableCell className="text-xs text-slate-500 dark:text-slate-400">{p.scheduled_for ? formatDateTime(p.scheduled_for) : '—'}</TableCell>
                 <TableCell>
-                  <div className="flex gap-1">
+                  <div className="flex gap-0.5">
                     {(p.status === 'draft' || p.status === 'failed') && (
-                      <button onClick={() => handlePublish(p)} disabled={publishing} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-emerald-600 dark:hover:bg-slate-800" title={t('posts.action.publishNow')}><Send className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => handlePublish(p)} disabled={publishing} className="flex h-9 w-9 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-emerald-600 dark:hover:bg-slate-800" title={t('posts.action.publishNow')}><Send className="h-3.5 w-3.5" /></button>
                     )}
-                    <button onClick={() => handleEdit(p)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('posts.action.edit')}><Edit2 className="h-3.5 w-3.5" /></button>
-                    <button onClick={() => duplicate(p.id)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('posts.action.duplicate')}><Copy className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => handleEdit(p)} className="flex h-9 w-9 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('posts.action.edit')}><Edit2 className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => duplicate(p.id)} className="flex h-9 w-9 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('posts.action.duplicate')}><Copy className="h-3.5 w-3.5" /></button>
                     {p.status === 'archived' ? (
-                      <button onClick={() => handleRestore(p)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('posts.action.restore')}><RotateCcw className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => handleRestore(p)} className="flex h-9 w-9 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('posts.action.restore')}><RotateCcw className="h-3.5 w-3.5" /></button>
                     ) : (
-                      <button onClick={() => handleArchive(p)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('posts.action.archive')}><FileText className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => handleArchive(p)} className="flex h-9 w-9 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('posts.action.archive')}><FileText className="h-3.5 w-3.5" /></button>
                     )}
-                    <button onClick={() => remove(p.id)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-500 dark:hover:bg-slate-800" title={t('posts.action.delete')}><Trash2 className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => remove(p.id)} className="flex h-9 w-9 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-rose-500 dark:hover:bg-slate-800" title={t('posts.action.delete')}><Trash2 className="h-3.5 w-3.5" /></button>
                   </div>
                 </TableCell>
               </TableRow>
