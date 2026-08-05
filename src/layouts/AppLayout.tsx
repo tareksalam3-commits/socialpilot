@@ -8,6 +8,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Database,
   History,
   Image as ImageIcon,
   Inbox as InboxIcon,
@@ -60,6 +61,7 @@ const navSections = [
     items: [
       { to: '/app/playground', labelKey: 'nav.playground', icon: MessageSquare },
       { to: '/app/studio', labelKey: 'nav.contentStudio', icon: Wand2 },
+      { to: '/app/content-sources', labelKey: 'nav.contentSources', icon: Database },
       { to: '/app/prompts', labelKey: 'nav.prompts', icon: Library },
       { to: '/app/ai-history', labelKey: 'nav.aiHistory', icon: History },
       { to: '/app/token-analytics', labelKey: 'nav.tokenAnalytics', icon: ZapIcon },

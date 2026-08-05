@@ -36,6 +36,7 @@ const {
   tokenAnalytics: { Component: TokenAnalyticsPage },
   aiSettings: { Component: AISettingsPage },
   brandVoice: { Component: BrandVoicePage },
+  contentSources: { Component: ContentSourcesPage },
 } = pages;
 
 function App() {
@@ -89,6 +90,7 @@ function App() {
                   <Route path="token-analytics" element={<TokenAnalyticsPage />} />
                   <Route path="ai-settings" element={<AISettingsPage />} />
                   <Route path="brand-voice" element={<BrandVoicePage />} />
+                  <Route path="content-sources" element={<ContentSourcesPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                 </Route>
                 <Route path="/" element={<Navigate to="/app/assistant" replace />} />

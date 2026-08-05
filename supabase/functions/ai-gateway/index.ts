@@ -25,6 +25,11 @@ type ChatRequestBody = {
   stream?: boolean;
   free_only?: boolean;
   brand_voice?: Record<string, unknown> | null;
+  // Source content pulled from a Content Sources fetch (article body, PDF/Word/Excel
+  // text, YouTube transcript, etc). When present it's injected as its own system
+  // block so the model treats it as reference material for the user's prompt,
+  // separate from brand voice instructions.
+  content_text?: string | null;
 };
 
 type ModelInfo = {
@@ -340,6 +345,23 @@ ${languageRule}`;
     messages = [{ role: 'system', content: systemContent }, ...messages];
   } else {
     messages = [{ role: 'system', content: languageRule }, ...messages];
+  }
+
+  if (body.content_text && body.content_text.trim()) {
+    // Cap what we forward — this is summarized/excerpted content coming out of
+    // Content Sources already, so it should be short, but guard against an
+    // oversized paste blowing the request budget regardless.
+    const sourceContent = body.content_text.trim().slice(0, 12_000);
+    messages = [
+      {
+        role: 'system',
+        content:
+          'The user has selected the following source content (from an article, document, or video ' +
+          'transcript) to base their request on. Use it as your factual reference material; do not ' +
+          'invent facts beyond it:\n\n---\n' + sourceContent + '\n---',
+      },
+      ...messages,
+    ];
   }
 
   const startTime = Date.now();

@@ -39,6 +39,7 @@ export const pages = {
   tokenAnalytics: page(() => import('@/features/ai/TokenAnalyticsPage'), 'TokenAnalyticsPage'),
   aiSettings: page(() => import('@/features/ai/AISettingsPage'), 'AISettingsPage'),
   brandVoice: page(() => import('@/features/ai/BrandVoicePage'), 'BrandVoicePage'),
+  contentSources: page(() => import('@/features/contentSources/ContentSourcesPage'), 'ContentSourcesPage'),
 } as const;
 
 /** Maps each `/app/*` route path to its preload function, for hover-prefetching from the sidebar. */
@@ -61,6 +62,7 @@ export const preloadByPath: Record<string, () => Promise<unknown>> = {
   '/app/workspace': pages.workspace.preload,
   '/app/notifications': pages.notifications.preload,
   '/app/brand-voice': pages.brandVoice.preload,
+  '/app/content-sources': pages.contentSources.preload,
   '/app/ai-settings': pages.aiSettings.preload,
   '/app/settings': pages.settings.preload,
 };

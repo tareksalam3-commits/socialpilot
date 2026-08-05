@@ -23,6 +23,10 @@ export type GenerateOptions = {
   stream?: boolean;
   freeOnly?: boolean;
   brandVoice?: Record<string, unknown> | null;
+  // Source content selected from Content Sources (article/document/transcript
+  // excerpt) to ground this generation in — forwarded to the gateway as
+  // `content_text`.
+  contentText?: string | null;
   onChunk?: (chunk: string) => void;
 };
 
@@ -40,6 +44,7 @@ export const aiGateway = {
         stream: opts.stream,
         free_only: opts.freeOnly,
         brand_voice: opts.brandVoice,
+        content_text: opts.contentText,
       }),
     });
 
