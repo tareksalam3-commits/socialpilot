@@ -194,6 +194,9 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     'auth.resetPassword.toastFailed': 'فشلت إعادة التعيين',
     'auth.resetPassword.toastSuccess': 'تم تحديث كلمة المرور',
     'auth.resetPassword.toastSuccessDesc': 'يمكنك الآن تسجيل الدخول بكلمة المرور الجديدة.',
+    'auth.resetPassword.verifying': 'جارٍ التحقق من الرابط…',
+    'auth.resetPassword.invalidLink': 'رابط إعادة التعيين غير صالح أو منتهي الصلاحية.',
+    'auth.resetPassword.requestNewLink': 'طلب رابط جديد',
     'authLayout.tagline': 'خطّط وجدول ونمِّ حضورك على مواقع التواصل الاجتماعي.',
     'authLayout.description': 'مساحة العمل الشاملة لإدارة حسابات التواصل الاجتماعي، مدعومة بالذكاء الاصطناعي.',
 
@@ -933,6 +936,9 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     'auth.resetPassword.toastFailed': 'Reset failed',
     'auth.resetPassword.toastSuccess': 'Password updated',
     'auth.resetPassword.toastSuccessDesc': 'You can now sign in with your new password.',
+    'auth.resetPassword.verifying': 'Verifying link…',
+    'auth.resetPassword.invalidLink': 'The reset link is invalid or has expired.',
+    'auth.resetPassword.requestNewLink': 'Request a new link',
     'authLayout.tagline': 'Plan, schedule, and grow your social presence.',
     'authLayout.description': 'The all-in-one workspace for managing your social media accounts, powered by AI.',
 
@@ -1670,6 +1676,9 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     'auth.resetPassword.toastFailed': 'Échec de la réinitialisation',
     'auth.resetPassword.toastSuccess': 'Mot de passe mis à jour',
     'auth.resetPassword.toastSuccessDesc': 'Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.',
+    'auth.resetPassword.verifying': 'Vérification du lien…',
+    'auth.resetPassword.invalidLink': 'Le lien de réinitialisation est invalide ou a expiré.',
+    'auth.resetPassword.requestNewLink': 'Demander un nouveau lien',
     'authLayout.tagline': 'Planifiez et développez votre présence sociale.',
     'authLayout.description': 'Espace de travail tout-en-un pour gérer vos comptes sociaux, propulsé par IA.',
 
@@ -2407,6 +2416,9 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     'auth.resetPassword.toastFailed': 'Error al restablecer',
     'auth.resetPassword.toastSuccess': 'Contraseña actualizada',
     'auth.resetPassword.toastSuccessDesc': 'Ahora puedes iniciar sesión con tu nueva contraseña.',
+    'auth.resetPassword.verifying': 'Verificando enlace…',
+    'auth.resetPassword.invalidLink': 'El enlace de restablecimiento no es válido o ha expirado.',
+    'auth.resetPassword.requestNewLink': 'Solicitar un nuevo enlace',
     'authLayout.tagline': 'Planifica y haz crecer tu presencia social.',
     'authLayout.description': 'El espacio de trabajo todo en uno para gestionar tus redes sociales, con IA.',
 
