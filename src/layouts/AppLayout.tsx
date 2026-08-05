@@ -1,6 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { NotificationCenter } from '@/features/notifications/NotificationCenter';
-import { toggleCommandBar } from '@/features/ai/CommandBar';
 import {
   BarChart3,
   Bell as BellIcon,
@@ -38,6 +37,7 @@ const navSections = [
   {
     labelKey: 'nav.section.overview',
     items: [
+      { to: '/app/automation', labelKey: 'nav.automation', icon: Bot },
       { to: '/app/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard },
       { to: '/app/analytics', labelKey: 'nav.analytics', icon: BarChart3 },
       { to: '/app/search', labelKey: 'nav.search', icon: SearchIcon },
@@ -51,7 +51,6 @@ const navSections = [
       { to: '/app/calendar', labelKey: 'nav.calendar', icon: CalendarDays },
       { to: '/app/media', labelKey: 'nav.mediaLibrary', icon: ImageIcon },
       { to: '/app/inbox', labelKey: 'nav.inbox', icon: InboxIcon },
-      { to: '/app/automation', labelKey: 'nav.automation', icon: Bot },
     ],
   },
   {
@@ -232,22 +231,6 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-3">
-            <button
-              onClick={toggleCommandBar}
-              className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-gradient-to-r from-violet-50 to-indigo-50 px-3 py-1.5 text-sm font-medium text-violet-700 transition hover:from-violet-100 hover:to-indigo-100 dark:border-slate-700 dark:from-violet-900/30 dark:to-indigo-900/30 dark:text-violet-300 dark:hover:from-violet-900/50 dark:hover:to-indigo-900/50 sm:flex"
-              aria-label={t('ai.commandBar.open')}
-            >
-              <Sparkles className="h-4 w-4" />
-              <span>SocialPilot AI</span>
-              <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-600 dark:bg-violet-900/50 dark:text-violet-400">⌘K</span>
-            </button>
-            <button
-              onClick={toggleCommandBar}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-violet-500 to-indigo-500 text-white shadow-sm transition hover:from-violet-600 hover:to-indigo-600 sm:hidden"
-              aria-label={t('ai.commandBar.open')}
-            >
-              <Sparkles className="h-4 w-4" />
-            </button>
             <NotificationCenter />
             <div className="hidden text-right md:block">
               <p className="text-sm font-medium text-slate-900 dark:text-white">
