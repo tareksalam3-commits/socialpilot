@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { Camera, Eye, EyeOff, Globe, Key, Loader2, Monitor, Moon, Plug, Shield, Sun, User as UserIcon, Wrench, Send } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Eye, EyeOff, Globe, Monitor, Moon, Plug, Shield, Sun, User as UserIcon, Wrench } from 'lucide-react';
 import { useAuth } from '@/providers/AuthProvider';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useToast } from '@/providers/ToastProvider';
@@ -9,28 +9,35 @@ import { LANGUAGES } from '@/i18n/translations';
 import { Badge, Button, Card, Input, Tabs } from '@/ui';
 import { profileRepository } from '@/repositories/profileRepository';
 import { workspaceRepository } from '@/repositories/workspaceRepository';
-import { apiKeyRepository } from '@/repositories/apiKeyRepository';
 import { platformCredentialsRepository, type CredentialKey, type CredentialStatus } from '@/repositories/platformCredentialsRepository';
 import { supabase } from '@/services/supabase';
 import { validateRequired } from '@/utils/validation';
-import type { ApiKey } from '@/types/database';
 import { formatDate, initials } from '@/utils/format';
 
-type TabId = 'general' | 'profile' | 'workspace' | 'security' | 'apikeys' | 'integrations' | 'publishing';
+type TabId = 'general' | 'profile' | 'workspace' | 'appearance' | 'language' | 'security' | 'integrations';
 
 export function SettingsPage() {
   const [tab, setTab] = useState<TabId>('general');
   const { t } = useLanguage();
 
-  const tabs = [
-    { id: 'general' as TabId, label: t('settings.tab.general'), icon: <Wrench className="h-4 w-4" /> },
-    { id: 'profile' as TabId, label: t('settings.tab.profile'), icon: <UserIcon className="h-4 w-4" /> },
-    { id: 'workspace' as TabId, label: t('settings.tab.workspace'), icon: <Shield className="h-4 w-4" /> },
-    { id: 'publishing' as TabId, label: t('settings.tab.publishing'), icon: <Send className="h-4 w-4" /> },
-    { id: 'integrations' as TabId, label: t('settings.tab.integrations'), icon: <Plug className="h-4 w-4" /> },
-    { id: 'security' as TabId, label: t('settings.tab.security'), icon: <Shield className="h-4 w-4" /> },
-    { id: 'apikeys' as TabId, label: t('settings.tab.apikeys'), icon: <Key className="h-4 w-4" /> },
+  const items: Record<TabId, { label: string; icon: ReactNode }> = {
+    general: { label: t('settings.tab.general'), icon: <Wrench className="h-4 w-4" /> },
+    profile: { label: t('settings.tab.profile'), icon: <UserIcon className="h-4 w-4" /> },
+    workspace: { label: t('settings.tab.workspace'), icon: <Shield className="h-4 w-4" /> },
+    appearance: { label: t('settings.tab.appearance'), icon: <Monitor className="h-4 w-4" /> },
+    language: { label: t('settings.tab.language'), icon: <Globe className="h-4 w-4" /> },
+    integrations: { label: t('settings.tab.integrations'), icon: <Plug className="h-4 w-4" /> },
+    security: { label: t('settings.tab.security'), icon: <Shield className="h-4 w-4" /> },
+  };
+
+  const groups: { title: string; tabs: TabId[] }[] = [
+    { title: t('settings.group.workspace'), tabs: ['general', 'workspace', 'language'] },
+    { title: t('settings.group.account'), tabs: ['profile', 'security'] },
+    { title: t('settings.group.appearance'), tabs: ['appearance'] },
+    { title: t('settings.group.publishing'), tabs: ['integrations'] },
   ];
+
+  const flatTabs = groups.flatMap((g) => g.tabs).map((id) => ({ id, label: items[id].label, icon: items[id].icon }));
 
   return (
     <div className="space-y-6">
@@ -38,20 +45,57 @@ export function SettingsPage() {
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('settings.title')}</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('settings.subtitle')}</p>
       </div>
-      <Tabs tabs={tabs} active={tab} onChange={(t) => setTab(t as TabId)} />
-      <div>
-        {tab === 'general' && <GeneralTab />}
-        {tab === 'profile' && <ProfileTab />}
-        {tab === 'workspace' && <WorkspaceTab />}
-        {tab === 'security' && <SecurityTab />}
-        {tab === 'apikeys' && <ApiKeysTab />}
-        {tab === 'integrations' && <IntegrationsTab />}
+
+      {/* Mobile / narrow screens: horizontal scrollable tabs */}
+      <div className="lg:hidden">
+        <Tabs tabs={flatTabs} active={tab} onChange={(id) => setTab(id as TabId)} />
+      </div>
+
+      <div className="lg:flex lg:items-start lg:gap-8">
+        {/* Desktop: grouped sidebar navigation */}
+        <nav className="hidden w-56 shrink-0 lg:block">
+          <div className="space-y-6">
+            {groups.map((group) => (
+              <div key={group.title}>
+                <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                  {group.title}
+                </p>
+                <div className="space-y-0.5">
+                  {group.tabs.map((id) => (
+                    <button
+                      key={id}
+                      onClick={() => setTab(id)}
+                      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+                        tab === id
+                          ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                          : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {items[id].icon}
+                      {items[id].label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </nav>
+
+        <div className="min-w-0 flex-1">
+          {tab === 'general' && <GeneralTab />}
+          {tab === 'profile' && <ProfileTab />}
+          {tab === 'workspace' && <WorkspaceTab />}
+          {tab === 'appearance' && <AppearanceTab />}
+          {tab === 'language' && <LanguageTab />}
+          {tab === 'security' && <SecurityTab />}
+          {tab === 'integrations' && <IntegrationsTab />}
+        </div>
       </div>
     </div>
   );
 }
 
-function LanguageSection() {
+function LanguageTab() {
   const { language, setLanguage, t } = useLanguage();
   const { push } = useToast();
 
@@ -61,10 +105,8 @@ function LanguageSection() {
   };
 
   return (
-    <div>
-      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{t('settings.language.title')}</h3>
-      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{t('settings.language.description')}</p>
-      <div className="mt-3 grid grid-cols-2 gap-4 sm:max-w-sm">
+    <Card title={t('settings.language.title')} description={t('settings.language.description')}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {LANGUAGES.map((lang) => (
           <button
             key={lang.code}
@@ -81,56 +123,7 @@ function LanguageSection() {
           </button>
         ))}
       </div>
-    </div>
-  );
-}
-
-function AppearanceSection() {
-  const { theme, setTheme } = useTheme();
-  const { push } = useToast();
-  const { profile, refreshProfile } = useAuth();
-  const { t } = useLanguage();
-
-  const apply = async (nextTheme: 'light' | 'dark' | 'system') => {
-    setTheme(nextTheme);
-    if (profile) {
-      try {
-        await profileRepository.update(profile.user_id, { theme: nextTheme });
-        await refreshProfile();
-        push({ title: t('settings.appearance.toast.saved'), variant: 'success' });
-      } catch {
-        // theme still applies locally
-      }
-    }
-  };
-
-  const options = [
-    { id: 'light' as const, label: t('settings.appearance.light'), icon: <Sun className="h-5 w-5" /> },
-    { id: 'dark' as const, label: t('settings.appearance.dark'), icon: <Moon className="h-5 w-5" /> },
-    { id: 'system' as const, label: t('settings.appearance.system'), icon: <Monitor className="h-5 w-5" /> },
-  ];
-
-  return (
-    <div>
-      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{t('settings.appearance.title')}</h3>
-      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{t('settings.appearance.description')}</p>
-      <div className="mt-3 grid grid-cols-3 gap-4 sm:max-w-md">
-        {options.map((opt) => (
-          <button
-            key={opt.id}
-            onClick={() => apply(opt.id)}
-            className={`flex flex-col items-center gap-2 rounded-lg border p-4 transition ${
-              theme === opt.id
-                ? 'border-slate-900 bg-slate-50 dark:border-white dark:bg-slate-800'
-                : 'border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600'
-            }`}
-          >
-            <span className="text-slate-700 dark:text-slate-300">{opt.icon}</span>
-            <span className="text-sm font-medium text-slate-900 dark:text-white">{opt.label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
+    </Card>
   );
 }
 
@@ -139,23 +132,15 @@ function GeneralTab() {
   const { workspace } = useWorkspace();
   const { t } = useLanguage();
   return (
-    <div className="space-y-6">
-      <Card title={t('settings.general.title')} description={t('settings.general.description')}>
-        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Info label={t('settings.general.email')} value={profile ? '—' : '—'} />
-          <Info label={t('settings.general.fullName')} value={profile?.full_name ?? t('settings.notSet')} />
-          <Info label={t('settings.general.workspace')} value={workspace?.name ?? t('settings.notSet')} />
-          <Info label={t('settings.general.brandName')} value={workspace?.brand_name ?? t('settings.notSet')} />
-          <Info label={t('settings.general.language')} value={workspace?.language ?? 'en'} />
-        </dl>
-      </Card>
-      <Card>
-        <div className="space-y-6 divide-y divide-slate-200 dark:divide-slate-800 [&>*:not(:first-child)]:pt-6">
-          <LanguageSection />
-          <AppearanceSection />
-        </div>
-      </Card>
-    </div>
+    <Card title={t('settings.general.title')} description={t('settings.general.description')}>
+      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Info label={t('settings.general.email')} value={profile ? '—' : '—'} />
+        <Info label={t('settings.general.fullName')} value={profile?.full_name ?? t('settings.notSet')} />
+        <Info label={t('settings.general.workspace')} value={workspace?.name ?? t('settings.notSet')} />
+        <Info label={t('settings.general.brandName')} value={workspace?.brand_name ?? t('settings.notSet')} />
+        <Info label={t('settings.general.language')} value={workspace?.language ?? 'ar'} />
+      </dl>
+    </Card>
   );
 }
 
@@ -168,8 +153,6 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
-const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
-
 function ProfileTab() {
   const { user, profile, refreshProfile } = useAuth();
   const { push } = useToast();
@@ -177,37 +160,9 @@ function ProfileTab() {
   const [fullName, setFullName] = useState(profile?.full_name ?? '');
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url ?? '');
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleAvatarPick = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !user) return;
-    if (!file.type.startsWith('image/')) {
-      push({ title: t('settings.profile.uploadError'), description: t('settings.profile.uploadInvalidType'), variant: 'error' });
-      return;
-    }
-    if (file.size > MAX_AVATAR_BYTES) {
-      push({ title: t('settings.profile.uploadError'), description: t('settings.profile.uploadTooLarge'), variant: 'error' });
-      return;
-    }
-    setUploading(true);
-    try {
-      const url = await profileRepository.uploadAvatar(user.id, file);
-      setAvatarUrl(url);
-      await profileRepository.update(user.id, { avatar_url: url });
-      await refreshProfile();
-      push({ title: t('settings.profile.toast.updated'), variant: 'success' });
-    } catch (e) {
-      push({ title: t('settings.profile.uploadError'), description: e instanceof Error ? e.message : '', variant: 'error' });
-    } finally {
-      setUploading(false);
-    }
-  };
 
   const handleSave = async () => {
-    const nameErr = validateRequired(fullName, 'Full name');
+    const nameErr = validateRequired(fullName, t('settings.profile.fullName'), t);
     if (!nameErr.valid) {
       push({ title: t('settings.profile.toast.validationError'), description: nameErr.error!, variant: 'error' });
       return;
@@ -227,37 +182,23 @@ function ProfileTab() {
   return (
     <Card title={t('settings.profile.title')} description={t('settings.profile.description')}>
       <div className="flex items-center gap-4">
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          className="group relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-lg font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200"
-        >
-          {avatarUrl ? (
-            <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
-          ) : (
-            initials(fullName || user?.email)
-          )}
-          <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100">
-            {uploading ? <Loader2 className="h-5 w-5 animate-spin text-white" /> : <Camera className="h-5 w-5 text-white" />}
-          </span>
-        </button>
-        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarPick} />
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-200 text-lg font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+          {initials(fullName || user?.email)}
+        </div>
         <div>
           <p className="text-sm font-medium text-slate-900 dark:text-white">{user?.email}</p>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="mt-0.5 text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-          >
-            {uploading ? t('settings.profile.uploading') : t('settings.profile.changePhoto')}
-          </button>
-          <p className="text-xs text-slate-500 dark:text-slate-400">{t('settings.profile.uploadHint')}</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">{t('settings.profile.avatarHint')}</p>
         </div>
       </div>
       <div className="mt-6 space-y-4">
         <Input label={t('settings.profile.fullName')} value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder={t('auth.fullNamePlaceholder')} />
+        <Input
+          label={t('settings.profile.avatarUrl')}
+          value={avatarUrl}
+          onChange={(e) => setAvatarUrl(e.target.value)}
+          placeholder="https://…"
+          hint={t('settings.profile.avatarUrlHint')}
+        />
         <div className="flex justify-end">
           <Button onClick={handleSave} loading={loading}>
             {t('settings.profile.saveChanges')}
@@ -274,12 +215,12 @@ function WorkspaceTab() {
   const [name, setName] = useState(workspace?.name ?? '');
   const [brandName, setBrandName] = useState(workspace?.brand_name ?? '');
   const [logoUrl, setLogoUrl] = useState(workspace?.logo_url ?? '');
-  const [language, setLanguage] = useState(workspace?.language ?? 'en');
+  const [language, setLanguage] = useState(workspace?.language ?? 'ar');
   const [loading, setLoading] = useState(false);
   const { t } = useLanguage();
 
   const handleSave = async () => {
-    const nameErr = validateRequired(name, 'Workspace name');
+    const nameErr = validateRequired(name, t('settings.workspace.name'), t);
     if (!nameErr.valid) {
       push({ title: t('settings.workspace.toast.validationError'), description: nameErr.error!, variant: 'error' });
       return;
@@ -308,7 +249,7 @@ function WorkspaceTab() {
         <Input label={t('settings.workspace.name')} value={name} onChange={(e) => setName(e.target.value)} placeholder="My Workspace" />
         <Input label={t('settings.workspace.brandName')} value={brandName} onChange={(e) => setBrandName(e.target.value)} placeholder="Acme Inc." />
         <Input label={t('settings.workspace.logoUrl')} value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…" />
-        <div className="sm:max-w-xs">
+        <div>
           <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('settings.workspace.contentLanguage')}</label>
           <select
             value={language}
@@ -318,6 +259,11 @@ function WorkspaceTab() {
             {[
               { code: 'ar', label: 'العربية' },
               { code: 'en', label: 'English' },
+              { code: 'es', label: 'Spanish' },
+              { code: 'fr', label: 'French' },
+              { code: 'de', label: 'German' },
+              { code: 'pt', label: 'Portuguese' },
+              { code: 'hi', label: 'Hindi' },
             ].map((l) => (
               <option key={l.code} value={l.code}>
                 {l.label}
@@ -330,6 +276,53 @@ function WorkspaceTab() {
             {t('settings.workspace.saveChanges')}
           </Button>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+function AppearanceTab() {
+  const { theme, setTheme } = useTheme();
+  const { push } = useToast();
+  const { profile, refreshProfile } = useAuth();
+  const { t } = useLanguage();
+
+  const apply = async (nextTheme: 'light' | 'dark' | 'system') => {
+    setTheme(nextTheme);
+    if (profile) {
+      try {
+        await profileRepository.update(profile.user_id, { theme: nextTheme });
+        await refreshProfile();
+        push({ title: t('settings.appearance.toast.saved'), variant: 'success' });
+      } catch {
+        // theme still applies locally
+      }
+    }
+  };
+
+  const options = [
+    { id: 'light' as const, label: t('settings.appearance.light'), icon: <Sun className="h-5 w-5" /> },
+    { id: 'dark' as const, label: t('settings.appearance.dark'), icon: <Moon className="h-5 w-5" /> },
+    { id: 'system' as const, label: t('settings.appearance.system'), icon: <Monitor className="h-5 w-5" /> },
+  ];
+
+  return (
+    <Card title={t('settings.appearance.title')} description={t('settings.appearance.description')}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {options.map((opt) => (
+          <button
+            key={opt.id}
+            onClick={() => apply(opt.id)}
+            className={`flex flex-col items-center gap-2 rounded-lg border p-4 transition ${
+              theme === opt.id
+                ? 'border-slate-900 bg-slate-50 dark:border-white dark:bg-slate-800'
+                : 'border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600'
+            }`}
+          >
+            <span className="text-slate-700 dark:text-slate-300">{opt.icon}</span>
+            <span className="text-sm font-medium text-slate-900 dark:text-white">{opt.label}</span>
+          </button>
+        ))}
       </div>
     </Card>
   );
@@ -423,134 +416,10 @@ function SecurityTab() {
   );
 }
 
-function ApiKeysTab() {
-  const { workspace } = useWorkspace();
-  const { push } = useToast();
-  const { t } = useLanguage();
-  const [keys, setKeys] = useState<ApiKey[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [label, setLabel] = useState('');
-  const [value, setValue] = useState('');
-  const [creating, setCreating] = useState(false);
-
-  const load = async () => {
-    if (!workspace) return;
-    try {
-      setLoading(true);
-      const data = await apiKeyRepository.list(workspace.id);
-      setKeys(data);
-    } catch (e) {
-      push({ title: t('settings.apikeys.toast.loadFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // load on mount / when workspace changes
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace?.id]);
-
-  const handleCreate = async () => {
-    const labelErr = validateRequired(label, 'Label');
-    const valueErr = validateRequired(value, 'API key value');
-    if (!labelErr.valid || !valueErr.valid) {
-      push({ title: t('settings.apikeys.toast.validationError'), description: labelErr.error ?? valueErr.error ?? '', variant: 'error' });
-      return;
-    }
-    if (!workspace) return;
-    setCreating(true);
-    try {
-      const masked = value.length > 8 ? `${value.slice(0, 4)}••••${value.slice(-4)}` : '••••';
-      const created = await apiKeyRepository.create({
-        workspace_id: workspace.id,
-        label,
-        masked_value: masked,
-      });
-      setKeys((prev) => [created, ...prev]);
-      setLabel('');
-      setValue('');
-      push({ title: t('settings.apikeys.toast.added'), variant: 'success' });
-    } catch (e) {
-      push({ title: t('settings.apikeys.toast.addFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const handleRevoke = async (id: string) => {
-    try {
-      await apiKeyRepository.revoke(id);
-      setKeys((prev) => prev.map((k) => (k.id === id ? { ...k, status: 'revoked' } : k)));
-      push({ title: t('settings.apikeys.toast.revoked'), variant: 'success' });
-    } catch (e) {
-      push({ title: t('settings.apikeys.toast.revokeFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <Card title={t('settings.apikeys.title')} description={t('settings.apikeys.description')}>
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Input label={t('settings.apikeys.label')} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="OpenAI" />
-            <Input
-              label={t('settings.apikeys.keyValue')}
-              type="password"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder="sk-…"
-            />
-            <div className="flex items-end">
-              <Button onClick={handleCreate} loading={creating} className="w-full">
-                {t('settings.apikeys.addKey')}
-              </Button>
-            </div>
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {t('settings.apikeys.note')}
-          </p>
-        </div>
-      </Card>
-
-      <Card title={t('settings.apikeys.storedKeys')}>
-        {loading ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
-        ) : keys.length === 0 ? (
-          <p className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">{t('settings.apikeys.none')}</p>
-        ) : (
-          <div className="space-y-2">
-            {keys.map((k) => (
-              <div
-                key={k.id}
-                className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3 dark:border-slate-800"
-              >
-                <div>
-                  <p className="text-sm font-medium text-slate-900 dark:text-white">{k.label}</p>
-                  <p className="font-mono text-xs text-slate-500 dark:text-slate-400">{k.masked_value}</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">{formatDate(k.created_at)}</span>
-                  <Badge variant={k.status === 'active' ? 'success' : 'error'}>{k.status}</Badge>
-                  {k.status === 'active' && (
-                    <Button size="sm" variant="ghost" onClick={() => handleRevoke(k.id)}>
-                      {t('settings.apikeys.revoke')}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
 const CREDENTIAL_FIELDS: { key: CredentialKey; label: string; placeholder: string; secret: boolean; group: 'meta' | 'linkedin' | 'general' }[] = [
   { key: 'meta_app_id', label: 'Meta App ID', placeholder: 'e.g. 1234567890123456', secret: false, group: 'meta' },
   { key: 'meta_app_secret', label: 'Meta App Secret', placeholder: 'Paste the app secret from Meta for Developers', secret: true, group: 'meta' },
+  { key: 'meta_config_id', label: 'Meta Login Configuration ID (only if using Facebook Login for Business)', placeholder: 'e.g. 123456789012345', secret: false, group: 'meta' },
   { key: 'linkedin_client_id', label: 'LinkedIn Client ID', placeholder: 'e.g. 86abcxyz12345', secret: false, group: 'linkedin' },
   { key: 'linkedin_client_secret', label: 'LinkedIn Client Secret', placeholder: 'Paste the client secret from the LinkedIn app', secret: true, group: 'linkedin' },
   { key: 'app_url', label: 'App URL', placeholder: 'https://your-app-domain.com', secret: false, group: 'general' },

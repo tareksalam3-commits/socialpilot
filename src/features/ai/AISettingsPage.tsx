@@ -1,49 +1,161 @@
-import { useState } from 'react';
-import { CheckCircle2, Loader2, Plug, Save, XCircle, Zap } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CheckCircle2, KeyRound, Loader2, Plug, Save, Trash2, XCircle, Zap } from 'lucide-react';
 import { useAISettings } from '@/hooks/useAISettings';
+import { useProviderKeys } from '@/hooks/useProviderKeys';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
 import { aiGateway } from '@/services/aiGateway';
-import { Badge, Button, Card, Input } from '@/ui';
-import type { ModelInfo } from '@/types/ai';
+import { Badge, Button, Card, Input, Skeleton } from '@/ui';
+import type { AiProvider, ModelInfo, ProviderInfo, ProviderStatus } from '@/types/ai';
 
 type ConnState = 'idle' | 'testing' | 'connected' | 'failed';
 
-export function AISettingsPage() {
+// Fallback shown while the live list loads from the edge function (?action=providers),
+// which is the source of truth for which providers are actually wired up server-side.
+const FALLBACK_PROVIDERS: ProviderInfo[] = [
+  { id: 'openrouter', label: 'OpenRouter', default_model: 'openrouter/auto', supports_model_list: true },
+  { id: 'groq', label: 'Groq', default_model: 'llama-3.3-70b-versatile', supports_model_list: true },
+  { id: 'cerebras', label: 'Cerebras', default_model: 'llama-3.3-70b', supports_model_list: true },
+  { id: 'nvidia', label: 'NVIDIA NIM', default_model: 'meta/llama-3.3-70b-instruct', supports_model_list: true },
+  { id: 'mistral', label: 'Mistral', default_model: 'mistral-small-latest', supports_model_list: true },
+  { id: 'zai', label: 'Z.ai', default_model: 'glm-5.2', supports_model_list: false },
+];
+
+function ProviderKeyRow({
+  provider,
+  status,
+  workspaceId,
+  onSave,
+  onClear,
+}: {
+  provider: ProviderInfo;
+  status: ProviderStatus | null;
+  workspaceId: string;
+  onSave: (provider: AiProvider, key: string) => Promise<void>;
+  onClear: (provider: AiProvider) => Promise<void>;
+}) {
   const { t } = useLanguage();
-  const { workspace } = useWorkspace();
-  const { settings, loading, update, setApiKey } = useAISettings();
   const { push } = useToast();
-
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [connState, setConnState] = useState<ConnState>('idle');
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
+  const [value, setValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testState, setTestState] = useState<ConnState>('idle');
 
-  const handleSaveKey = async () => {
-    if (!apiKeyInput.trim()) {
-      push({ title: t('ai.settings.toast.enterApiKey'), variant: 'error' });
+  const configured = status?.configured ?? false;
+
+  const handleSave = async () => {
+    if (!value.trim()) {
+      push({ title: t('ai.settings.providers.toast.enterKey'), variant: 'error' });
       return;
     }
     setSaving(true);
     try {
-      await setApiKey(apiKeyInput);
-      setApiKeyInput('');
-      push({ title: t('ai.settings.toast.keySaved'), description: t('ai.settings.toast.keySavedDesc'), variant: 'success' });
+      await onSave(provider.id, value.trim());
+      setValue('');
+      push({ title: t('ai.settings.providers.toast.saved', { provider: provider.label }), variant: 'success' });
     } catch (e) {
-      push({ title: t('ai.settings.toast.saveFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
+      push({ title: t('ai.settings.providers.toast.saveFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
     } finally {
       setSaving(false);
     }
   };
 
   const handleTest = async () => {
+    setTesting(true);
+    setTestState('testing');
+    try {
+      await aiGateway.testConnection(workspaceId, provider.id);
+      setTestState('connected');
+      push({ title: t('ai.settings.providers.toast.testOk', { provider: provider.label }), variant: 'success' });
+    } catch (e) {
+      setTestState('failed');
+      push({ title: t('ai.settings.providers.toast.testFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleClear = async () => {
+    try {
+      await onClear(provider.id);
+      push({ title: t('ai.settings.providers.toast.cleared', { provider: provider.label }), variant: 'success' });
+    } catch (e) {
+      push({ title: t('ai.settings.providers.toast.saveFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{provider.label}</span>
+          {configured ? (
+            <Badge variant="success">{t('ai.settings.providers.configured')}</Badge>
+          ) : (
+            <Badge>{t('ai.settings.providers.notConfigured')}</Badge>
+          )}
+          {testState === 'connected' && (
+            <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" /> {t('ai.settings.apiKey.connected')}</Badge>
+          )}
+          {testState === 'failed' && (
+            <Badge variant="error"><XCircle className="mr-1 h-3 w-3" /> {t('ai.settings.apiKey.failed')}</Badge>
+          )}
+        </div>
+        <span className="font-mono text-[11px] text-slate-400">{provider.default_model}</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Input
+          type="password"
+          placeholder={configured ? t('ai.settings.providers.placeholderConfigured') : t('ai.settings.providers.placeholder')}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="min-w-[220px] flex-1"
+        />
+        <Button size="sm" onClick={handleSave} loading={saving}>
+          <Save className="h-4 w-4" /> {t('ai.settings.apiKey.saveButton')}
+        </Button>
+        <Button variant="outline" size="sm" onClick={handleTest} loading={testing} disabled={!configured}>
+          <Plug className="h-4 w-4" /> {t('ai.settings.apiKey.testButton')}
+        </Button>
+        {configured && (
+          <Button variant="ghost" size="sm" onClick={handleClear}>
+            <Trash2 className="h-4 w-4" /> {t('ai.settings.providers.clear')}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function AISettingsPage() {
+  const { t } = useLanguage();
+  const { workspace } = useWorkspace();
+  const { settings, loading, update } = useAISettings();
+  const { loading: keysLoading, saveKey, clearKey, statusFor } = useProviderKeys();
+  const { push } = useToast();
+
+  const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
+  const [connState, setConnState] = useState<ConnState>('idle');
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+
+  useEffect(() => {
+    aiGateway
+      .getProviders()
+      .then((list) => {
+        if (list.length > 0) setProviders(list);
+      })
+      .catch(() => {
+        // keep the fallback list — the "AI Settings" page should still be usable offline
+      });
+  }, []);
+
+  const handleTest = async () => {
     if (!workspace) return;
     setConnState('testing');
     try {
-      await aiGateway.testConnection(workspace.id);
+      await aiGateway.testConnection(workspace.id, settings?.provider);
       setConnState('connected');
       push({ title: t('ai.settings.toast.connectionSuccess'), description: t('ai.settings.toast.connectionSuccessDesc'), variant: 'success' });
     } catch (e) {
@@ -56,7 +168,7 @@ export function AISettingsPage() {
     if (!workspace) return;
     setLoadingModels(true);
     try {
-      const result = await aiGateway.listModels(workspace.id);
+      const result = await aiGateway.listModels(workspace.id, settings?.provider);
       setModels(result.models);
       push({ title: t('ai.settings.toast.modelsLoaded'), description: t('ai.settings.toast.modelsLoadedDesc', { free: result.free_count, total: result.total_count }), variant: 'success' });
     } catch (e) {
@@ -76,7 +188,15 @@ export function AISettingsPage() {
   };
 
   if (loading) {
-    return <div className="space-y-6"><div className="h-32 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" /></div>;
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="rounded-xl border border-slate-200 p-5 dark:border-slate-800">
+          <Skeleton className="mb-3 h-4 w-32" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      </div>
+    );
   }
 
   const freeModels = models.filter((m) => m.is_free);
@@ -88,43 +208,48 @@ export function AISettingsPage() {
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('ai.settings.subtitle')}</p>
       </div>
 
-      {/* API Key */}
-      <Card title={t('ai.settings.apiKey.title')} description={t('ai.settings.apiKey.description')}>
-        <div className="space-y-4">
-          <div className="flex gap-2">
-            <Input
-              type="password"
-              placeholder={t('ai.settings.apiKey.placeholder')}
-              value={apiKeyInput}
-              onChange={(e) => setApiKeyInput(e.target.value)}
-              className="flex-1"
-            />
-            <Button onClick={handleSaveKey} loading={saving}>
-              <Save className="h-4 w-4" /> {t('ai.settings.apiKey.saveButton')}
-            </Button>
+      {/* Provider API Keys — one ready slot per provider, all in one place */}
+      <Card title={t('ai.settings.providers.title')} description={t('ai.settings.providers.description')}>
+        {keysLoading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
           </div>
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" onClick={handleTest} loading={connState === 'testing'}>
-              <Plug className="h-4 w-4" /> {t('ai.settings.apiKey.testButton')}
-            </Button>
-            {connState === 'connected' && (
-              <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" /> {t('ai.settings.apiKey.connected')}</Badge>
-            )}
-            {connState === 'failed' && (
-              <Badge variant="error"><XCircle className="mr-1 h-3 w-3" /> {t('ai.settings.apiKey.failed')}</Badge>
-            )}
-            {settings?.last_successful_model && (
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                {t('ai.settings.apiKey.lastModel')} <span className="font-mono">{settings.last_successful_model}</span>
-              </span>
-            )}
+        ) : (
+          <div className="space-y-3">
+            {providers.map((p) => (
+              <ProviderKeyRow
+                key={p.id}
+                provider={p}
+                status={statusFor(p.id)}
+                workspaceId={workspace?.id ?? ''}
+                onSave={saveKey}
+                onClear={clearKey}
+              />
+            ))}
           </div>
-        </div>
+        )}
       </Card>
 
       {/* Model Configuration */}
       <Card title={t('ai.settings.model.title')} description={t('ai.settings.model.description')}>
         <div className="space-y-4">
+          <div>
+            <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">
+              <KeyRound className="h-3.5 w-3.5" /> {t('ai.settings.model.defaultProviderLabel')}
+            </label>
+            <select
+              value={settings?.provider ?? 'openrouter'}
+              onChange={(e) => handleUpdate({ provider: e.target.value })}
+              className="w-full max-w-xs rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}{statusFor(p.id)?.configured ? '' : ` (${t('ai.settings.providers.notConfigured')})`}
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('ai.settings.model.defaultModelLabel')}</label>
             <input
@@ -197,19 +322,33 @@ export function AISettingsPage() {
         </div>
       </Card>
 
-      {/* Provider & Model Status */}
+      {/* Model Status for the active/default provider */}
       <Card title={t('ai.settings.provider.title')} description={t('ai.settings.provider.description')}>
         <div className="space-y-4">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="outline" size="sm" onClick={handleTest} loading={connState === 'testing'}>
+              <Plug className="h-4 w-4" /> {t('ai.settings.apiKey.testButton')}
+            </Button>
             <Button variant="outline" size="sm" onClick={handleLoadModels} loading={loadingModels}>
               <Zap className="h-4 w-4" /> {t('ai.settings.provider.loadModels')}
             </Button>
+            {connState === 'connected' && (
+              <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" /> {t('ai.settings.apiKey.connected')}</Badge>
+            )}
+            {connState === 'failed' && (
+              <Badge variant="error"><XCircle className="mr-1 h-3 w-3" /> {t('ai.settings.apiKey.failed')}</Badge>
+            )}
             {models.length > 0 && (
               <span className="text-xs text-slate-500 dark:text-slate-400">
                 {t('ai.settings.provider.freeOfTotal', { free: freeModels.length, total: models.length })}
               </span>
             )}
           </div>
+          {settings?.last_successful_model && (
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {t('ai.settings.apiKey.lastModel')} <span className="font-mono">{settings.last_successful_model}</span>
+            </span>
+          )}
           {loadingModels && (
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Loader2 className="h-4 w-4 animate-spin" /> {t('ai.settings.provider.fetching')}
@@ -226,23 +365,6 @@ export function AISettingsPage() {
               {models.length > 50 && <p className="px-2 py-1 text-xs text-slate-400">{t('ai.settings.provider.andMore', { count: models.length - 50 })}</p>}
             </div>
           )}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {[
-              { name: 'OpenRouter', status: 'active' },
-              { name: 'Groq', status: 'prepared' },
-              { name: 'Google AI', status: 'prepared' },
-              { name: 'HuggingFace', status: 'prepared' },
-              { name: 'Cloudflare AI', status: 'prepared' },
-              { name: 'Ollama', status: 'prepared' },
-            ].map((p) => (
-              <div key={p.name} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800">
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{p.name}</span>
-                <Badge variant={p.status === 'active' ? 'success' : 'default'}>
-                  {p.status === 'active' ? t('common.active') : t('common.ready')}
-                </Badge>
-              </div>
-            ))}
-          </div>
         </div>
       </Card>
     </div>

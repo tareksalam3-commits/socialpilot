@@ -3,7 +3,7 @@ import { Copy, Edit2, FolderPlus, Plus, Search, Star, Trash2, X } from 'lucide-r
 import { usePrompts } from '@/hooks/usePrompts';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
-import { Badge, Button, Card, Input, Modal, EmptyState } from '@/ui';
+import { Badge, Button, Card, Input, Modal, EmptyState, Skeleton } from '@/ui';
 import { timeAgo } from '@/utils/format';
 import type { Prompt } from '@/types/ai';
 
@@ -190,7 +190,7 @@ export function PromptLibraryPage() {
       {/* Prompts grid */}
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-40 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />)}
+          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40 rounded-xl" />)}
         </div>
       ) : filtered.length === 0 ? (
         <Card><EmptyState icon={<Search className="h-10 w-10" />} title={t('ai.prompts.empty.title')} description={t('ai.prompts.empty.description')} /></Card>
@@ -210,7 +210,7 @@ export function PromptLibraryPage() {
                 {p.variables.slice(0, 3).map((v) => <Badge key={v} className="font-mono">{`{${v}}`}</Badge>)}
               </div>
               <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 dark:border-slate-800">
-                <span className="text-xs text-slate-400">{timeAgo(p.updated_at, t)}</span>
+                <span className="text-xs text-slate-400">{timeAgo(p.updated_at)}</span>
                 <div className="flex gap-1">
                   <button onClick={() => handleCopy(p.content)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('ai.prompts.copy')}><Copy className="h-3.5 w-3.5" /></button>
                   <button onClick={() => handleEdit(p)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title={t('ai.prompts.edit')}><Edit2 className="h-3.5 w-3.5" /></button>

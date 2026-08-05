@@ -54,13 +54,8 @@ export function CommandBar() {
       }
       if (e.key === 'Escape') setOpen(false);
     };
-    const onOpenEvent = () => setOpen(true);
     document.addEventListener('keydown', onKey);
-    window.addEventListener('open-command-bar', onOpenEvent);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      window.removeEventListener('open-command-bar', onOpenEvent);
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, []);
 
   const navCommands: Command[] = [

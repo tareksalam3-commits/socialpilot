@@ -22,10 +22,10 @@ export function RegisterPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const nameErr = validateRequired(fullName, 'Full name');
-    const emailErr = validateEmail(email);
-    const passErr = validatePassword(password);
-    const matchErr = validateMatch(password, confirm, 'Passwords');
+    const nameErr = validateRequired(fullName, t('auth.fullName'), t);
+    const emailErr = validateEmail(email, t);
+    const passErr = validatePassword(password, t);
+    const matchErr = validateMatch(password, confirm, t('auth.confirmPassword'), t);
     setErrors({
       fullName: nameErr.error,
       email: emailErr.error,

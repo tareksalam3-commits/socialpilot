@@ -6,15 +6,19 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 };
 
-const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 const REQUEST_TIMEOUT_MS = 60_000;
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 1000;
+const MODELS_TIMEOUT_MS = 15_000;
+const TEST_TIMEOUT_MS = 10_000;
+const MAX_MODEL_ATTEMPTS_PER_PROVIDER = 3;
+const RETRY_DELAY_MS = 600;
+
+type AiProvider = 'openrouter' | 'groq' | 'cerebras' | 'nvidia' | 'mistral' | 'zai';
 
 type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
 type ChatRequestBody = {
   workspace_id: string;
   messages: ChatMessage[];
+  provider?: string;
   model?: string;
   temperature?: number;
   max_tokens?: number;
@@ -25,11 +29,41 @@ type ChatRequestBody = {
 
 type ModelInfo = {
   id: string;
-  name: string;
+  name?: string;
   pricing?: { prompt: string; completion: string };
   context_length?: number;
-  architecture?: { modality?: string };
 };
+
+type ProviderCatalogEntry = {
+  id: AiProvider;
+  label: string;
+  base_url: string;
+  default_model: string;
+  supports_model_list: boolean;
+};
+
+// Every provider here speaks the same OpenAI-compatible chat/completions
+// shape, which is what makes automatic fallback between them possible
+// without provider-specific request code.
+const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
+  { id: 'openrouter', label: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', default_model: 'openrouter/auto', supports_model_list: true },
+  { id: 'groq', label: 'Groq', base_url: 'https://api.groq.com/openai/v1', default_model: 'llama-3.3-70b-versatile', supports_model_list: true },
+  { id: 'cerebras', label: 'Cerebras', base_url: 'https://api.cerebras.ai/v1', default_model: 'llama-3.3-70b', supports_model_list: true },
+  { id: 'nvidia', label: 'NVIDIA NIM', base_url: 'https://integrate.api.nvidia.com/v1', default_model: 'meta/llama-3.3-70b-instruct', supports_model_list: true },
+  { id: 'mistral', label: 'Mistral', base_url: 'https://api.mistral.ai/v1', default_model: 'mistral-small-latest', supports_model_list: true },
+  { id: 'zai', label: 'Z.ai', base_url: 'https://api.z.ai/api/paas/v4', default_model: 'glm-5.2', supports_model_list: false },
+];
+
+type ProviderKeyRow = {
+  provider: AiProvider;
+  api_key_encrypted: string | null;
+  base_url: string | null;
+  account_id: string | null;
+};
+
+function catalogFor(id: string): ProviderCatalogEntry {
+  return PROVIDER_CATALOG.find((p) => p.id === id) ?? PROVIDER_CATALOG[0];
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -52,16 +86,25 @@ async function isWorkspaceMember(supabase: ReturnType<typeof createClient>, work
   return !!data;
 }
 
-async function getApiKey(supabase: ReturnType<typeof createClient>, workspaceId: string, callerId: string): Promise<string | null> {
-  const { data, error } = await supabase.rpc('get_ai_provider_key', { p_workspace_id: workspaceId, p_caller_id: callerId });
-  if (error || !data) return null;
-  return data as string;
+// Service-role client bypasses RLS, so this reads ai_provider_keys directly —
+// no SECURITY DEFINER RPC needed for the gateway's own use (the RPC
+// `list_ai_provider_status` exists only for the browser client, which has no
+// SELECT access to this table at all).
+async function getProviderKeys(supabase: ReturnType<typeof createClient>, workspaceId: string): Promise<Map<AiProvider, ProviderKeyRow>> {
+  const { data, error } = await supabase
+    .from('ai_provider_keys')
+    .select('provider, api_key_encrypted, base_url, account_id')
+    .eq('workspace_id', workspaceId);
+  const map = new Map<AiProvider, ProviderKeyRow>();
+  if (error || !data) return map;
+  for (const row of data as ProviderKeyRow[]) map.set(row.provider, row);
+  return map;
 }
 
 async function getAiSettings(supabase: ReturnType<typeof createClient>, workspaceId: string) {
   const { data, error } = await supabase
     .from('ai_settings')
-    .select('default_model, temperature, max_tokens, streaming, free_only_mode, mode, last_successful_model')
+    .select('provider, default_model, temperature, max_tokens, streaming, free_only_mode, mode, last_successful_model, last_successful_provider')
     .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (error) return null;
@@ -72,8 +115,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
-    return res;
+    return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -87,12 +129,24 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+function authHeaders(entry: ProviderCatalogEntry, apiKey: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+  };
+  if (entry.id === 'openrouter') {
+    headers['HTTP-Referer'] = 'https://socialpilot.ai';
+    headers['X-Title'] = 'SocialPilot AI';
+  }
+  return headers;
+}
 
-async function fetchModels(apiKey: string): Promise<ModelInfo[]> {
-  const res = await fetchWithTimeout(`${OPENROUTER_BASE}/models`, { headers: { Authorization: `Bearer ${apiKey}` } }, 15_000);
+async function fetchModels(entry: ProviderCatalogEntry, keyRow: ProviderKeyRow): Promise<ModelInfo[]> {
+  const baseUrl = keyRow.base_url || entry.base_url;
+  const res = await fetchWithTimeout(`${baseUrl}/models`, { headers: authHeaders(entry, keyRow.api_key_encrypted!) }, MODELS_TIMEOUT_MS);
   if (!res.ok) throw new Error(`Failed to fetch models: ${res.status}`);
   const json = await res.json();
-  return json.data as ModelInfo[];
+  return (json.data ?? []) as ModelInfo[];
 }
 
 function pickFreeModels(models: ModelInfo[]): ModelInfo[] {
@@ -132,26 +186,140 @@ async function recordUsage(
   });
 }
 
-async function updateLastSuccessfulModel(
+async function updateLastSuccessful(
   supabase: ReturnType<typeof createClient>,
   workspaceId: string,
+  provider: string,
   model: string,
 ): Promise<void> {
-  await supabase.from('ai_settings').update({ last_successful_model: model, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId);
+  await supabase
+    .from('ai_settings')
+    .update({ last_successful_model: model, last_successful_provider: provider, updated_at: new Date().toISOString() })
+    .eq('workspace_id', workspaceId);
+}
+
+// Ordered list of providers to actually try for this request: the caller's
+// preferred provider first (if it has a key configured), then every other
+// configured provider, in catalog order. Providers with no key saved are
+// skipped entirely — that's the "switch to one that works, invisibly to the
+// user" behavior.
+function buildProviderChain(preferred: string | undefined, keys: Map<AiProvider, ProviderKeyRow>): AiProvider[] {
+  const configured = PROVIDER_CATALOG.map((p) => p.id).filter((id) => !!keys.get(id)?.api_key_encrypted);
+  const chain: AiProvider[] = [];
+  if (preferred && configured.includes(preferred as AiProvider)) chain.push(preferred as AiProvider);
+  for (const id of configured) if (!chain.includes(id)) chain.push(id);
+  return chain;
+}
+
+function isHardFailure(status: number): boolean {
+  // Auth/quota/billing problems — retrying the same key won't help, move on
+  // to the next provider immediately instead of burning attempts on it.
+  return status === 401 || status === 402 || status === 403 || status === 404;
+}
+
+function isTransientFailure(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+type StreamProbeResult =
+  | { ok: true; leadingChunks: Uint8Array[] }
+  | { ok: false; error: string };
+
+const STREAM_PROBE_MAX_CHUNKS = 60;
+const STREAM_PROBE_TIMEOUT_MS = 12_000;
+
+// A provider can return HTTP 200 and still hand back nothing usable — an
+// empty stream, a stream that only ever emits an embedded `error` object, or
+// one that stalls forever. Read a bounded number of leading chunks (or until
+// we see real content/reasoning) before deciding this attempt actually
+// worked. Chunks consumed here are buffered and replayed to the client once
+// we commit to this attempt, so nothing is lost — the user never sees the
+// provider(s) that failed silently underneath.
+async function probeStream(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<StreamProbeResult> {
+  const leadingChunks: Uint8Array[] = [];
+  const probeDecoder = new TextDecoder();
+  let buffer = '';
+  let sawContent = false;
+  let sawReasoning = false;
+  const deadline = Date.now() + STREAM_PROBE_TIMEOUT_MS;
+
+  for (let i = 0; i < STREAM_PROBE_MAX_CHUNKS; i++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+
+    let done: boolean;
+    let value: Uint8Array | undefined;
+    try {
+      const timeoutMarker = Symbol('timeout');
+      const result = await Promise.race([
+        reader.read(),
+        new Promise<typeof timeoutMarker>((resolve) => setTimeout(() => resolve(timeoutMarker), remaining)),
+      ]);
+      if (result === timeoutMarker) break;
+      ({ done, value } = result as ReadableStreamReadResult<Uint8Array>);
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'stream read error' };
+    }
+
+    if (done) break;
+    if (!value) continue;
+
+    leadingChunks.push(value);
+    buffer += probeDecoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === '[DONE]' || payload === '') continue;
+      try {
+        const json = JSON.parse(payload);
+        if (json.error) {
+          return { ok: false, error: typeof json.error === 'string' ? json.error : JSON.stringify(json.error) };
+        }
+        const delta = json.choices?.[0]?.delta;
+        if (delta?.content) sawContent = true;
+        if (delta?.reasoning) sawReasoning = true;
+      } catch {
+        // partial JSON split across chunk boundary — wait for more
+      }
+    }
+
+    if (sawContent) return { ok: true, leadingChunks };
+  }
+
+  // The model was actively reasoning within the probe window but hadn't
+  // produced visible content yet — that's a working provider, just a slow
+  // one. Let it keep streaming rather than false-failing it.
+  if (sawReasoning) return { ok: true, leadingChunks };
+
+  return { ok: false, error: 'No content received from provider within probe window' };
 }
 
 async function handleChatCompletion(
   supabase: ReturnType<typeof createClient>,
   body: ChatRequestBody,
-  apiKey: string,
   settings: Awaited<ReturnType<typeof getAiSettings>>,
+  providerKeys: Map<AiProvider, ProviderKeyRow>,
   userId: string,
 ): Promise<Response> {
-  const model = body.model || settings?.default_model || 'openrouter/auto';
+  const preferredProvider = (body.provider || settings?.provider || 'openrouter') as AiProvider;
+  const chain = buildProviderChain(preferredProvider, providerKeys);
+
+  if (chain.length === 0) {
+    return errorResponse('No API key configured for any AI provider. Add one in AI Settings.', 400);
+  }
+
   const temperature = body.temperature ?? settings?.temperature ?? 0.7;
   const maxTokens = body.max_tokens ?? settings?.max_tokens ?? 1024;
   const stream = body.stream ?? settings?.streaming ?? true;
   const freeOnly = body.free_only ?? settings?.free_only_mode ?? true;
+
+  const languageRule =
+    'Language rule: reply in the same language the user\'s content/topic is written in. ' +
+    'Only switch languages if the task explicitly asks for a translation or explicitly names a different output language — follow that explicit instruction in that case instead.';
 
   let messages = body.messages;
   if (body.brand_voice) {
@@ -166,114 +334,165 @@ async function handleChatCompletion(
 - Keywords to include: ${Array.isArray(bv.keywords) ? bv.keywords.join(', ') : 'none'}
 - Keywords to avoid: ${Array.isArray(bv.negative_keywords) ? bv.negative_keywords.join(', ') : 'none'}
 - CTA style: ${bv.cta_style ?? 'clear'}
-- Emoji style: ${bv.emoji_style ?? 'minimal'}`;
+- Emoji style: ${bv.emoji_style ?? 'minimal'}
+
+${languageRule}`;
     messages = [{ role: 'system', content: systemContent }, ...messages];
+  } else {
+    messages = [{ role: 'system', content: languageRule }, ...messages];
   }
 
   const startTime = Date.now();
-
   let lastError: string | null = null;
-  let modelsToTry: string[] = [model];
 
-  if (freeOnly && model === 'openrouter/auto') {
-    try {
-      const allModels = await fetchModels(apiKey);
-      const freeModels = pickFreeModels(allModels);
-      if (settings?.last_successful_model && freeModels.some((m) => m.id === settings.last_successful_model)) {
-        modelsToTry = [settings.last_successful_model, ...freeModels.map((m) => m.id).filter((id) => id !== settings.last_successful_model)];
-      } else {
-        modelsToTry = freeModels.map((m) => m.id);
+  for (const providerId of chain) {
+    const entry = catalogFor(providerId);
+    const keyRow = providerKeys.get(providerId)!;
+    const isPreferred = providerId === preferredProvider;
+    const requestedModel = isPreferred ? body.model || settings?.default_model : undefined;
+
+    let modelsToTry: string[] = [];
+
+    if (providerId === 'openrouter' && freeOnly && (!requestedModel || requestedModel === 'openrouter/auto')) {
+      try {
+        const allModels = await fetchModels(entry, keyRow);
+        const freeModels = pickFreeModels(allModels);
+        const lastGood = settings?.last_successful_provider === 'openrouter' ? settings?.last_successful_model : null;
+        if (lastGood && freeModels.some((m) => m.id === lastGood)) {
+          modelsToTry = [lastGood, ...freeModels.map((m) => m.id).filter((id) => id !== lastGood)];
+        } else {
+          modelsToTry = freeModels.map((m) => m.id);
+        }
+      } catch {
+        // fall back to the provider default below
       }
-      if (modelsToTry.length === 0) modelsToTry = [model];
-    } catch {
-      // fall back to the requested model
+      if (modelsToTry.length === 0) modelsToTry = [entry.default_model];
+    } else if (requestedModel) {
+      modelsToTry = [requestedModel];
+    } else if (settings?.last_successful_provider === providerId && settings?.last_successful_model) {
+      modelsToTry = [settings.last_successful_model, entry.default_model];
+    } else {
+      modelsToTry = [entry.default_model];
     }
-  }
 
-  const payload = {
-    model,
-    messages,
-    temperature,
-    max_tokens: maxTokens,
-    stream,
-  };
+    const attempts = modelsToTry.slice(0, MAX_MODEL_ATTEMPTS_PER_PROVIDER);
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const currentModel = attempt === 0 ? model : modelsToTry[attempt % modelsToTry.length] || model;
-    try {
-      const res = await fetchWithTimeout(
-        `${OPENROUTER_BASE}/chat/completions`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://socialpilot.ai',
-            'X-Title': 'SocialPilot AI',
+    for (const currentModel of attempts) {
+      try {
+        const requestBody: Record<string, unknown> = { model: currentModel, messages, temperature, max_tokens: maxTokens, stream };
+        // OpenRouter itself fronts several upstream hosts for most models.
+        // allow_fallbacks defaults to true, but we set it explicitly so this
+        // stays correct even if OpenRouter's default ever changes: if the
+        // upstream host currently serving this model errors out, OpenRouter
+        // silently retries the next host for the same model before we ever
+        // see a failure here.
+        if (providerId === 'openrouter') {
+          requestBody.provider = { allow_fallbacks: true };
+        }
+        const res = await fetchWithTimeout(
+          `${keyRow.base_url || entry.base_url}/chat/completions`,
+          {
+            method: 'POST',
+            headers: authHeaders(entry, keyRow.api_key_encrypted!),
+            body: JSON.stringify(requestBody),
           },
-          body: JSON.stringify({ ...payload, model: currentModel }),
-        },
-        REQUEST_TIMEOUT_MS,
-      );
+          REQUEST_TIMEOUT_MS,
+        );
 
-      if (!res.ok) {
-        const errText = await res.text();
-        lastError = `OpenRouter ${res.status}: ${errText}`;
-        if (res.status === 429 || res.status >= 500) {
-          await delay(RETRY_DELAY_MS * (attempt + 1));
+        if (!res.ok) {
+          const errText = await res.text();
+          lastError = `${entry.label} ${res.status}: ${errText}`;
+          if (isTransientFailure(res.status)) {
+            await delay(RETRY_DELAY_MS);
+            continue; // try the next model on this same provider
+          }
+          if (isHardFailure(res.status)) break; // dead key/quota — jump to the next provider
           continue;
         }
-        break;
-      }
 
-      const responseTime = Date.now() - startTime;
+        const responseTime = Date.now() - startTime;
 
-      if (stream) {
-        const stream = new ReadableStream({
-          async start(controller) {
-            const reader = res.body!.getReader();
-            const decoder = new TextDecoder();
-            let totalContent = '';
+        if (stream) {
+          const reader = res.body!.getReader();
+          const probe = await probeStream(reader);
+
+          if (!probe.ok) {
+            // Looked fine at the HTTP level but produced nothing usable —
+            // abandon this attempt and fall through to the next model /
+            // provider exactly like a hard HTTP failure would. The client
+            // never received a byte of this attempt.
             try {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                const chunk = decoder.decode(value, { stream: true });
-                totalContent += chunk;
-                controller.enqueue(value);
-              }
-            } catch (e) {
-              controller.error(e);
-              return;
+              await reader.cancel();
+            } catch {
+              // already closed — fine
             }
-            controller.close();
-            const tokensOut = estimateTokens(totalContent);
-            const tokensIn = estimateTokens(JSON.stringify(messages));
-            await updateLastSuccessfulModel(supabase, body.workspace_id, currentModel);
-            await recordUsage(supabase, body.workspace_id, userId, {
-              model: currentModel,
-              provider: 'openrouter',
-              tokens_in: tokensIn,
-              tokens_out: tokensOut,
-              cost: 0,
-              status: 'success',
-              response_time_ms: responseTime,
-              prompt_type: 'chat',
-            });
-          },
-        });
-        return new Response(stream, {
-          headers: { ...corsHeaders, 'Content-Type': 'text/event-stream', 'X-Model': currentModel, 'X-Response-Time': String(responseTime) },
-        });
-      } else {
+            lastError = `${entry.label} ${currentModel}: ${probe.error}`;
+            await delay(RETRY_DELAY_MS);
+            continue;
+          }
+
+          const readableStream = new ReadableStream({
+            async start(controller) {
+              const decoder = new TextDecoder();
+              let totalContent = '';
+              try {
+                for (const chunk of probe.leadingChunks) {
+                  totalContent += decoder.decode(chunk, { stream: true });
+                  controller.enqueue(chunk);
+                }
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  totalContent += decoder.decode(value, { stream: true });
+                  controller.enqueue(value);
+                }
+              } catch (e) {
+                controller.error(e);
+                return;
+              }
+              controller.close();
+              const tokensOut = estimateTokens(totalContent);
+              const tokensIn = estimateTokens(JSON.stringify(messages));
+              await updateLastSuccessful(supabase, body.workspace_id, providerId, currentModel);
+              await recordUsage(supabase, body.workspace_id, userId, {
+                model: currentModel,
+                provider: providerId,
+                tokens_in: tokensIn,
+                tokens_out: tokensOut,
+                cost: 0,
+                status: 'success',
+                response_time_ms: responseTime,
+                prompt_type: 'chat',
+              });
+            },
+          });
+          return new Response(readableStream, {
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'text/event-stream',
+              'X-Model': currentModel,
+              'X-Provider': providerId,
+              'X-Response-Time': String(responseTime),
+            },
+          });
+        }
+
         const json = await res.json();
         const content = json.choices?.[0]?.message?.content ?? '';
+
+        if (!content.trim()) {
+          // 200 OK but nothing usable in it — same story as the streaming
+          // path: don't hand this back as a "success", try the next model.
+          lastError = `${entry.label} ${currentModel}: empty response content`;
+          await delay(RETRY_DELAY_MS);
+          continue;
+        }
         const tokensIn = json.usage?.prompt_tokens ?? estimateTokens(JSON.stringify(messages));
         const tokensOut = json.usage?.completion_tokens ?? estimateTokens(content);
-        await updateLastSuccessfulModel(supabase, body.workspace_id, currentModel);
+        await updateLastSuccessful(supabase, body.workspace_id, providerId, currentModel);
         await recordUsage(supabase, body.workspace_id, userId, {
           model: currentModel,
-          provider: 'openrouter',
+          provider: providerId,
           tokens_in: tokensIn,
           tokens_out: tokensOut,
           cost: 0,
@@ -284,25 +503,24 @@ async function handleChatCompletion(
         return jsonResponse({
           content,
           model: currentModel,
+          provider: providerId,
           tokens_in: tokensIn,
           tokens_out: tokensOut,
           response_time_ms: responseTime,
         });
-      }
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : 'Unknown error';
-      if (attempt < MAX_RETRIES - 1) {
-        await delay(RETRY_DELAY_MS * (attempt + 1));
-        continue;
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : 'Unknown error';
+        continue; // network error / timeout — try the next model or provider
       }
     }
+    // this provider's models are all exhausted — fall through to the next configured provider
   }
 
   const responseTime = Date.now() - startTime;
   if (userId) {
     await recordUsage(supabase, body.workspace_id, userId, {
-      model,
-      provider: 'openrouter',
+      model: body.model || 'unknown',
+      provider: preferredProvider,
       tokens_in: 0,
       tokens_out: 0,
       cost: 0,
@@ -311,19 +529,22 @@ async function handleChatCompletion(
       prompt_type: 'chat',
     });
   }
-  return errorResponse(lastError ?? 'All retries exhausted', 502);
+  return errorResponse(lastError ?? 'Every configured AI provider failed for this request.', 502);
 }
 
-async function handleModels(apiKey: string): Promise<Response> {
+async function handleModels(entry: ProviderCatalogEntry, keyRow: ProviderKeyRow): Promise<Response> {
+  if (!entry.supports_model_list) {
+    return jsonResponse({ models: [], free_count: 0, total_count: 0 });
+  }
   try {
-    const models = await fetchModels(apiKey);
-    const freeModels = pickFreeModels(models);
+    const models = await fetchModels(entry, keyRow);
+    const freeModels = entry.id === 'openrouter' ? pickFreeModels(models) : [];
     return jsonResponse({
       models: models.map((m) => ({
         id: m.id,
-        name: m.name,
+        name: m.name ?? m.id,
         context_length: m.context_length,
-        is_free: parseFloat(m.pricing?.prompt ?? '1') === 0 && parseFloat(m.pricing?.completion ?? '1') === 0,
+        is_free: entry.id === 'openrouter' ? parseFloat(m.pricing?.prompt ?? '1') === 0 && parseFloat(m.pricing?.completion ?? '1') === 0 : false,
         pricing: m.pricing,
       })),
       free_count: freeModels.length,
@@ -334,17 +555,45 @@ async function handleModels(apiKey: string): Promise<Response> {
   }
 }
 
-async function handleTestConnection(apiKey: string): Promise<Response> {
+async function handleTestConnection(
+  supabase: ReturnType<typeof createClient>,
+  workspaceId: string,
+  entry: ProviderCatalogEntry,
+  keyRow: ProviderKeyRow,
+): Promise<Response> {
+  const markResult = async (status: 'connected' | 'failed') => {
+    await supabase
+      .from('ai_provider_keys')
+      .update({ last_test_status: status, last_tested_at: new Date().toISOString() })
+      .eq('workspace_id', workspaceId)
+      .eq('provider', entry.id);
+  };
   try {
-    const res = await fetchWithTimeout(
-      `${OPENROUTER_BASE}/key`,
-      { headers: { Authorization: `Bearer ${apiKey}` } },
-      10_000,
-    );
-    if (!res.ok) return errorResponse(`Connection failed: ${res.status}`, res.status);
-    const json = await res.json();
-    return jsonResponse({ status: 'connected', data: json.data });
+    // Providers without a dedicated key-check endpoint are tested with a
+    // minimal real chat request instead — a 401/403 there means the key
+    // itself is bad, which is what "connected" is actually verifying.
+    const res =
+      entry.id === 'openrouter'
+        ? await fetchWithTimeout(`${keyRow.base_url || entry.base_url}/key`, { headers: authHeaders(entry, keyRow.api_key_encrypted!) }, TEST_TIMEOUT_MS)
+        : await fetchWithTimeout(
+            `${keyRow.base_url || entry.base_url}/chat/completions`,
+            {
+              method: 'POST',
+              headers: authHeaders(entry, keyRow.api_key_encrypted!),
+              body: JSON.stringify({ model: entry.default_model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
+            },
+            TEST_TIMEOUT_MS,
+          );
+
+    if (!res.ok && (res.status === 401 || res.status === 403)) {
+      await markResult('failed');
+      return errorResponse(`Connection failed: ${res.status}`, res.status);
+    }
+    await markResult('connected');
+    const json = await res.json().catch(() => null);
+    return jsonResponse({ status: 'connected', data: json });
   } catch (e) {
+    await markResult('failed');
     return errorResponse(e instanceof Error ? e.message : 'Connection test failed', 502);
   }
 }
@@ -379,14 +628,31 @@ Deno.serve(async (req: Request) => {
     const url = new URL(req.url);
     const action = url.searchParams.get('action') || 'chat';
 
+    if (action === 'providers') {
+      return jsonResponse({
+        providers: PROVIDER_CATALOG.map((p) => ({
+          id: p.id,
+          label: p.label,
+          default_model: p.default_model,
+          supports_model_list: p.supports_model_list,
+        })),
+      });
+    }
+
     if (action === 'models' || action === 'test') {
       const body = await req.json();
       if (!body.workspace_id) return errorResponse('workspace_id is required', 400);
       if (!(await isWorkspaceMember(supabase, body.workspace_id, callerId))) return errorResponse('Forbidden', 403);
-      const apiKey = await getApiKey(supabase, body.workspace_id, callerId);
-      if (!apiKey) return errorResponse('No API key configured. Add your OpenRouter API key in AI Settings.', 400);
-      if (action === 'models') return await handleModels(apiKey);
-      return await handleTestConnection(apiKey);
+
+      const settings = await getAiSettings(supabase, body.workspace_id);
+      const providerKeys = await getProviderKeys(supabase, body.workspace_id);
+      const providerId = (body.provider || settings?.provider || 'openrouter') as AiProvider;
+      const entry = catalogFor(providerId);
+      const keyRow = providerKeys.get(providerId);
+      if (!keyRow?.api_key_encrypted) return errorResponse(`No API key configured for ${entry.label}. Add it in AI Settings.`, 400);
+
+      if (action === 'models') return await handleModels(entry, keyRow);
+      return await handleTestConnection(supabase, body.workspace_id, entry, keyRow);
     }
 
     if (action === 'chat') {
@@ -395,14 +661,12 @@ Deno.serve(async (req: Request) => {
       if (!body.messages || body.messages.length === 0) return errorResponse('messages are required', 400);
       if (!(await isWorkspaceMember(supabase, body.workspace_id, callerId))) return errorResponse('Forbidden', 403);
 
-      const apiKey = await getApiKey(supabase, body.workspace_id, callerId);
-      if (!apiKey) return errorResponse('No API key configured. Add your OpenRouter API key in AI Settings.', 400);
-
       const settings = await getAiSettings(supabase, body.workspace_id);
-      return await handleChatCompletion(supabase, body, apiKey, settings, callerId);
+      const providerKeys = await getProviderKeys(supabase, body.workspace_id);
+      return await handleChatCompletion(supabase, body, settings, providerKeys, callerId);
     }
 
-    return errorResponse('Unknown action. Use ?action=chat|models|test', 400);
+    return errorResponse('Unknown action. Use ?action=chat|models|test|providers', 400);
   } catch (err) {
     return errorResponse(err instanceof Error ? err.message : 'Internal server error', 500);
   }

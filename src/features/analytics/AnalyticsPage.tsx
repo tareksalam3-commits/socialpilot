@@ -169,7 +169,7 @@ export function AnalyticsPage() {
               {summary.workspaceActivity.recent.map((a) => (
                 <div key={a.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2 dark:border-slate-800">
                   <p className="text-sm text-slate-700 dark:text-slate-300">{a.description}</p>
-                  <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">{timeAgo(a.created_at, t)}</span>
+                  <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">{timeAgo(a.created_at)}</span>
                 </div>
               ))}
             </div>

@@ -5,6 +5,7 @@ import { useAI } from '@/hooks/useAI';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useAuth } from '@/providers/AuthProvider';
 import { useToast } from '@/providers/ToastProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { Button, EmptyState } from '@/ui';
 import { timeAgo } from '@/utils/format';
 import type { InboxConversation } from '@/types/social';
@@ -21,6 +22,7 @@ export function InboxPage() {
   const { workspace } = useWorkspace();
   const { user } = useAuth();
   const { push } = useToast();
+  const { t } = useLanguage();
   const [reply, setReply] = useState('');
   const [aiGenerating, setAiGenerating] = useState(false);
   const msgEndRef = useRef<HTMLDivElement>(null);
@@ -74,7 +76,7 @@ export function InboxPage() {
             <button onClick={() => setShowArchived(true)} className={`flex-1 rounded-lg px-2 py-1 text-xs font-medium ${showArchived ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white' : 'text-slate-500'}`}>Archived</button>
           </div>
           <div className="flex-1 space-y-1 overflow-y-auto p-2">
-            {loading ? <p className="p-4 text-center text-sm text-slate-500">Loading…</p> : conversations.length === 0 ? <p className="p-4 text-center text-sm text-slate-500">No conversations.</p> : conversations.map((c) => (
+            {loading ? <p className="p-4 text-center text-sm text-slate-500">{t('common.loading')}</p> : conversations.length === 0 ? <p className="p-4 text-center text-sm text-slate-500">No conversations.</p> : conversations.map((c) => (
               <ConversationItem key={c.id} conv={c} active={c.id === activeId} onClick={() => { loadMessages(c.id); markRead(c.id); }} onArchive={() => archive(c.id, !c.archived)} />
             ))}
           </div>

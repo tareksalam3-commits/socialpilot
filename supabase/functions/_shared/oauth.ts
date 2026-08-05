@@ -23,7 +23,7 @@ export function errorResponse(message: string, status = 400): Response {
  * to the APP_URL env var if nothing's been saved there yet. */
 export async function redirectToApp(supabase: SupabaseClient, params: Record<string, string>): Promise<Response> {
   const appUrl = (await getCredential(supabase, 'app_url')) ?? '';
-  const url = new URL(`${appUrl.replace(/\/$/, '')}/accounts`);
+  const url = new URL(`${appUrl.replace(/\/$/, '')}/app/accounts`);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   return new Response(null, { status: 302, headers: { Location: url.toString() } });
 }

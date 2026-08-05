@@ -138,6 +138,25 @@ export type ChatCompletionResult = {
   response_time_ms: number;
 };
 
+export type AiProvider = 'openrouter' | 'groq' | 'cerebras' | 'nvidia' | 'mistral' | 'zai';
+
+export type ProviderInfo = {
+  id: AiProvider;
+  label: string;
+  default_model: string;
+  supports_model_list: boolean;
+};
+
+export type ProviderStatus = {
+  provider: AiProvider;
+  configured: boolean;
+  base_url: string | null;
+  account_id: string | null;
+  last_test_status: 'connected' | 'failed' | null;
+  last_tested_at: string | null;
+  updated_at: string | null;
+};
+
 export type AiAnalytics = {
   totalRequests: number;
   totalTokensIn: number;

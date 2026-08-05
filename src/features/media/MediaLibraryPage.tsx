@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { File, Film, Image as ImageIcon, FolderPlus, Search, Trash2, Upload, X } from 'lucide-react';
 import { useMedia } from '@/hooks/useMedia';
 import { useToast } from '@/providers/ToastProvider';
+import { useLanguage } from '@/providers/LanguageProvider';
 import { Badge, Button, Card, EmptyState, Input, Modal } from '@/ui';
 import { formatDate } from '@/utils/format';
 import type { MediaItem } from '@/types/social';
@@ -12,6 +13,7 @@ const typeColors = { image: 'text-emerald-600', video: 'text-purple-600', docume
 export function MediaLibraryPage() {
   const { items, folders, loading, upload, remove, createFolder, deleteFolder, filterType, setFilterType, filterFolder, setFilterFolder, searchQuery, setSearchQuery } = useMedia();
   const { push } = useToast();
+  const { t } = useLanguage();
   const [showFolder, setShowFolder] = useState(false);
   const [folderName, setFolderName] = useState('');
   const [preview, setPreview] = useState<MediaItem | null>(null);
@@ -79,7 +81,7 @@ export function MediaLibraryPage() {
       )}
 
       {loading ? (
-        <p className="py-6 text-center text-sm text-slate-500">Loading…</p>
+        <p className="py-6 text-center text-sm text-slate-500">{t('common.loading')}</p>
       ) : items.length === 0 ? (
         <Card><EmptyState icon={<ImageIcon className="h-10 w-10" />} title="No media yet" description="Upload images, videos, or documents to get started." action={<label><Button onClick={() => {}}><Upload className="h-4 w-4" /> Upload</Button><input type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} /></label>} /></Card>
       ) : (

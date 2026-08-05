@@ -25,16 +25,6 @@ const statusColors: Record<string, string> = {
   archived: 'border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-800',
 };
 
-const weekdayKeys = ['posts.calendar.weekday.sun', 'posts.calendar.weekday.mon', 'posts.calendar.weekday.tue', 'posts.calendar.weekday.wed', 'posts.calendar.weekday.thu', 'posts.calendar.weekday.fri', 'posts.calendar.weekday.sat'];
-const statusLabelKey: Record<string, string> = {
-  draft: 'posts.status.draft',
-  scheduled: 'posts.status.scheduled',
-  publishing: 'posts.status.publishing',
-  published: 'posts.status.published',
-  failed: 'posts.status.failed',
-  archived: 'posts.status.archived',
-};
-
 export function ContentCalendarPage() {
   const { t } = useLanguage();
   const { posts, update } = usePosts();
@@ -44,6 +34,22 @@ export function ContentCalendarPage() {
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [showReschedule, setShowReschedule] = useState(false);
   const [newDate, setNewDate] = useState('');
+
+  const viewLabels: Record<ViewMode, string> = {
+    month: t('calendar.view.month'),
+    week: t('calendar.view.week'),
+    day: t('calendar.view.day'),
+  };
+
+  const weekdayLabels = [
+    t('calendar.weekday.sun'),
+    t('calendar.weekday.mon'),
+    t('calendar.weekday.tue'),
+    t('calendar.weekday.wed'),
+    t('calendar.weekday.thu'),
+    t('calendar.weekday.fri'),
+    t('calendar.weekday.sat'),
+  ];
 
   const postsByDate = useMemo(() => {
     const map = new Map<string, Post[]>();
@@ -68,7 +74,11 @@ export function ContentCalendarPage() {
     const newDate = new Date(dateStr);
     newDate.setHours(9, 0, 0, 0);
     await update(postId, { scheduled_for: newDate.toISOString(), status: 'scheduled' });
-    push({ title: t('posts.calendar.toast.rescheduled.title'), description: t('posts.calendar.toast.rescheduled.description', { date: formatDateTime(newDate.toISOString()) }), variant: 'success' });
+    push({
+      title: t('calendar.toast.rescheduled.title'),
+      description: t('calendar.toast.rescheduled.description', { date: formatDateTime(newDate.toISOString()) }),
+      variant: 'success',
+    });
   }, [update, push, t]);
 
   const days = useMemo(() => {
@@ -98,18 +108,18 @@ export function ContentCalendarPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('posts.calendar.title')}</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('posts.calendar.subtitle')}</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('calendar.title')}</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('calendar.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded-lg border border-slate-200 dark:border-slate-800">
             {(['month', 'week', 'day'] as ViewMode[]).map((m) => (
-              <button key={m} onClick={() => setView(m)} className={`px-3 py-1.5 text-xs font-medium transition ${view === m ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'text-slate-600 dark:text-slate-400'}`}>{t(`posts.calendar.view.${m}`)}</button>
+              <button key={m} onClick={() => setView(m)} className={`px-3 py-1.5 text-xs font-medium transition ${view === m ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'text-slate-600 dark:text-slate-400'}`}>{viewLabels[m]}</button>
             ))}
           </div>
           <Button variant="outline" size="sm" onClick={() => navigate(-1)}><ChevronLeft className="h-4 w-4" /></Button>
           <Button variant="outline" size="sm" onClick={() => navigate(1)}><ChevronRight className="h-4 w-4" /></Button>
-          <Button variant="outline" size="sm" onClick={() => setCurrentDate(new Date())}>{t('posts.calendar.today')}</Button>
+          <Button variant="outline" size="sm" onClick={() => setCurrentDate(new Date())}>{t('calendar.today')}</Button>
         </div>
       </div>
 
@@ -121,13 +131,13 @@ export function ContentCalendarPage() {
             <CalendarPost key={p.id} post={p} onClick={() => setSelectedPost(p)} />
           ))}
           {(!postsByDate.get(currentDate.toISOString().slice(0, 10)) || postsByDate.get(currentDate.toISOString().slice(0, 10))!.length === 0) && (
-            <Card><p className="py-6 text-center text-sm text-slate-500">{t('posts.calendar.noPostsToday')}</p></Card>
+            <Card><p className="py-6 text-center text-sm text-slate-500">{t('calendar.noPostsToday')}</p></Card>
           )}
         </div>
       ) : (
         <div className="grid grid-cols-7 gap-1">
-          {weekdayKeys.map((k) => (
-            <div key={k} className="pb-1 text-center text-xs font-semibold uppercase text-slate-400">{t(k)}</div>
+          {weekdayLabels.map((d) => (
+            <div key={d} className="pb-1 text-center text-xs font-semibold uppercase text-slate-400">{d}</div>
           ))}
           {days.map((d) => {
             const dateStr = d.toISOString().slice(0, 10);
@@ -145,11 +155,11 @@ export function ContentCalendarPage() {
                 <div className="space-y-1">
                   {dayPosts.slice(0, 3).map((p) => (
                     <div key={p.id} draggable onDragStart={(e) => e.dataTransfer.setData('text/plain', p.id)} onClick={() => setSelectedPost(p)} className={`cursor-move rounded border px-1.5 py-1 text-xs ${statusColors[p.status] ?? statusColors.draft}`}>
-                      <p className="truncate">{p.title ?? (p.content.slice(0, 30) || t('posts.calendar.untitled'))}</p>
+                      <p className="truncate">{p.title ?? (p.content.slice(0, 30) || t('calendar.untitled'))}</p>
                       {p.platforms.slice(0, 2).map((pl) => <span key={pl} className={`mr-1 inline-block rounded px-1 text-[10px] ${platformColors[pl] ?? ''}`}>{pl.slice(0, 2)}</span>)}
                     </div>
                   ))}
-                  {dayPosts.length > 3 && <p className="text-xs text-slate-400">{t('posts.calendar.moreCount', { count: dayPosts.length - 3 })}</p>}
+                  {dayPosts.length > 3 && <p className="text-xs text-slate-400">{t('calendar.morePosts', { count: dayPosts.length - 3 })}</p>}
                 </div>
               </div>
             );
@@ -157,17 +167,17 @@ export function ContentCalendarPage() {
         </div>
       )}
 
-      <Modal open={!!selectedPost} onClose={() => setSelectedPost(null)} title={t('posts.calendar.postDetails')} size="md"
+      <Modal open={!!selectedPost} onClose={() => setSelectedPost(null)} title={t('calendar.postDetails.title')} size="md"
         footer={selectedPost && <>
-          <Button variant="outline" onClick={() => { setNewDate(selectedPost.scheduled_for ? selectedPost.scheduled_for.slice(0, 16) : ''); setShowReschedule(true); }}>{t('posts.calendar.reschedule')}</Button>
-          <Button onClick={() => setSelectedPost(null)}>{t('posts.calendar.close')}</Button>
+          <Button variant="outline" onClick={() => { setNewDate(selectedPost.scheduled_for ? selectedPost.scheduled_for.slice(0, 16) : ''); setShowReschedule(true); }}>{t('calendar.postDetails.reschedule')}</Button>
+          <Button onClick={() => setSelectedPost(null)}>{t('calendar.postDetails.close')}</Button>
         </>}>
         {selectedPost && (
           <div className="space-y-3">
             {selectedPost.title && <p className="text-sm font-semibold text-slate-900 dark:text-white">{selectedPost.title}</p>}
             <p className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">{selectedPost.content}</p>
             <div className="flex flex-wrap gap-2">
-              <Badge variant={selectedPost.status === 'published' ? 'success' : selectedPost.status === 'failed' ? 'error' : 'info'}>{t(statusLabelKey[selectedPost.status] ?? selectedPost.status)}</Badge>
+              <Badge variant={selectedPost.status === 'published' ? 'success' : selectedPost.status === 'failed' ? 'error' : 'info'}>{t(`post.status.${selectedPost.status}`)}</Badge>
               {selectedPost.platforms.map((p) => <Badge key={p}>{p}</Badge>)}
             </div>
             {selectedPost.scheduled_for && <p className="flex items-center gap-1.5 text-xs text-slate-500"><Clock className="h-3 w-3" /> {formatDateTime(selectedPost.scheduled_for)}</p>}
@@ -175,11 +185,11 @@ export function ContentCalendarPage() {
         )}
       </Modal>
 
-      <Modal open={showReschedule} onClose={() => setShowReschedule(false)} title={t('posts.calendar.reschedulePost')} size="sm"
-        footer={<><Button variant="outline" onClick={() => setShowReschedule(false)}>{t('posts.calendar.cancel')}</Button><Button onClick={async () => {
-          if (selectedPost && newDate) { await update(selectedPost.id, { scheduled_for: new Date(newDate).toISOString(), status: 'scheduled' }); push({ title: t('posts.calendar.toast.rescheduled.title'), variant: 'success' }); setShowReschedule(false); setSelectedPost(null); }
-        }}>{t('posts.calendar.save')}</Button></>}>
-        <Input label={t('posts.calendar.newDateTime')} type="datetime-local" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
+      <Modal open={showReschedule} onClose={() => setShowReschedule(false)} title={t('calendar.reschedule.title')} size="sm"
+        footer={<><Button variant="outline" onClick={() => setShowReschedule(false)}>{t('common.cancel')}</Button><Button onClick={async () => {
+          if (selectedPost && newDate) { await update(selectedPost.id, { scheduled_for: new Date(newDate).toISOString(), status: 'scheduled' }); push({ title: t('calendar.toast.rescheduled.title'), variant: 'success' }); setShowReschedule(false); setSelectedPost(null); }
+        }}>{t('common.save')}</Button></>}>
+        <Input label={t('calendar.reschedule.dateLabel')} type="datetime-local" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
       </Modal>
     </div>
   );
@@ -190,10 +200,10 @@ function CalendarPost({ post, onClick }: { post: Post; onClick: () => void }) {
   return (
     <div draggable onDragStart={(e) => e.dataTransfer.setData('text/plain', post.id)} onClick={onClick} className={`cursor-move rounded-lg border p-3 ${statusColors[post.status] ?? statusColors.draft}`}>
       <div className="flex items-center justify-between">
-        <Badge variant={post.status === 'published' ? 'success' : post.status === 'failed' ? 'error' : 'info'}>{t(statusLabelKey[post.status] ?? post.status)}</Badge>
+        <Badge variant={post.status === 'published' ? 'success' : post.status === 'failed' ? 'error' : 'info'}>{t(`post.status.${post.status}`)}</Badge>
         <span className="text-xs text-slate-500">{post.scheduled_for ? formatDateTime(post.scheduled_for) : ''}</span>
       </div>
-      <p className="mt-2 text-sm font-medium text-slate-900 dark:text-white">{post.title ?? t('posts.calendar.untitled')}</p>
+      <p className="mt-2 text-sm font-medium text-slate-900 dark:text-white">{post.title ?? t('calendar.untitled')}</p>
       <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{post.content.slice(0, 100)}</p>
       <div className="mt-2 flex gap-1">{post.platforms.map((pl) => <span key={pl} className={`rounded px-1.5 py-0.5 text-[10px] ${platformColors[pl] ?? ''}`}>{pl}</span>)}</div>
     </div>

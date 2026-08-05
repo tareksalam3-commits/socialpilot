@@ -1,24 +1,26 @@
 export type ValidationResult = { valid: boolean; error?: string };
 
-export function validateEmail(email: string): ValidationResult {
-  if (!email.trim()) return { valid: false, error: 'Email is required' };
+type TFunction = (key: string, params?: Record<string, string | number>) => string;
+
+export function validateEmail(email: string, t: TFunction): ValidationResult {
+  if (!email.trim()) return { valid: false, error: t('validation.email.required') };
   const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!re.test(email)) return { valid: false, error: 'Enter a valid email address' };
+  if (!re.test(email)) return { valid: false, error: t('validation.email.invalid') };
   return { valid: true };
 }
 
-export function validatePassword(password: string): ValidationResult {
-  if (!password) return { valid: false, error: 'Password is required' };
-  if (password.length < 6) return { valid: false, error: 'Password must be at least 6 characters' };
+export function validatePassword(password: string, t: TFunction): ValidationResult {
+  if (!password) return { valid: false, error: t('validation.password.required') };
+  if (password.length < 6) return { valid: false, error: t('validation.password.minLength', { count: 6 }) };
   return { valid: true };
 }
 
-export function validateRequired(value: string, label: string): ValidationResult {
-  if (!value.trim()) return { valid: false, error: `${label} is required` };
+export function validateRequired(value: string, label: string, t: TFunction): ValidationResult {
+  if (!value.trim()) return { valid: false, error: t('validation.field.required', { field: label }) };
   return { valid: true };
 }
 
-export function validateMatch(a: string, b: string, label: string): ValidationResult {
-  if (a !== b) return { valid: false, error: `${label} do not match` };
+export function validateMatch(a: string, b: string, label: string, t: TFunction): ValidationResult {
+  if (a !== b) return { valid: false, error: t('validation.field.noMatch', { field: label }) };
   return { valid: true };
 }

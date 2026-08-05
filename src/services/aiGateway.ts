@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatCompletionResult, ModelInfo } from '@/types/ai';
+import type { ChatMessage, ChatCompletionResult, ModelInfo, ProviderInfo } from '@/types/ai';
 import { supabase } from '@/services/supabase';
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-gateway`;
@@ -54,13 +54,38 @@ export const aiGateway = {
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let fullContent = '';
+      let buffer = '';
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        fullContent += chunk;
-        opts.onChunk(chunk);
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? ''; // last line may be split across chunks — keep it for next read
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+
+          const payload = trimmed.slice(5).trim();
+          if (payload === '[DONE]' || payload === '') continue;
+
+          try {
+            const json = JSON.parse(payload);
+            const delta = json.choices?.[0]?.delta;
+            // reasoning tokens (model "thinking") are intentionally skipped —
+            // only the actual generated text goes to the caller
+            if (delta?.content) {
+              fullContent += delta.content;
+              opts.onChunk(delta.content);
+            }
+          } catch {
+            // JSON split across a chunk boundary — will complete on a later read
+          }
+        }
       }
+
       return {
         content: fullContent,
         model: res.headers.get('X-Model') ?? '',
@@ -81,34 +106,11 @@ export const aiGateway = {
     };
   },
 
-  async stream(opts: GenerateOptions): Promise<ReadableStream<Uint8Array>> {
-    const res = await fetch(`${FUNCTION_URL}?action=chat`, {
-      method: 'POST',
-      headers: await getAuthHeaders(),
-      body: JSON.stringify({
-        workspace_id: opts.workspaceId,
-        messages: opts.messages,
-        model: opts.model,
-        temperature: opts.temperature,
-        max_tokens: opts.maxTokens,
-        stream: true,
-        free_only: opts.freeOnly,
-        brand_voice: opts.brandVoice,
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(err.error ?? `Request failed (${res.status})`);
-    }
-    if (!res.body) throw new Error('No response stream');
-    return res.body;
-  },
-
-  async listModels(workspaceId: string): Promise<{ models: ModelInfo[]; free_count: number; total_count: number }> {
+  async listModels(workspaceId: string, provider?: string): Promise<{ models: ModelInfo[]; free_count: number; total_count: number }> {
     const res = await fetch(`${FUNCTION_URL}?action=models`, {
       method: 'POST',
       headers: await getAuthHeaders(),
-      body: JSON.stringify({ workspace_id: workspaceId }),
+      body: JSON.stringify({ workspace_id: workspaceId, provider }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Failed to list models' }));
@@ -117,16 +119,30 @@ export const aiGateway = {
     return await res.json();
   },
 
-  async testConnection(workspaceId: string): Promise<{ status: string; data?: unknown }> {
+  async testConnection(workspaceId: string, provider?: string): Promise<{ status: string; data?: unknown }> {
     const res = await fetch(`${FUNCTION_URL}?action=test`, {
       method: 'POST',
       headers: await getAuthHeaders(),
-      body: JSON.stringify({ workspace_id: workspaceId }),
+      body: JSON.stringify({ workspace_id: workspaceId, provider }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Connection test failed' }));
       throw new Error(err.error ?? `Request failed (${res.status})`);
     }
     return await res.json();
+  },
+
+  async getProviders(): Promise<ProviderInfo[]> {
+    const res = await fetch(`${FUNCTION_URL}?action=providers`, {
+      method: 'POST',
+      headers: await getAuthHeaders(),
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load providers' }));
+      throw new Error(err.error ?? `Request failed (${res.status})`);
+    }
+    const data = await res.json();
+    return (data.providers ?? []) as ProviderInfo[];
   },
 };
