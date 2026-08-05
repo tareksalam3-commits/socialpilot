@@ -28,7 +28,7 @@ export const workspaceRepository = {
       .insert({
         name: input.name,
         brand_name: input.brand_name ?? null,
-        timezone: input.timezone ?? 'UTC',
+        timezone: input.timezone ?? 'Africa/Cairo',
         language: input.language ?? 'en',
         owner_id: user.id,
       })

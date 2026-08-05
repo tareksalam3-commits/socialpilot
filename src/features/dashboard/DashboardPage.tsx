@@ -178,7 +178,6 @@ export function DashboardPage() {
         <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <InfoItem label={t('dashboard.workspace.name')} value={workspace?.name ?? '—'} />
           <InfoItem label={t('dashboard.workspace.brandName')} value={workspace?.brand_name ?? '—'} />
-          <InfoItem label={t('dashboard.workspace.timezone')} value={workspace?.timezone ?? 'UTC'} />
           <InfoItem label={t('dashboard.workspace.language')} value={workspace?.language ?? 'en'} />
         </dl>
       </Card>
