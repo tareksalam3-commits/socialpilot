@@ -23,7 +23,12 @@ import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
 import { Badge } from '@/ui';
 
-type Command = {
+/** Programmatically toggle the command bar open/closed */
+export function toggleCommandBar() {
+  globalToggleCommandBar?.();
+}
+
+export type Command = {
   id: string;
   labelKey: string;
   description?: string;
@@ -32,6 +37,9 @@ type Command = {
   action: () => void;
   keywords?: string[];
 };
+
+// Shared ref for programmatic toggle
+let globalToggleCommandBar: (() => void) | null = null;
 
 export function CommandBar() {
   const { t } = useLanguage();
@@ -56,6 +64,12 @@ export function CommandBar() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Expose toggle function for external access
+  useEffect(() => {
+    globalToggleCommandBar = () => setOpen((v) => !v);
+    return () => { globalToggleCommandBar = null; };
   }, []);
 
   const navCommands: Command[] = [
