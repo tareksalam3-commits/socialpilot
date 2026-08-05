@@ -37,7 +37,6 @@ const navSections = [
   {
     labelKey: 'nav.section.overview',
     items: [
-      { to: '/app/automation', labelKey: 'nav.automation', icon: Bot },
       { to: '/app/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard },
       { to: '/app/analytics', labelKey: 'nav.analytics', icon: BarChart3 },
       { to: '/app/search', labelKey: 'nav.search', icon: SearchIcon },
@@ -51,6 +50,7 @@ const navSections = [
       { to: '/app/calendar', labelKey: 'nav.calendar', icon: CalendarDays },
       { to: '/app/media', labelKey: 'nav.mediaLibrary', icon: ImageIcon },
       { to: '/app/inbox', labelKey: 'nav.inbox', icon: InboxIcon },
+      { to: '/app/automation', labelKey: 'nav.automation', icon: Bot },
     ],
   },
   {
@@ -231,6 +231,16 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-3">
+            <button
+              onClick={() => window.dispatchEvent(new Event('open-command-bar'))}
+              className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+            >
+              <Bot className="h-4 w-4" />
+              <span className="hidden sm:inline">{t('ai.commandBar.trigger')}</span>
+              <span className="hidden rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-400 dark:border-slate-700 dark:text-slate-500 md:inline">
+                Ctrl+K
+              </span>
+            </button>
             <NotificationCenter />
             <div className="hidden text-right md:block">
               <p className="text-sm font-medium text-slate-900 dark:text-white">
