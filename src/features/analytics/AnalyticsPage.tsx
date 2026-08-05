@@ -89,7 +89,7 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('analytics.title')}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('analytics.subtitle')}</p>
@@ -97,7 +97,7 @@ export function AnalyticsPage() {
         <select
           value={days}
           onChange={(e) => setDays(parseInt(e.target.value, 10))}
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 sm:w-auto"
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
         >
           <option value={7}>{t('analytics.range.7d')}</option>
           <option value={30}>{t('analytics.range.30d')}</option>
@@ -169,7 +169,7 @@ export function AnalyticsPage() {
               {summary.workspaceActivity.recent.map((a) => (
                 <div key={a.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2 dark:border-slate-800">
                   <p className="text-sm text-slate-700 dark:text-slate-300">{a.description}</p>
-                  <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">{timeAgo(a.created_at)}</span>
+                  <span className="shrink-0 text-xs text-slate-400 dark:text-slate-500">{timeAgo(a.created_at, t)}</span>
                 </div>
               ))}
             </div>

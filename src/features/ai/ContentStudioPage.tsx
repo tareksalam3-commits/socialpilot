@@ -82,22 +82,6 @@ const platforms = [
   { id: 'linkedin', labelKey: 'ai.studio.platform.linkedin', icon: Linkedin },
 ];
 
-type AudienceType = 'general' | 'recruitment' | 'customers';
-
-const audiences: { id: AudienceType; labelKey: string }[] = [
-  { id: 'general', labelKey: 'ai.studio.audience.general' },
-  { id: 'recruitment', labelKey: 'ai.studio.audience.recruitment' },
-  { id: 'customers', labelKey: 'ai.studio.audience.customers' },
-];
-
-// Overrides the broad brand-voice audience with a specific focus for this
-// generation only (doesn't touch the saved Brand Voice settings).
-const audiencePrompts: Record<AudienceType, string> = {
-  general: '',
-  recruitment: 'Target audience for this post: job recruitment. Address university/college graduates aged 22-35 who are considering a sales career. Do not mention insurance policies or products for customers.',
-  customers: 'Target audience for this post: insurance customers. Address business owners, employees, and freelancers aged 30-50 who are considering buying an insurance policy. Do not mention job openings or recruitment.',
-};
-
 const generators: { id: GeneratorType; labelKey: string; icon: typeof Lightbulb }[] = [
   { id: 'hooks', labelKey: 'ai.studio.generator.hooks', icon: Zap },
   { id: 'cta', labelKey: 'ai.studio.generator.cta', icon: Target },
@@ -160,7 +144,6 @@ export function ContentStudioPage() {
   const { push } = useToast();
   const [input, setInput] = useState('');
   const [platform, setPlatform] = useState<string>('facebook');
-  const [audience, setAudience] = useState<AudienceType>('general');
   const [output, setOutput] = useState('');
   const [streaming, setStreaming] = useState(false);
 
@@ -171,7 +154,7 @@ export function ContentStudioPage() {
     }
     setOutput('');
     setStreaming(true);
-    const prompt = `${actionPrompts[action]}\n\n${platformPrompts[platform] ?? ''}\n\n${audiencePrompts[audience]}\n\nContent: ${input}`;
+    const prompt = `${actionPrompts[action]}\n\n${platformPrompts[platform] ?? ''}\n\nContent: ${input}`;
     const res = await generate({
       workspaceId: workspace.id,
       userId: user.id,
@@ -197,7 +180,7 @@ export function ContentStudioPage() {
     }
     setOutput('');
     setStreaming(true);
-    const prompt = `${generatorPrompts[gen]}\n\n${audiencePrompts[audience]}\n\nTopic: ${input}`;
+    const prompt = `${generatorPrompts[gen]}\n\nTopic: ${input}`;
     const res = await generate({
       workspaceId: workspace.id,
       userId: user.id,
@@ -239,7 +222,7 @@ export function ContentStudioPage() {
       </div>
 
       {/* Platform selector */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex gap-2">
         {platforms.map((p) => (
           <button
             key={p.id}
@@ -253,26 +236,6 @@ export function ContentStudioPage() {
             <p.icon className="h-4 w-4" /> {t(p.labelKey)}
           </button>
         ))}
-      </div>
-
-      {/* Audience selector */}
-      <div>
-        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{t('ai.studio.audienceLabel')}</p>
-        <div className="flex flex-wrap gap-2">
-          {audiences.map((a) => (
-            <button
-              key={a.id}
-              onClick={() => setAudience(a.id)}
-              className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
-                audience === a.id
-                  ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900'
-                  : 'border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-400'
-              }`}
-            >
-              {t(a.labelKey)}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

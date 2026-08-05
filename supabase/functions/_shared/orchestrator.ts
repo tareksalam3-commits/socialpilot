@@ -110,12 +110,6 @@ export async function publishPost(supabase: SupabaseClient, post: Record<string,
   let allSuccess = true;
 
   for (const target of allTargets ?? []) {
-    // Never re-publish a target that already succeeded — publishPost() is reused
-    // for the "Publish Now" retry action on a partially-failed post, so without
-    // this guard, retrying the one failed platform would duplicate-post to every
-    // platform that already succeeded.
-    if (target.status === 'published') continue;
-
     await log(supabase, { workspace_id: workspaceId, post_id: postId, target_id: target.id, platform: target.platform, event: 'attempt' });
     try {
       if (!target.account_id) throw new Error('No connected account for this platform');

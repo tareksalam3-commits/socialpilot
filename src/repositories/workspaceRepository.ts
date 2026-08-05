@@ -15,6 +15,7 @@ export const workspaceRepository = {
   async create(input: {
     name: string;
     brand_name?: string | null;
+    timezone?: string;
     language?: string;
   }): Promise<Workspace> {
     const {
@@ -27,8 +28,8 @@ export const workspaceRepository = {
       .insert({
         name: input.name,
         brand_name: input.brand_name ?? null,
-        timezone: 'Africa/Cairo',
-        language: input.language ?? 'ar',
+        timezone: input.timezone ?? 'UTC',
+        language: input.language ?? 'en',
         owner_id: user.id,
       })
       .select()

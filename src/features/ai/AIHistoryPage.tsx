@@ -3,7 +3,7 @@ import { Copy, Download, Plus, Search, Star, Trash2 } from 'lucide-react';
 import { useAIHistory } from '@/hooks/useAIHistory';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
-import { Badge, Button, Card, EmptyState, ErrorState, Skeleton } from '@/ui';
+import { Badge, Button, Card, EmptyState, ErrorState } from '@/ui';
 import { MarkdownRenderer } from '@/ui';
 import { timeAgo } from '@/utils/format';
 import type { AiHistoryEntry } from '@/types/ai';
@@ -40,12 +40,12 @@ export function AIHistoryPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('ai.history.title')}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('ai.history.subtitle')}</p>
         </div>
-        <Button className="w-full sm:w-auto" variant="outline" onClick={handleExport}><Download className="h-4 w-4" /> {t('ai.history.exportButton')}</Button>
+        <Button variant="outline" onClick={handleExport}><Download className="h-4 w-4" /> {t('ai.history.exportButton')}</Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -75,27 +75,27 @@ export function AIHistoryPage() {
       {error ? (
         <ErrorState description={error} />
       ) : loading ? (
-        <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
+        <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />)}</div>
       ) : filtered.length === 0 ? (
         <Card><EmptyState icon={<Search className="h-10 w-10" />} title={t('ai.history.empty.title')} description={t('ai.history.empty.description')} /></Card>
       ) : (
         <div className="space-y-3">
           {filtered.map((entry) => (
             <div key={entry.id} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
                   <Badge variant={entry.status === 'success' ? 'success' : 'error'}>{entry.status}</Badge>
                   <Badge variant="info">{entry.type}</Badge>
                   {entry.model && <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{entry.model}</span>}
                 </div>
-                <div className="flex items-center gap-1">
-                  <span className="me-1 text-xs text-slate-400">{timeAgo(entry.created_at)}</span>
-                  <button onClick={() => toggleFavorite(entry.id, !entry.favorite)} className="flex h-9 w-9 items-center justify-center text-slate-400 hover:text-amber-500">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-slate-400">{timeAgo(entry.created_at)}</span>
+                  <button onClick={() => toggleFavorite(entry.id, !entry.favorite)} className="text-slate-400 hover:text-amber-500">
                     <Star className={`h-4 w-4 ${entry.favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
                   </button>
-                  <button onClick={() => handleReuse(entry)} className="flex h-9 w-9 items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" title={t('ai.history.reuseInput')}><Plus className="h-4 w-4" /></button>
-                  {entry.output && <button onClick={() => handleCopy(entry.output!)} className="flex h-9 w-9 items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" title={t('ai.history.copyOutput')}><Copy className="h-4 w-4" /></button>}
-                  <button onClick={() => remove(entry.id)} className="flex h-9 w-9 items-center justify-center text-slate-400 hover:text-rose-500" title={t('ai.history.delete')}><Trash2 className="h-4 w-4" /></button>
+                  <button onClick={() => handleReuse(entry)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" title={t('ai.history.reuseInput')}><Plus className="h-4 w-4" /></button>
+                  {entry.output && <button onClick={() => handleCopy(entry.output!)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" title={t('ai.history.copyOutput')}><Copy className="h-4 w-4" /></button>}
+                  <button onClick={() => remove(entry.id)} className="text-slate-400 hover:text-rose-500" title={t('ai.history.delete')}><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
               <div className="mt-3">

@@ -6,7 +6,6 @@ import { SupabaseClient } from 'npm:@supabase/supabase-js@2.57.4';
 const ENV_FALLBACK: Record<string, string> = {
   meta_app_id: 'META_APP_ID',
   meta_app_secret: 'META_APP_SECRET',
-  meta_config_id: 'META_CONFIG_ID',
   linkedin_client_id: 'LINKEDIN_CLIENT_ID',
   linkedin_client_secret: 'LINKEDIN_CLIENT_SECRET',
   app_url: 'APP_URL',

@@ -5,7 +5,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useDashboardData } from '@/hooks/useDashboardData';
-import { Badge, Button, Card, CardSkeleton, EmptyState, ErrorState, Skeleton } from '@/ui';
+import { Badge, Button, Card, CardSkeleton, EmptyState, ErrorState } from '@/ui';
 import { timeAgo } from '@/utils/format';
 
 export function DashboardPage() {
@@ -102,10 +102,10 @@ export function DashboardPage() {
             <div className="space-y-3">
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <Skeleton className="h-8 w-8 rounded-full" />
-                  <div className="flex-1 space-y-1.5">
-                    <Skeleton className="h-3 w-1/2" />
-                    <Skeleton className="h-2 w-1/4" />
+                  <div className="h-8 w-8 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
+                  <div className="flex-1 space-y-1">
+                    <div className="h-3 w-1/2 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+                    <div className="h-2 w-1/4 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
                   </div>
                 </div>
               ))}
@@ -141,8 +141,8 @@ export function DashboardPage() {
             <ErrorState description={error} />
           ) : loading ? (
             <div className="space-y-3">
-              <Skeleton className="h-4 w-1/3" />
-              <Skeleton className="h-32 w-full" />
+              <div className="h-4 w-1/3 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="h-32 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
             </div>
           ) : (
             <div className="space-y-4">
@@ -175,10 +175,11 @@ export function DashboardPage() {
 
       {/* Workspace info */}
       <Card title={t('dashboard.workspace.title')} description={t('dashboard.workspace.description')}>
-        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <InfoItem label={t('dashboard.workspace.name')} value={workspace?.name ?? '—'} />
           <InfoItem label={t('dashboard.workspace.brandName')} value={workspace?.brand_name ?? '—'} />
-          <InfoItem label={t('dashboard.workspace.language')} value={workspace?.language ?? 'ar'} />
+          <InfoItem label={t('dashboard.workspace.timezone')} value={workspace?.timezone ?? 'UTC'} />
+          <InfoItem label={t('dashboard.workspace.language')} value={workspace?.language ?? 'en'} />
         </dl>
       </Card>
     </div>

@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/services/supabase';
-import { useLanguage } from '@/providers/LanguageProvider';
 import type { Profile } from '@/types/database';
 
 type AuthContextValue = {
@@ -17,17 +16,14 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-type TFunction = (key: string, params?: Record<string, string | number>) => string;
-
-function mapAuthError(message: string, t: TFunction): string {
-  if (message.includes('Invalid login credentials')) return t('auth.error.invalidCredentials');
-  if (message.includes('already registered')) return t('auth.error.emailExists');
-  if (message.includes('Password should be at least')) return t('validation.password.minLength', { count: 6 });
+function mapAuthError(message: string): string {
+  if (message.includes('Invalid login credentials')) return 'Incorrect email or password.';
+  if (message.includes('already registered')) return 'An account with this email already exists.';
+  if (message.includes('Password should be at least')) return 'Password must be at least 6 characters.';
   return message;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { t } = useLanguage();
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,33 +44,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    // Safety net: on a slow/flaky connection getSession() can hang (or
-    // reject) indefinitely, leaving the app stuck on "checking session"
-    // forever. Force loading to resolve after 10s no matter what.
-    const timeout = setTimeout(() => {
-      if (mounted) setLoading(false);
-    }, 10000);
-
-    supabase.auth
-      .getSession()
-      .then(({ data }) => {
-        if (!mounted) return;
-        setSession(data.session);
-        if (data.session?.user) {
-          loadProfile(data.session.user.id).finally(() => {
-            clearTimeout(timeout);
-            if (mounted) setLoading(false);
-          });
-        } else {
-          clearTimeout(timeout);
-          setLoading(false);
-        }
-      })
-      .catch((error) => {
-        console.error('Failed to get session:', error);
-        clearTimeout(timeout);
-        if (mounted) setLoading(false);
-      });
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session);
+      if (data.session?.user) {
+        loadProfile(data.session.user.id).finally(() => mounted && setLoading(false));
+      } else {
+        setLoading(false);
+      }
+    });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       (async () => {
@@ -90,7 +68,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       mounted = false;
-      clearTimeout(timeout);
       sub.subscription.unsubscribe();
     };
   }, []);
@@ -101,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password,
       options: { data: { full_name: fullName } },
     });
-    if (error) return { error: mapAuthError(error.message, t) };
+    if (error) return { error: mapAuthError(error.message) };
     // If email confirmation is disabled, Supabase returns a session immediately.
     if (data.session?.user) {
       setSession(data.session);
@@ -113,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: mapAuthError(error.message, t) };
+    if (error) return { error: mapAuthError(error.message) };
     // Set session + profile here (instead of waiting for the async
     // onAuthStateChange event) so that by the time this resolves and the
     // caller navigates, `user`/`profile` are already committed — avoids a

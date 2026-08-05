@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Eye, EyeOff, Globe, Monitor, Moon, Plug, Shield, Sun, User as UserIcon, Wrench } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Eye, EyeOff, Globe, Key, Monitor, Moon, Plug, Shield, Sun, User as UserIcon, Wrench, Send, Bell } from 'lucide-react';
 import { useAuth } from '@/providers/AuthProvider';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useToast } from '@/providers/ToastProvider';
@@ -9,35 +9,31 @@ import { LANGUAGES } from '@/i18n/translations';
 import { Badge, Button, Card, Input, Tabs } from '@/ui';
 import { profileRepository } from '@/repositories/profileRepository';
 import { workspaceRepository } from '@/repositories/workspaceRepository';
+import { apiKeyRepository } from '@/repositories/apiKeyRepository';
 import { platformCredentialsRepository, type CredentialKey, type CredentialStatus } from '@/repositories/platformCredentialsRepository';
 import { supabase } from '@/services/supabase';
 import { validateRequired } from '@/utils/validation';
+import type { ApiKey } from '@/types/database';
 import { formatDate, initials } from '@/utils/format';
 
-type TabId = 'general' | 'profile' | 'workspace' | 'appearance' | 'language' | 'security' | 'integrations';
+type TabId = 'general' | 'profile' | 'workspace' | 'appearance' | 'language' | 'security' | 'apikeys' | 'integrations' | 'publishing' | 'notifications';
 
 export function SettingsPage() {
   const [tab, setTab] = useState<TabId>('general');
   const { t } = useLanguage();
 
-  const items: Record<TabId, { label: string; icon: ReactNode }> = {
-    general: { label: t('settings.tab.general'), icon: <Wrench className="h-4 w-4" /> },
-    profile: { label: t('settings.tab.profile'), icon: <UserIcon className="h-4 w-4" /> },
-    workspace: { label: t('settings.tab.workspace'), icon: <Shield className="h-4 w-4" /> },
-    appearance: { label: t('settings.tab.appearance'), icon: <Monitor className="h-4 w-4" /> },
-    language: { label: t('settings.tab.language'), icon: <Globe className="h-4 w-4" /> },
-    integrations: { label: t('settings.tab.integrations'), icon: <Plug className="h-4 w-4" /> },
-    security: { label: t('settings.tab.security'), icon: <Shield className="h-4 w-4" /> },
-  };
-
-  const groups: { title: string; tabs: TabId[] }[] = [
-    { title: t('settings.group.workspace'), tabs: ['general', 'workspace', 'language'] },
-    { title: t('settings.group.account'), tabs: ['profile', 'security'] },
-    { title: t('settings.group.appearance'), tabs: ['appearance'] },
-    { title: t('settings.group.publishing'), tabs: ['integrations'] },
+  const tabs = [
+    { id: 'general' as TabId, label: t('settings.tab.general'), icon: <Wrench className="h-4 w-4" /> },
+    { id: 'profile' as TabId, label: t('settings.tab.profile'), icon: <UserIcon className="h-4 w-4" /> },
+    { id: 'workspace' as TabId, label: t('settings.tab.workspace'), icon: <Shield className="h-4 w-4" /> },
+    { id: 'appearance' as TabId, label: t('settings.tab.appearance'), icon: <Monitor className="h-4 w-4" /> },
+    { id: 'language' as TabId, label: t('settings.tab.language'), icon: <Globe className="h-4 w-4" /> },
+    { id: 'publishing' as TabId, label: t('settings.tab.publishing'), icon: <Send className="h-4 w-4" /> },
+    { id: 'integrations' as TabId, label: t('settings.tab.integrations'), icon: <Plug className="h-4 w-4" /> },
+    { id: 'notifications' as TabId, label: t('settings.tab.notifications'), icon: <Bell className="h-4 w-4" /> },
+    { id: 'security' as TabId, label: t('settings.tab.security'), icon: <Shield className="h-4 w-4" /> },
+    { id: 'apikeys' as TabId, label: t('settings.tab.apikeys'), icon: <Key className="h-4 w-4" /> },
   ];
-
-  const flatTabs = groups.flatMap((g) => g.tabs).map((id) => ({ id, label: items[id].label, icon: items[id].icon }));
 
   return (
     <div className="space-y-6">
@@ -45,51 +41,16 @@ export function SettingsPage() {
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('settings.title')}</h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('settings.subtitle')}</p>
       </div>
-
-      {/* Mobile / narrow screens: horizontal scrollable tabs */}
-      <div className="lg:hidden">
-        <Tabs tabs={flatTabs} active={tab} onChange={(id) => setTab(id as TabId)} />
-      </div>
-
-      <div className="lg:flex lg:items-start lg:gap-8">
-        {/* Desktop: grouped sidebar navigation */}
-        <nav className="hidden w-56 shrink-0 lg:block">
-          <div className="space-y-6">
-            {groups.map((group) => (
-              <div key={group.title}>
-                <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                  {group.title}
-                </p>
-                <div className="space-y-0.5">
-                  {group.tabs.map((id) => (
-                    <button
-                      key={id}
-                      onClick={() => setTab(id)}
-                      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-                        tab === id
-                          ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
-                          : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      {items[id].icon}
-                      {items[id].label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </nav>
-
-        <div className="min-w-0 flex-1">
-          {tab === 'general' && <GeneralTab />}
-          {tab === 'profile' && <ProfileTab />}
-          {tab === 'workspace' && <WorkspaceTab />}
-          {tab === 'appearance' && <AppearanceTab />}
-          {tab === 'language' && <LanguageTab />}
-          {tab === 'security' && <SecurityTab />}
-          {tab === 'integrations' && <IntegrationsTab />}
-        </div>
+      <Tabs tabs={tabs} active={tab} onChange={(t) => setTab(t as TabId)} />
+      <div>
+        {tab === 'general' && <GeneralTab />}
+        {tab === 'profile' && <ProfileTab />}
+        {tab === 'workspace' && <WorkspaceTab />}
+        {tab === 'appearance' && <AppearanceTab />}
+        {tab === 'language' && <LanguageTab />}
+        {tab === 'security' && <SecurityTab />}
+        {tab === 'apikeys' && <ApiKeysTab />}
+        {tab === 'integrations' && <IntegrationsTab />}
       </div>
     </div>
   );
@@ -138,7 +99,8 @@ function GeneralTab() {
         <Info label={t('settings.general.fullName')} value={profile?.full_name ?? t('settings.notSet')} />
         <Info label={t('settings.general.workspace')} value={workspace?.name ?? t('settings.notSet')} />
         <Info label={t('settings.general.brandName')} value={workspace?.brand_name ?? t('settings.notSet')} />
-        <Info label={t('settings.general.language')} value={workspace?.language ?? 'ar'} />
+        <Info label={t('settings.general.timezone')} value={workspace?.timezone ?? 'UTC'} />
+        <Info label={t('settings.general.language')} value={workspace?.language ?? 'en'} />
       </dl>
     </Card>
   );
@@ -162,7 +124,7 @@ function ProfileTab() {
   const [loading, setLoading] = useState(false);
 
   const handleSave = async () => {
-    const nameErr = validateRequired(fullName, t('settings.profile.fullName'), t);
+    const nameErr = validateRequired(fullName, 'Full name');
     if (!nameErr.valid) {
       push({ title: t('settings.profile.toast.validationError'), description: nameErr.error!, variant: 'error' });
       return;
@@ -200,7 +162,7 @@ function ProfileTab() {
           hint={t('settings.profile.avatarUrlHint')}
         />
         <div className="flex justify-end">
-          <Button className="w-full sm:w-auto" onClick={handleSave} loading={loading}>
+          <Button onClick={handleSave} loading={loading}>
             {t('settings.profile.saveChanges')}
           </Button>
         </div>
@@ -215,12 +177,13 @@ function WorkspaceTab() {
   const [name, setName] = useState(workspace?.name ?? '');
   const [brandName, setBrandName] = useState(workspace?.brand_name ?? '');
   const [logoUrl, setLogoUrl] = useState(workspace?.logo_url ?? '');
-  const [language, setLanguage] = useState(workspace?.language ?? 'ar');
+  const [timezone, setTimezone] = useState(workspace?.timezone ?? 'UTC');
+  const [language, setLanguage] = useState(workspace?.language ?? 'en');
   const [loading, setLoading] = useState(false);
   const { t } = useLanguage();
 
   const handleSave = async () => {
-    const nameErr = validateRequired(name, t('settings.workspace.name'), t);
+    const nameErr = validateRequired(name, 'Workspace name');
     if (!nameErr.valid) {
       push({ title: t('settings.workspace.toast.validationError'), description: nameErr.error!, variant: 'error' });
       return;
@@ -232,6 +195,7 @@ function WorkspaceTab() {
         name,
         brand_name: brandName || null,
         logo_url: logoUrl || null,
+        timezone,
         language,
       });
       await refresh();
@@ -249,30 +213,45 @@ function WorkspaceTab() {
         <Input label={t('settings.workspace.name')} value={name} onChange={(e) => setName(e.target.value)} placeholder="My Workspace" />
         <Input label={t('settings.workspace.brandName')} value={brandName} onChange={(e) => setBrandName(e.target.value)} placeholder="Acme Inc." />
         <Input label={t('settings.workspace.logoUrl')} value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…" />
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('settings.workspace.contentLanguage')}</label>
-          <select
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-          >
-            {[
-              { code: 'ar', label: 'العربية' },
-              { code: 'en', label: 'English' },
-              { code: 'es', label: 'Spanish' },
-              { code: 'fr', label: 'French' },
-              { code: 'de', label: 'German' },
-              { code: 'pt', label: 'Portuguese' },
-              { code: 'hi', label: 'Hindi' },
-            ].map((l) => (
-              <option key={l.code} value={l.code}>
-                {l.label}
-              </option>
-            ))}
-          </select>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('settings.workspace.timezone')}</label>
+            <select
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              {['UTC', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris', 'Asia/Tokyo', 'Asia/Kolkata'].map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('settings.workspace.contentLanguage')}</label>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              {[
+                { code: 'en', label: 'English' },
+                { code: 'es', label: 'Spanish' },
+                { code: 'fr', label: 'French' },
+                { code: 'de', label: 'German' },
+                { code: 'pt', label: 'Portuguese' },
+                { code: 'hi', label: 'Hindi' },
+              ].map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <div className="flex justify-end">
-          <Button className="w-full sm:w-auto" onClick={handleSave} loading={loading}>
+          <Button onClick={handleSave} loading={loading}>
             {t('settings.workspace.saveChanges')}
           </Button>
         </div>
@@ -385,16 +364,16 @@ function SecurityTab() {
             onChange={(e) => setConfirm(e.target.value)}
             placeholder="Re-enter new password"
           />
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center justify-between">
             <button
               type="button"
               onClick={() => setShow((v) => !v)}
-              className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+              className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
             >
               {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               {show ? t('settings.security.hidePasswords') : t('settings.security.showPasswords')}
             </button>
-            <Button className="w-full sm:w-auto" onClick={handleChange} loading={loading}>
+            <Button onClick={handleChange} loading={loading}>
               {t('settings.security.updatePassword')}
             </Button>
           </div>
@@ -402,15 +381,140 @@ function SecurityTab() {
       </Card>
       <Card title={t('settings.security.account')} description={t('settings.security.accountDesc')}>
         <div className="space-y-3">
-          <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center justify-between">
             <span className="text-sm text-slate-500 dark:text-slate-400">{t('settings.security.email')}</span>
-            <span className="text-sm font-medium text-slate-900 dark:text-white break-all">{user?.email}</span>
+            <span className="text-sm font-medium text-slate-900 dark:text-white">{user?.email}</span>
           </div>
-          <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center justify-between">
             <span className="text-sm text-slate-500 dark:text-slate-400">{t('settings.security.userId')}</span>
-            <span className="font-mono text-xs text-slate-600 dark:text-slate-400 break-all">{user?.id}</span>
+            <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{user?.id}</span>
           </div>
         </div>
+      </Card>
+    </div>
+  );
+}
+
+function ApiKeysTab() {
+  const { workspace } = useWorkspace();
+  const { push } = useToast();
+  const { t } = useLanguage();
+  const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [label, setLabel] = useState('');
+  const [value, setValue] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  const load = async () => {
+    if (!workspace) return;
+    try {
+      setLoading(true);
+      const data = await apiKeyRepository.list(workspace.id);
+      setKeys(data);
+    } catch (e) {
+      push({ title: t('settings.apikeys.toast.loadFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // load on mount / when workspace changes
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.id]);
+
+  const handleCreate = async () => {
+    const labelErr = validateRequired(label, 'Label');
+    const valueErr = validateRequired(value, 'API key value');
+    if (!labelErr.valid || !valueErr.valid) {
+      push({ title: t('settings.apikeys.toast.validationError'), description: labelErr.error ?? valueErr.error ?? '', variant: 'error' });
+      return;
+    }
+    if (!workspace) return;
+    setCreating(true);
+    try {
+      const masked = value.length > 8 ? `${value.slice(0, 4)}••••${value.slice(-4)}` : '••••';
+      const created = await apiKeyRepository.create({
+        workspace_id: workspace.id,
+        label,
+        masked_value: masked,
+      });
+      setKeys((prev) => [created, ...prev]);
+      setLabel('');
+      setValue('');
+      push({ title: t('settings.apikeys.toast.added'), variant: 'success' });
+    } catch (e) {
+      push({ title: t('settings.apikeys.toast.addFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleRevoke = async (id: string) => {
+    try {
+      await apiKeyRepository.revoke(id);
+      setKeys((prev) => prev.map((k) => (k.id === id ? { ...k, status: 'revoked' } : k)));
+      push({ title: t('settings.apikeys.toast.revoked'), variant: 'success' });
+    } catch (e) {
+      push({ title: t('settings.apikeys.toast.revokeFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card title={t('settings.apikeys.title')} description={t('settings.apikeys.description')}>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Input label={t('settings.apikeys.label')} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="OpenAI" />
+            <Input
+              label={t('settings.apikeys.keyValue')}
+              type="password"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder="sk-…"
+            />
+            <div className="flex items-end">
+              <Button onClick={handleCreate} loading={creating} className="w-full">
+                {t('settings.apikeys.addKey')}
+              </Button>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {t('settings.apikeys.note')}
+          </p>
+        </div>
+      </Card>
+
+      <Card title={t('settings.apikeys.storedKeys')}>
+        {loading ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
+        ) : keys.length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">{t('settings.apikeys.none')}</p>
+        ) : (
+          <div className="space-y-2">
+            {keys.map((k) => (
+              <div
+                key={k.id}
+                className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3 dark:border-slate-800"
+              >
+                <div>
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">{k.label}</p>
+                  <p className="font-mono text-xs text-slate-500 dark:text-slate-400">{k.masked_value}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">{formatDate(k.created_at)}</span>
+                  <Badge variant={k.status === 'active' ? 'success' : 'error'}>{k.status}</Badge>
+                  {k.status === 'active' && (
+                    <Button size="sm" variant="ghost" onClick={() => handleRevoke(k.id)}>
+                      {t('settings.apikeys.revoke')}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
     </div>
   );
@@ -419,7 +523,6 @@ function SecurityTab() {
 const CREDENTIAL_FIELDS: { key: CredentialKey; label: string; placeholder: string; secret: boolean; group: 'meta' | 'linkedin' | 'general' }[] = [
   { key: 'meta_app_id', label: 'Meta App ID', placeholder: 'e.g. 1234567890123456', secret: false, group: 'meta' },
   { key: 'meta_app_secret', label: 'Meta App Secret', placeholder: 'Paste the app secret from Meta for Developers', secret: true, group: 'meta' },
-  { key: 'meta_config_id', label: 'Meta Login Configuration ID (only if using Facebook Login for Business)', placeholder: 'e.g. 123456789012345', secret: false, group: 'meta' },
   { key: 'linkedin_client_id', label: 'LinkedIn Client ID', placeholder: 'e.g. 86abcxyz12345', secret: false, group: 'linkedin' },
   { key: 'linkedin_client_secret', label: 'LinkedIn Client Secret', placeholder: 'Paste the client secret from the LinkedIn app', secret: true, group: 'linkedin' },
   { key: 'app_url', label: 'App URL', placeholder: 'https://your-app-domain.com', secret: false, group: 'general' },
@@ -500,7 +603,7 @@ function IntegrationsTab() {
             <button
               type="button"
               onClick={() => setReveal((prev) => ({ ...prev, [f.key]: !prev[f.key] }))}
-              className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
             >
               {reveal[f.key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>

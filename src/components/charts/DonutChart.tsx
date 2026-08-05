@@ -32,7 +32,7 @@ export function DonutChart({ data, size = 140, thickness = 16, centerLabel, cent
   let offset = 0;
 
   return (
-    <div className="flex flex-wrap items-center gap-5">
+    <div className="flex items-center gap-5">
       <div className="relative shrink-0" style={{ width: size, height: size }}>
         <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} role="img">
           <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
@@ -67,12 +67,12 @@ export function DonutChart({ data, size = 140, thickness = 16, centerLabel, cent
           </div>
         )}
       </div>
-      <div className="min-w-0 flex-1 space-y-1.5">
+      <div className="space-y-1.5">
         {data.map((d) => (
           <div key={d.label} className="flex items-center gap-2 text-xs">
             <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: d.color }} />
-            <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{d.label}</span>
-            <span className="shrink-0 font-medium text-slate-900 dark:text-white">{d.value}</span>
+            <span className="text-slate-600 dark:text-slate-300">{d.label}</span>
+            <span className="font-medium text-slate-900 dark:text-white">{d.value}</span>
           </div>
         ))}
       </div>

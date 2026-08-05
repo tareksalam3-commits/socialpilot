@@ -92,9 +92,9 @@ export function WorkspacePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center justify-between">
         <div><h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('workspace.title')}</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('workspace.subtitle')}</p></div>
-        <Button className="w-full sm:w-auto" onClick={() => setShowInvite(true)}><UserPlus className="h-4 w-4" /> {t('workspace.inviteMember')}</Button>
+        <Button onClick={() => setShowInvite(true)}><UserPlus className="h-4 w-4" /> {t('workspace.inviteMember')}</Button>
       </div>
 
       <Card title={t('workspace.members.title')} description={t('workspace.members.count', { count: members.length })}>
@@ -109,7 +109,7 @@ export function WorkspacePage() {
                   </select>
                 </TableCell>
                 <TableCell className="text-xs text-slate-500 dark:text-slate-400">{formatDate(m.created_at)}</TableCell>
-                <TableCell>{m.user_id !== user?.id && <button onClick={() => handleRemoveMember(m.id)} className="flex h-9 w-9 items-center justify-center rounded text-slate-400 hover:text-rose-500"><Trash2 className="h-3.5 w-3.5" /></button>}</TableCell>
+                <TableCell>{m.user_id !== user?.id && <button onClick={() => handleRemoveMember(m.id)} className="rounded p-1 text-slate-400 hover:text-rose-500"><Trash2 className="h-3.5 w-3.5" /></button>}</TableCell>
               </TableRow>
             ))}
           </Table>
@@ -120,8 +120,8 @@ export function WorkspacePage() {
         <Card title={t('workspace.invitations.title')} description={t('workspace.invitations.count', { count: invitations.length })}>
           <div className="space-y-2">
             {invitations.map((i) => (
-              <div key={i.id} className="flex flex-col gap-3 rounded-lg border border-slate-200 px-4 py-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-2"><Mail className="h-4 w-4 shrink-0 text-slate-400" /><div><p className="text-sm font-medium text-slate-900 dark:text-white">{i.email}</p><p className="text-xs text-slate-500 dark:text-slate-400">{t('workspace.invitations.invited', { time: timeAgo(i.created_at), date: formatDate(i.expires_at) })}</p></div></div>
+              <div key={i.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3 dark:border-slate-800">
+                <div className="flex items-center gap-2"><Mail className="h-4 w-4 text-slate-400" /><div><p className="text-sm font-medium text-slate-900 dark:text-white">{i.email}</p><p className="text-xs text-slate-500 dark:text-slate-400">{t('workspace.invitations.invited', { time: timeAgo(i.created_at), date: formatDate(i.expires_at) })}</p></div></div>
                 <div className="flex items-center gap-2"><Badge variant="info">{t(`workspace.role.${i.role}`)}</Badge><Button size="sm" variant="ghost" onClick={() => handleRevoke(i.id)}>{t('workspace.invitations.revoke')}</Button></div>
               </div>
             ))}

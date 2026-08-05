@@ -18,7 +18,7 @@ export function ForgotPasswordPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const emailErr = validateEmail(email, t);
+    const emailErr = validateEmail(email);
     setError(emailErr.error);
     if (!emailErr.valid) return;
 
@@ -57,7 +57,7 @@ export function ForgotPasswordPage() {
             to="/login"
             className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
           >
-            <ArrowLeft className="h-4 w-4 rtl:rotate-180" /> {t('auth.forgotPassword.backToSignIn')}
+            <ArrowLeft className="h-4 w-4" /> {t('auth.forgotPassword.backToSignIn')}
           </Link>
         </div>
       ) : (
@@ -79,7 +79,7 @@ export function ForgotPasswordPage() {
             to="/login"
             className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
           >
-            <ArrowLeft className="h-4 w-4 rtl:rotate-180" /> {t('auth.forgotPassword.backToSignIn')}
+            <ArrowLeft className="h-4 w-4" /> {t('auth.forgotPassword.backToSignIn')}
           </Link>
         </form>
       )}

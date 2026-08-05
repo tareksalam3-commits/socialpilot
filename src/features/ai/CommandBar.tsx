@@ -129,21 +129,21 @@ export function CommandBar() {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-start justify-center px-3 pt-6 sm:px-4 sm:pt-20">
+    <div className="fixed inset-0 z-[200] flex items-start justify-center pt-20">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setOpen(false)} />
       <div className="relative w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-          <Search className="h-5 w-5 shrink-0 text-slate-400" />
+          <Search className="h-5 w-5 text-slate-400" />
           <input
             type="text"
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('ai.commandBar.placeholder')}
-            className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-white"
+            className="flex-1 bg-transparent text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none dark:text-white"
           />
-          <span className="hidden sm:inline-block"><Badge variant="info">CTRL+K</Badge></span>
-          <button onClick={() => setOpen(false)} className="flex h-9 min-w-[36px] shrink-0 items-center justify-center text-xs text-slate-400 hover:text-slate-600">{t('ai.commandBar.esc')}</button>
+          <Badge variant="info">CTRL+K</Badge>
+          <button onClick={() => setOpen(false)} className="text-xs text-slate-400 hover:text-slate-600">{t('ai.commandBar.esc')}</button>
         </div>
 
         {result ? (

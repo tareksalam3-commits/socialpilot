@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { File, Film, Image as ImageIcon, FolderPlus, Search, Trash2, Upload, X } from 'lucide-react';
 import { useMedia } from '@/hooks/useMedia';
 import { useToast } from '@/providers/ToastProvider';
-import { useLanguage } from '@/providers/LanguageProvider';
 import { Badge, Button, Card, EmptyState, Input, Modal } from '@/ui';
 import { formatDate } from '@/utils/format';
 import type { MediaItem } from '@/types/social';
@@ -13,7 +12,6 @@ const typeColors = { image: 'text-emerald-600', video: 'text-purple-600', docume
 export function MediaLibraryPage() {
   const { items, folders, loading, upload, remove, createFolder, deleteFolder, filterType, setFilterType, filterFolder, setFilterFolder, searchQuery, setSearchQuery } = useMedia();
   const { push } = useToast();
-  const { t } = useLanguage();
   const [showFolder, setShowFolder] = useState(false);
   const [folderName, setFolderName] = useState('');
   const [preview, setPreview] = useState<MediaItem | null>(null);
@@ -41,15 +39,15 @@ export function MediaLibraryPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Media Library</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Upload, organize, and manage your media assets.</p>
         </div>
         <div className="flex gap-2">
-          <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setShowFolder(true)}><FolderPlus className="h-4 w-4" /> Folder</Button>
-          <label className="flex-1 sm:flex-none">
-            <Button className="w-full" onClick={() => {}}><Upload className="h-4 w-4" /> Upload</Button>
+          <Button variant="outline" onClick={() => setShowFolder(true)}><FolderPlus className="h-4 w-4" /> Folder</Button>
+          <label>
+            <Button onClick={() => {}}><Upload className="h-4 w-4" /> Upload</Button>
             <input type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
           </label>
         </div>
@@ -74,14 +72,14 @@ export function MediaLibraryPage() {
           {folders.map((f) => (
             <div key={f.id} className="flex items-center gap-1">
               <button onClick={() => setFilterFolder(f.id)} className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${filterFolder === f.id ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-400'}`}>{f.name}</button>
-              <button onClick={() => deleteFolder(f.id)} className="flex h-9 w-9 items-center justify-center text-slate-400 hover:text-rose-500 sm:h-6 sm:w-6"><X className="h-3.5 w-3.5" /></button>
+              <button onClick={() => deleteFolder(f.id)} className="text-slate-400 hover:text-rose-500"><X className="h-3 w-3" /></button>
             </div>
           ))}
         </div>
       )}
 
       {loading ? (
-        <p className="py-6 text-center text-sm text-slate-500">{t('common.loading')}</p>
+        <p className="py-6 text-center text-sm text-slate-500">Loading…</p>
       ) : items.length === 0 ? (
         <Card><EmptyState icon={<ImageIcon className="h-10 w-10" />} title="No media yet" description="Upload images, videos, or documents to get started." action={<label><Button onClick={() => {}}><Upload className="h-4 w-4" /> Upload</Button><input type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} /></label>} /></Card>
       ) : (
@@ -98,7 +96,7 @@ export function MediaLibraryPage() {
                       <Icon className={`h-10 w-10 ${typeColors[item.type]}`} />
                     </div>
                   )}
-                  <button onClick={(e) => { e.stopPropagation(); remove(item.id); }} className="absolute right-1.5 top-1.5 flex h-9 w-9 items-center justify-center rounded-lg bg-white/90 text-slate-500 opacity-100 transition hover:text-rose-500 active:scale-95 dark:bg-slate-900/90 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100"><Trash2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" /></button>
+                  <button onClick={(e) => { e.stopPropagation(); remove(item.id); }} className="absolute right-2 top-2 rounded-lg bg-white/80 p-1 text-slate-500 opacity-0 transition hover:text-rose-500 group-hover:opacity-100 dark:bg-slate-900/80"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
                 <div className="p-2">
                   <p className="truncate text-xs font-medium text-slate-900 dark:text-white">{item.name}</p>
@@ -119,7 +117,7 @@ export function MediaLibraryPage() {
           <div className="space-y-3">
             {preview.type === 'image' ? <img src={preview.url} alt={preview.name} className="max-h-96 w-full rounded-lg object-contain" /> : <div className="flex h-48 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">{(() => { const Icon = typeIcons[preview.type] ?? File; return <Icon className={`h-12 w-12 ${typeColors[preview.type]}`} />; })()}</div>}
             <div className="flex flex-wrap gap-2">{preview.tags.map((t) => <Badge key={t}>{t}</Badge>)}</div>
-            <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3 text-sm">
               <div><span className="text-slate-500 dark:text-slate-400">Type:</span> <span className="text-slate-900 dark:text-white">{preview.type}</span></div>
               <div><span className="text-slate-500 dark:text-slate-400">Size:</span> <span className="text-slate-900 dark:text-white">{preview.size_bytes ? (preview.size_bytes / 1024).toFixed(1) + ' KB' : '—'}</span></div>
               <div><span className="text-slate-500 dark:text-slate-400">Uploaded:</span> <span className="text-slate-900 dark:text-white">{formatDate(preview.created_at)}</span></div>

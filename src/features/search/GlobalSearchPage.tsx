@@ -74,7 +74,7 @@ export function GlobalSearchPage() {
       <div className="relative max-w-2xl">
         <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
         <input type="search" autoFocus placeholder="Search everything…" value={query} onChange={(e) => setQuery(e.target.value)} className="w-full rounded-xl border border-slate-300 bg-white py-3 pl-11 pr-10 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
-        {query && <button onClick={() => setQuery('')} className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center text-slate-400 hover:text-slate-600"><X className="h-5 w-5" /></button>}
+        {query && <button onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="h-5 w-5" /></button>}
       </div>
 
       {loading && <p className="text-sm text-slate-500">Searching…</p>}

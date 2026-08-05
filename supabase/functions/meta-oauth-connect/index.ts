@@ -22,11 +22,6 @@ Deno.serve(async (req: Request) => {
   const supabase = serviceClient();
   const appId = await getCredential(supabase, 'meta_app_id');
   if (!appId) return errorResponse('Meta App ID is not configured. Set it in Settings > Integrations.', 500);
-  // Apps set up under "Facebook Login for Business" (as opposed to classic
-  // Facebook Login) require a config_id from a Login Configuration instead
-  // of a plain scope list — the classic scope-based dialog fails silently
-  // (generic "Sorry, something went wrong") for these apps.
-  const configId = await getCredential(supabase, 'meta_config_id');
 
   const callerId = await getCallerId(supabase, req);
   if (!callerId) return errorResponse('Unauthorized', 401);
@@ -56,14 +51,8 @@ Deno.serve(async (req: Request) => {
   authorizeUrl.searchParams.set('client_id', appId);
   authorizeUrl.searchParams.set('redirect_uri', redirectUri);
   authorizeUrl.searchParams.set('state', state);
+  authorizeUrl.searchParams.set('scope', META_SCOPES);
   authorizeUrl.searchParams.set('response_type', 'code');
-  if (configId) {
-    // Facebook Login for Business: pass the Login Configuration ID instead
-    // of scope (Meta recommends omitting scope entirely in this mode).
-    authorizeUrl.searchParams.set('config_id', configId);
-  } else {
-    authorizeUrl.searchParams.set('scope', META_SCOPES);
-  }
 
   return jsonResponse({ url: authorizeUrl.toString() });
 });
