@@ -91,26 +91,31 @@ async function isWorkspaceMember(supabase: ReturnType<typeof createClient>, work
   return !!data;
 }
 
-// Service-role client bypasses RLS, so this reads ai_provider_keys directly —
-// no SECURITY DEFINER RPC needed for the gateway's own use (the RPC
-// `list_ai_provider_status` exists only for the browser client, which has no
-// SELECT access to this table at all).
-async function getProviderKeys(supabase: ReturnType<typeof createClient>, workspaceId: string): Promise<Map<AiProvider, ProviderKeyRow>> {
+async function isSuperAdmin(supabase: ReturnType<typeof createClient>, userId: string): Promise<boolean> {
+  const { data } = await supabase.from('profiles').select('platform_role').eq('user_id', userId).maybeSingle();
+  return data?.platform_role === 'super_admin';
+}
+
+// Provider keys and AI settings are platform-wide (a single shared pool of
+// keys with dynamic fallback), not per-workspace — so no workspace_id filter
+// here. Service-role client bypasses RLS, so this reads ai_provider_keys
+// directly — no SECURITY DEFINER RPC needed for the gateway's own use (the
+// RPC `list_ai_provider_status` exists only for the Super Admin browser
+// client, which has no SELECT access to this table at all).
+async function getProviderKeys(supabase: ReturnType<typeof createClient>): Promise<Map<AiProvider, ProviderKeyRow>> {
   const { data, error } = await supabase
     .from('ai_provider_keys')
-    .select('provider, api_key_encrypted, base_url, account_id')
-    .eq('workspace_id', workspaceId);
+    .select('provider, api_key_encrypted, base_url, account_id');
   const map = new Map<AiProvider, ProviderKeyRow>();
   if (error || !data) return map;
   for (const row of data as ProviderKeyRow[]) map.set(row.provider, row);
   return map;
 }
 
-async function getAiSettings(supabase: ReturnType<typeof createClient>, workspaceId: string) {
+async function getAiSettings(supabase: ReturnType<typeof createClient>) {
   const { data, error } = await supabase
     .from('ai_settings')
-    .select('provider, default_model, temperature, max_tokens, streaming, free_only_mode, mode, last_successful_model, last_successful_provider')
-    .eq('workspace_id', workspaceId)
+    .select('provider, default_model, temperature, max_tokens, streaming, free_only_mode, mode, model_selection, last_successful_model, last_successful_provider')
     .maybeSingle();
   if (error) return null;
   return data;
@@ -193,21 +198,22 @@ async function recordUsage(
 
 async function updateLastSuccessful(
   supabase: ReturnType<typeof createClient>,
-  workspaceId: string,
   provider: string,
   model: string,
 ): Promise<void> {
   await supabase
     .from('ai_settings')
     .update({ last_successful_model: model, last_successful_provider: provider, updated_at: new Date().toISOString() })
-    .eq('workspace_id', workspaceId);
+    .eq('id', true);
 }
 
 // Ordered list of providers to actually try for this request: the caller's
 // preferred provider first (if it has a key configured), then every other
 // configured provider, in catalog order. Providers with no key saved are
 // skipped entirely — that's the "switch to one that works, invisibly to the
-// user" behavior.
+// user" behavior. When model_selection is 'manual', the chain is pinned to
+// just the preferred provider by the caller (see handleChatCompletion) —
+// this function itself always builds the full fallback-capable chain.
 function buildProviderChain(preferred: string | undefined, keys: Map<AiProvider, ProviderKeyRow>): AiProvider[] {
   const configured = PROVIDER_CATALOG.map((p) => p.id).filter((id) => !!keys.get(id)?.api_key_encrypted);
   const chain: AiProvider[] = [];
@@ -311,7 +317,11 @@ async function handleChatCompletion(
   userId: string,
 ): Promise<Response> {
   const preferredProvider = (body.provider || settings?.provider || 'openrouter') as AiProvider;
-  const chain = buildProviderChain(preferredProvider, providerKeys);
+  const modelSelection = settings?.model_selection ?? 'auto';
+  // 'manual' means the Super Admin has pinned a specific provider/model — no
+  // cross-provider fallback in that case, only the chosen one is attempted.
+  // 'auto' keeps the full dynamic fallback chain across every configured provider.
+  const chain = modelSelection === 'manual' ? buildProviderChain(preferredProvider, providerKeys).slice(0, 1) : buildProviderChain(preferredProvider, providerKeys);
 
   if (chain.length === 0) {
     return errorResponse('No API key configured for any AI provider. Add one in AI Settings.', 400);
@@ -375,7 +385,7 @@ ${languageRule}`;
 
     let modelsToTry: string[] = [];
 
-    if (providerId === 'openrouter' && freeOnly && (!requestedModel || requestedModel === 'openrouter/auto')) {
+    if (modelSelection === 'auto' && providerId === 'openrouter' && freeOnly && (!requestedModel || requestedModel === 'openrouter/auto')) {
       try {
         const allModels = await fetchModels(entry, keyRow);
         const freeModels = pickFreeModels(allModels);
@@ -475,7 +485,7 @@ ${languageRule}`;
               controller.close();
               const tokensOut = estimateTokens(totalContent);
               const tokensIn = estimateTokens(JSON.stringify(messages));
-              await updateLastSuccessful(supabase, body.workspace_id, providerId, currentModel);
+              await updateLastSuccessful(supabase, providerId, currentModel);
               await recordUsage(supabase, body.workspace_id, userId, {
                 model: currentModel,
                 provider: providerId,
@@ -511,7 +521,7 @@ ${languageRule}`;
         }
         const tokensIn = json.usage?.prompt_tokens ?? estimateTokens(JSON.stringify(messages));
         const tokensOut = json.usage?.completion_tokens ?? estimateTokens(content);
-        await updateLastSuccessful(supabase, body.workspace_id, providerId, currentModel);
+        await updateLastSuccessful(supabase, providerId, currentModel);
         await recordUsage(supabase, body.workspace_id, userId, {
           model: currentModel,
           provider: providerId,
@@ -579,7 +589,6 @@ async function handleModels(entry: ProviderCatalogEntry, keyRow: ProviderKeyRow)
 
 async function handleTestConnection(
   supabase: ReturnType<typeof createClient>,
-  workspaceId: string,
   entry: ProviderCatalogEntry,
   keyRow: ProviderKeyRow,
 ): Promise<Response> {
@@ -587,7 +596,6 @@ async function handleTestConnection(
     await supabase
       .from('ai_provider_keys')
       .update({ last_test_status: status, last_tested_at: new Date().toISOString() })
-      .eq('workspace_id', workspaceId)
       .eq('provider', entry.id);
   };
   try {
@@ -662,19 +670,20 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === 'models' || action === 'test') {
+      // Provider/model management is platform-wide now — Super Admin only,
+      // not gated by workspace membership.
+      if (!(await isSuperAdmin(supabase, callerId))) return errorResponse('Forbidden', 403);
       const body = await req.json();
-      if (!body.workspace_id) return errorResponse('workspace_id is required', 400);
-      if (!(await isWorkspaceMember(supabase, body.workspace_id, callerId))) return errorResponse('Forbidden', 403);
 
-      const settings = await getAiSettings(supabase, body.workspace_id);
-      const providerKeys = await getProviderKeys(supabase, body.workspace_id);
+      const settings = await getAiSettings(supabase);
+      const providerKeys = await getProviderKeys(supabase);
       const providerId = (body.provider || settings?.provider || 'openrouter') as AiProvider;
       const entry = catalogFor(providerId);
       const keyRow = providerKeys.get(providerId);
-      if (!keyRow?.api_key_encrypted) return errorResponse(`No API key configured for ${entry.label}. Add it in AI Settings.`, 400);
+      if (!keyRow?.api_key_encrypted) return errorResponse(`No API key configured for ${entry.label}. Add it in AI Providers.`, 400);
 
       if (action === 'models') return await handleModels(entry, keyRow);
-      return await handleTestConnection(supabase, body.workspace_id, entry, keyRow);
+      return await handleTestConnection(supabase, entry, keyRow);
     }
 
     if (action === 'chat') {
@@ -683,8 +692,8 @@ Deno.serve(async (req: Request) => {
       if (!body.messages || body.messages.length === 0) return errorResponse('messages are required', 400);
       if (!(await isWorkspaceMember(supabase, body.workspace_id, callerId))) return errorResponse('Forbidden', 403);
 
-      const settings = await getAiSettings(supabase, body.workspace_id);
-      const providerKeys = await getProviderKeys(supabase, body.workspace_id);
+      const settings = await getAiSettings(supabase);
+      const providerKeys = await getProviderKeys(supabase);
       return await handleChatCompletion(supabase, body, settings, providerKeys, callerId);
     }
 

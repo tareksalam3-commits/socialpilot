@@ -22,9 +22,9 @@ export type BrandVoice = {
   updated_at: string;
 };
 
+// Platform-wide config (a single global row) — not per-workspace.
 export type AiSettings = {
-  id: string;
-  workspace_id: string;
+  model_selection: 'auto' | 'manual';
   provider: string;
   default_model: string;
   temperature: number;
@@ -33,6 +33,7 @@ export type AiSettings = {
   free_only_mode: boolean;
   mode: 'free' | 'hybrid' | 'paid';
   last_successful_model: string | null;
+  last_successful_provider: string | null;
   created_at: string;
   updated_at: string;
 };

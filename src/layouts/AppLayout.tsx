@@ -73,7 +73,6 @@ const navSections = [
       { to: '/app/workspace', labelKey: 'nav.workspace', icon: Users },
       { to: '/app/notifications', labelKey: 'nav.notifications', icon: BellIcon },
       { to: '/app/brand-voice', labelKey: 'nav.brandVoice', icon: Sparkles },
-      { to: '/app/ai-settings', labelKey: 'nav.aiSettings', icon: Settings },
       { to: '/app/settings', labelKey: 'nav.settings', icon: Settings },
     ],
   },

@@ -4,7 +4,6 @@ import {
   BarChart3,
   Bot,
   CreditCard,
-  Database,
   KeyRound,
   Layers,
   LogOut,
@@ -52,8 +51,7 @@ const adminNavSections = [
   {
     labelKey: 'admin.nav.section.platform',
     items: [
-      { to: '/admin/ai-models', labelKey: 'admin.nav.aiModels', icon: Database },
-      { to: '/admin/api-keys', labelKey: 'admin.nav.apiKeys', icon: KeyRound },
+      { to: '/admin/ai-providers', labelKey: 'admin.nav.aiProviders', icon: KeyRound },
       { to: '/admin/integrations', labelKey: 'admin.nav.integrations', icon: Plug },
       { to: '/admin/settings', labelKey: 'admin.nav.settings', icon: SettingsIcon },
     ],

@@ -148,31 +148,6 @@ export type Payment = {
   created_at: string;
 };
 
-export type AiProviderRow = {
-  id: string;
-  name: string;
-  display_name: string;
-  base_url: string | null;
-  is_active: boolean;
-  priority: number;
-  created_at: string;
-  updated_at: string;
-};
-
-export type AiModelRow = {
-  id: string;
-  provider_id: string;
-  model_key: string;
-  display_name: string;
-  context_window: number;
-  cost_per_1k_input: number;
-  cost_per_1k_output: number;
-  is_free: boolean;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
 export type SystemSetting = {
   key: string;
   value: unknown;

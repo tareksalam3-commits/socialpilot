@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { CheckCircle2, KeyRound, Loader2, Plug, Save, Trash2, XCircle, Zap } from 'lucide-react';
 import { useAISettings } from '@/hooks/useAISettings';
 import { useProviderKeys } from '@/hooks/useProviderKeys';
-import { useWorkspace } from '@/hooks/useWorkspace';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
 import { aiGateway } from '@/services/aiGateway';
@@ -25,13 +24,11 @@ const FALLBACK_PROVIDERS: ProviderInfo[] = [
 function ProviderKeyRow({
   provider,
   status,
-  workspaceId,
   onSave,
   onClear,
 }: {
   provider: ProviderInfo;
   status: ProviderStatus | null;
-  workspaceId: string;
   onSave: (provider: AiProvider, key: string) => Promise<void>;
   onClear: (provider: AiProvider) => Promise<void>;
 }) {
@@ -65,7 +62,7 @@ function ProviderKeyRow({
     setTesting(true);
     setTestState('testing');
     try {
-      await aiGateway.testConnection(workspaceId, provider.id);
+      await aiGateway.testConnection(provider.id);
       setTestState('connected');
       push({ title: t('ai.settings.providers.toast.testOk', { provider: provider.label }), variant: 'success' });
     } catch (e) {
@@ -128,9 +125,8 @@ function ProviderKeyRow({
   );
 }
 
-export function AISettingsPage() {
+export function AiProvidersPage() {
   const { t } = useLanguage();
-  const { workspace } = useWorkspace();
   const { settings, loading, update } = useAISettings();
   const { loading: keysLoading, saveKey, clearKey, statusFor } = useProviderKeys();
   const { push } = useToast();
@@ -147,15 +143,14 @@ export function AISettingsPage() {
         if (list.length > 0) setProviders(list);
       })
       .catch(() => {
-        // keep the fallback list — the "AI Settings" page should still be usable offline
+        // keep the fallback list — the page should still be usable offline
       });
   }, []);
 
   const handleTest = async () => {
-    if (!workspace) return;
     setConnState('testing');
     try {
-      await aiGateway.testConnection(workspace.id, settings?.provider);
+      await aiGateway.testConnection(settings?.provider);
       setConnState('connected');
       push({ title: t('ai.settings.toast.connectionSuccess'), description: t('ai.settings.toast.connectionSuccessDesc'), variant: 'success' });
     } catch (e) {
@@ -165,10 +160,9 @@ export function AISettingsPage() {
   };
 
   const handleLoadModels = async () => {
-    if (!workspace) return;
     setLoadingModels(true);
     try {
-      const result = await aiGateway.listModels(workspace.id, settings?.provider);
+      const result = await aiGateway.listModels(settings?.provider);
       setModels(result.models);
       push({ title: t('ai.settings.toast.modelsLoaded'), description: t('ai.settings.toast.modelsLoadedDesc', { free: result.free_count, total: result.total_count }), variant: 'success' });
     } catch (e) {
@@ -200,15 +194,16 @@ export function AISettingsPage() {
   }
 
   const freeModels = models.filter((m) => m.is_free);
+  const isManual = (settings?.model_selection ?? 'auto') === 'manual';
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('ai.settings.title')}</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('ai.settings.subtitle')}</p>
+        <h1 className="text-2xl font-bold text-white">{t('admin.aiProviders.title')}</h1>
+        <p className="mt-1 text-sm text-slate-400">{t('admin.aiProviders.subtitle')}</p>
       </div>
 
-      {/* Provider API Keys — one ready slot per provider, all in one place */}
+      {/* Provider API Keys — one shared pool for the whole platform, all providers in one place */}
       <Card title={t('ai.settings.providers.title')} description={t('ai.settings.providers.description')}>
         {keysLoading ? (
           <div className="space-y-3">
@@ -218,17 +213,38 @@ export function AISettingsPage() {
         ) : (
           <div className="space-y-3">
             {providers.map((p) => (
-              <ProviderKeyRow
-                key={p.id}
-                provider={p}
-                status={statusFor(p.id)}
-                workspaceId={workspace?.id ?? ''}
-                onSave={saveKey}
-                onClear={clearKey}
-              />
+              <ProviderKeyRow key={p.id} provider={p} status={statusFor(p.id)} onSave={saveKey} onClear={clearKey} />
             ))}
           </div>
         )}
+      </Card>
+
+      {/* Model selection mode: auto lets the gateway dynamically fall back
+          across every configured provider/model (as it already does under
+          the hood); manual pins one exact provider + model. */}
+      <Card title={t('ai.settings.model.selectionLabel')} description={isManual ? t('ai.settings.model.selection.manualHint') : t('ai.settings.model.selection.autoHint')}>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => handleUpdate({ model_selection: 'auto' })}
+            className={`flex-1 rounded-lg border px-4 py-3 text-start text-sm font-medium transition-colors ${
+              !isManual
+                ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300'
+                : 'border-slate-700 text-slate-300 hover:border-slate-600'
+            }`}
+          >
+            {t('ai.settings.model.selection.auto')}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleUpdate({ model_selection: 'manual' })}
+            className={`flex-1 rounded-lg border px-4 py-3 text-start text-sm font-medium transition-colors ${
+              isManual ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 text-slate-300 hover:border-slate-600'
+            }`}
+          >
+            {t('ai.settings.model.selection.manual')}
+          </button>
+        </div>
       </Card>
 
       {/* Model Configuration */}
@@ -303,6 +319,7 @@ export function AISettingsPage() {
                 defaultChecked={settings?.free_only_mode ?? true}
                 onChange={(e) => handleUpdate({ free_only_mode: e.target.checked })}
                 className="rounded"
+                disabled={isManual}
               />
               {t('ai.settings.model.freeOnly')}
             </label>
@@ -322,7 +339,9 @@ export function AISettingsPage() {
         </div>
       </Card>
 
-      {/* Model Status for the active/default provider */}
+      {/* Live model catalog for the active/default provider — fetched
+          straight from the provider's API, the same way OpenRouter's model
+          list works, instead of a manually-curated local table. */}
       <Card title={t('ai.settings.provider.title')} description={t('ai.settings.provider.description')}>
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-3">

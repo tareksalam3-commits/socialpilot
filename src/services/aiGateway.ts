@@ -111,11 +111,13 @@ export const aiGateway = {
     };
   },
 
-  async listModels(workspaceId: string, provider?: string): Promise<{ models: ModelInfo[]; free_count: number; total_count: number }> {
+  // Provider/model management is platform-wide (Super Admin only) — no
+  // workspace_id here, the edge function checks is_super_admin() instead.
+  async listModels(provider?: string): Promise<{ models: ModelInfo[]; free_count: number; total_count: number }> {
     const res = await fetch(`${FUNCTION_URL}?action=models`, {
       method: 'POST',
       headers: await getAuthHeaders(),
-      body: JSON.stringify({ workspace_id: workspaceId, provider }),
+      body: JSON.stringify({ provider }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Failed to list models' }));
@@ -124,11 +126,11 @@ export const aiGateway = {
     return await res.json();
   },
 
-  async testConnection(workspaceId: string, provider?: string): Promise<{ status: string; data?: unknown }> {
+  async testConnection(provider?: string): Promise<{ status: string; data?: unknown }> {
     const res = await fetch(`${FUNCTION_URL}?action=test`, {
       method: 'POST',
       headers: await getAuthHeaders(),
-      body: JSON.stringify({ workspace_id: workspaceId, provider }),
+      body: JSON.stringify({ provider }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Connection test failed' }));

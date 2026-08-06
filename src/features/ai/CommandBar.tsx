@@ -69,7 +69,6 @@ export function CommandBar() {
     { id: 'nav-scheduled', labelKey: 'ai.commandBar.nav.scheduled', icon: CalendarDays, category: 'navigate', action: () => navigate('/app/scheduled') },
     { id: 'nav-settings', labelKey: 'ai.commandBar.nav.settings', icon: Settings, category: 'navigate', action: () => navigate('/app/settings') },
     { id: 'nav-brand', labelKey: 'ai.commandBar.nav.brand', icon: Sparkles, category: 'navigate', action: () => navigate('/app/brand-voice') },
-    { id: 'nav-ai-settings', labelKey: 'ai.commandBar.nav.aiSettings', icon: Settings, category: 'navigate', action: () => navigate('/app/ai-settings') },
   ];
 
   const genCommands: Command[] = [

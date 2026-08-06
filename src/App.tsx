@@ -37,7 +37,6 @@ const {
   prompts: { Component: PromptLibraryPage },
   aiHistory: { Component: AIHistoryPage },
   tokenAnalytics: { Component: TokenAnalyticsPage },
-  aiSettings: { Component: AISettingsPage },
   brandVoice: { Component: BrandVoicePage },
   contentSources: { Component: ContentSourcesPage },
   adminDashboard: { Component: AdminDashboardPage },
@@ -47,8 +46,7 @@ const {
   adminPlans: { Component: SubscriptionPlansPage },
   adminPayments: { Component: PaymentsPage },
   adminAiCredits: { Component: AiCreditsPage },
-  adminAiModels: { Component: AiModelsPage },
-  adminApiKeys: { Component: ApiKeysPage },
+  adminAiProviders: { Component: AiProvidersPage },
   adminIntegrations: { Component: AdminIntegrationsPage },
   adminSettings: { Component: AdminSystemSettingsPage },
   adminAuditLogs: { Component: AuditLogsPage },
@@ -104,7 +102,6 @@ function App() {
                   <Route path="prompts" element={<PromptLibraryPage />} />
                   <Route path="ai-history" element={<AIHistoryPage />} />
                   <Route path="token-analytics" element={<TokenAnalyticsPage />} />
-                  <Route path="ai-settings" element={<AISettingsPage />} />
                   <Route path="brand-voice" element={<BrandVoicePage />} />
                   <Route path="content-sources" element={<ContentSourcesPage />} />
                   <Route path="settings" element={<SettingsPage />} />
@@ -126,8 +123,7 @@ function App() {
                   <Route path="plans" element={<SubscriptionPlansPage />} />
                   <Route path="payments" element={<PaymentsPage />} />
                   <Route path="ai-credits" element={<AiCreditsPage />} />
-                  <Route path="ai-models" element={<AiModelsPage />} />
-                  <Route path="api-keys" element={<ApiKeysPage />} />
+                  <Route path="ai-providers" element={<AiProvidersPage />} />
                   <Route path="integrations" element={<AdminIntegrationsPage />} />
                   <Route path="settings" element={<AdminSystemSettingsPage />} />
                 </Route>
