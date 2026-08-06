@@ -9,8 +9,8 @@ type AuthContextValue = {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null; profile: Profile | null }>;
+  signIn: (email: string, password: string) => Promise<{ error: string | null; profile: Profile | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadProfile = async (userId: string) => {
+  const loadProfile = async (userId: string): Promise<Profile | null> => {
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -40,9 +40,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .maybeSingle();
     if (error) {
       console.error('Failed to load profile:', error.message);
-      return;
+      return null;
     }
     setProfile(data as Profile | null);
+    return data as Profile | null;
   };
 
   useEffect(() => {
@@ -101,29 +102,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password,
       options: { data: { full_name: fullName } },
     });
-    if (error) return { error: mapAuthError(error.message, t) };
+    if (error) return { error: mapAuthError(error.message, t), profile: null };
     // If email confirmation is disabled, Supabase returns a session immediately.
+    let loadedProfile: Profile | null = null;
     if (data.session?.user) {
       setSession(data.session);
-      await loadProfile(data.session.user.id);
+      loadedProfile = await loadProfile(data.session.user.id);
       setLoading(false);
     }
-    return { error: null };
+    return { error: null, profile: loadedProfile };
   };
 
   const signIn = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: mapAuthError(error.message, t) };
+    if (error) return { error: mapAuthError(error.message, t), profile: null };
     // Set session + profile here (instead of waiting for the async
     // onAuthStateChange event) so that by the time this resolves and the
     // caller navigates, `user`/`profile` are already committed — avoids a
     // race where ProtectedRoute reads stale state right after navigation.
+    let loadedProfile: Profile | null = null;
     if (data.session?.user) {
       setSession(data.session);
-      await loadProfile(data.session.user.id);
+      loadedProfile = await loadProfile(data.session.user.id);
     }
     setLoading(false);
-    return { error: null };
+    return { error: null, profile: loadedProfile };
   };
 
   const signOut = async () => {

@@ -4,6 +4,7 @@ import { Sparkles } from 'lucide-react';
 import { AuthLayout } from '@/layouts/AuthLayout';
 import { Button, Input } from '@/ui';
 import { useAuth } from '@/providers/AuthProvider';
+import { getPostLoginPath } from '@/utils/roles';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
 import { validateEmail, validatePassword, validateRequired, validateMatch } from '@/utils/validation';
@@ -35,7 +36,7 @@ export function RegisterPage() {
     if (!nameErr.valid || !emailErr.valid || !passErr.valid || !matchErr.valid) return;
 
     setLoading(true);
-    const { error } = await signUp(email, password, fullName);
+    const { error, profile: signedUpProfile } = await signUp(email, password, fullName);
     setLoading(false);
     if (error) {
       push({ title: t('auth.toast.signUpFailed'), description: error, variant: 'error' });
@@ -46,7 +47,7 @@ export function RegisterPage() {
       description: t('auth.toast.accountCreatedDesc'),
       variant: 'success',
     });
-    navigate('/app/dashboard');
+    navigate(getPostLoginPath(signedUpProfile));
   };
 
   return (

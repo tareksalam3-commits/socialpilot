@@ -4,12 +4,13 @@ import { Sparkles } from 'lucide-react';
 import { AuthLayout } from '@/layouts/AuthLayout';
 import { Button, Input } from '@/ui';
 import { useAuth } from '@/providers/AuthProvider';
+import { getPostLoginPath } from '@/utils/roles';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
 import { validateEmail, validatePassword } from '@/utils/validation';
 
 export function LoginPage() {
-  const { signIn } = useAuth();
+  const { signIn, profile } = useAuth();
   const { push } = useToast();
   const { t } = useLanguage();
   const navigate = useNavigate();
@@ -26,14 +27,17 @@ export function LoginPage() {
     if (!emailErr.valid || !passErr.valid) return;
 
     setLoading(true);
-    const { error } = await signIn(email, password);
+    const { error, profile: signedInProfile } = await signIn(email, password);
     setLoading(false);
     if (error) {
       push({ title: t('auth.toast.signInFailed'), description: error, variant: 'error' });
       return;
     }
     push({ title: t('auth.toast.welcomeBack'), variant: 'success' });
-    navigate('/app/dashboard');
+    // `signIn` resolves after the profile (and its platform_role) is already
+    // loaded, so route straight to the right interface — Super Admin panel
+    // or the regular workspace app — without an extra redirect hop.
+    navigate(getPostLoginPath(signedInProfile ?? profile));
   };
 
   return (

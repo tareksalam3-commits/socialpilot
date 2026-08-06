@@ -5,7 +5,10 @@ import { ThemeProvider } from '@/providers/ThemeProvider';
 import { LanguageProvider } from '@/providers/LanguageProvider';
 import { ToastProvider } from '@/providers/ToastProvider';
 import { ProtectedRoute } from '@/layouts/ProtectedRoute';
+import { AdminProtectedRoute } from '@/layouts/AdminProtectedRoute';
 import { AppLayout } from '@/layouts/AppLayout';
+import { AdminLayout } from '@/layouts/AdminLayout';
+import { RoleRedirect } from '@/layouts/RoleRedirect';
 import { LoadingScreen } from '@/ui';
 import { CommandBar } from '@/features/ai/CommandBar';
 import { pages, warmCommonPages } from '@/routes/lazyPages';
@@ -37,6 +40,19 @@ const {
   aiSettings: { Component: AISettingsPage },
   brandVoice: { Component: BrandVoicePage },
   contentSources: { Component: ContentSourcesPage },
+  adminDashboard: { Component: AdminDashboardPage },
+  adminUsers: { Component: AllUsersPage },
+  adminWorkspaces: { Component: AllWorkspacesPage },
+  adminSubscriptions: { Component: SubscriptionsPage },
+  adminPlans: { Component: SubscriptionPlansPage },
+  adminPayments: { Component: PaymentsPage },
+  adminAiCredits: { Component: AiCreditsPage },
+  adminAiModels: { Component: AiModelsPage },
+  adminApiKeys: { Component: ApiKeysPage },
+  adminIntegrations: { Component: AdminIntegrationsPage },
+  adminSettings: { Component: AdminSystemSettingsPage },
+  adminAuditLogs: { Component: AuditLogsPage },
+  adminAnalytics: { Component: AdminAnalyticsPage },
 } = pages;
 
 function App() {
@@ -93,8 +109,30 @@ function App() {
                   <Route path="content-sources" element={<ContentSourcesPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                 </Route>
-                <Route path="/" element={<Navigate to="/app/assistant" replace />} />
-                <Route path="*" element={<Navigate to="/app/assistant" replace />} />
+                <Route
+                  path="/admin"
+                  element={
+                    <AdminProtectedRoute>
+                      <AdminLayout />
+                    </AdminProtectedRoute>
+                  }
+                >
+                  <Route index element={<AdminDashboardPage />} />
+                  <Route path="analytics" element={<AdminAnalyticsPage />} />
+                  <Route path="audit-logs" element={<AuditLogsPage />} />
+                  <Route path="users" element={<AllUsersPage />} />
+                  <Route path="workspaces" element={<AllWorkspacesPage />} />
+                  <Route path="subscriptions" element={<SubscriptionsPage />} />
+                  <Route path="plans" element={<SubscriptionPlansPage />} />
+                  <Route path="payments" element={<PaymentsPage />} />
+                  <Route path="ai-credits" element={<AiCreditsPage />} />
+                  <Route path="ai-models" element={<AiModelsPage />} />
+                  <Route path="api-keys" element={<ApiKeysPage />} />
+                  <Route path="integrations" element={<AdminIntegrationsPage />} />
+                  <Route path="settings" element={<AdminSystemSettingsPage />} />
+                </Route>
+                <Route path="/" element={<RoleRedirect />} />
+                <Route path="*" element={<RoleRedirect />} />
               </Routes>
             </Suspense>
           </BrowserRouter>

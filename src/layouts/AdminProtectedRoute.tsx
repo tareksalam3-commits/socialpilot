@@ -5,16 +5,17 @@ import { useLanguage } from '@/providers/LanguageProvider';
 import { LoadingScreen } from '@/ui';
 import { isSuperAdmin } from '@/utils/roles';
 
-/** Guards the regular `/app/*` workspace application. Super Admins are
- * routed to their own `/admin` panel instead — they never see the
- * workspace UI, keeping the two interfaces completely separate. */
-export function ProtectedRoute({ children }: { children: ReactNode }) {
+/** Guards the entire `/admin` panel. Only signed-in users whose
+ * `profile.platform_role === 'super_admin'` may pass — every other user
+ * (including Workspace Owners) is redirected straight back into the
+ * regular workspace app and never sees this panel exists. */
+export function AdminProtectedRoute({ children }: { children: ReactNode }) {
   const { user, profile, loading } = useAuth();
   const { t } = useLanguage();
   const location = useLocation();
 
   if (loading) return <LoadingScreen label={t('common.checkingSession')} />;
   if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
-  if (isSuperAdmin(profile)) return <Navigate to="/admin" replace />;
+  if (!isSuperAdmin(profile)) return <Navigate to="/app/assistant" replace />;
   return <>{children}</>;
 }

@@ -40,6 +40,20 @@ export const pages = {
   aiSettings: page(() => import('@/features/ai/AISettingsPage'), 'AISettingsPage'),
   brandVoice: page(() => import('@/features/ai/BrandVoicePage'), 'BrandVoicePage'),
   contentSources: page(() => import('@/features/contentSources/ContentSourcesPage'), 'ContentSourcesPage'),
+  // Super Admin panel (/admin/*) — separate from the workspace app pages above.
+  adminDashboard: page(() => import('@/features/admin/AdminDashboardPage'), 'AdminDashboardPage'),
+  adminUsers: page(() => import('@/features/admin/AllUsersPage'), 'AllUsersPage'),
+  adminWorkspaces: page(() => import('@/features/admin/AllWorkspacesPage'), 'AllWorkspacesPage'),
+  adminSubscriptions: page(() => import('@/features/admin/SubscriptionsPage'), 'SubscriptionsPage'),
+  adminPlans: page(() => import('@/features/admin/SubscriptionPlansPage'), 'SubscriptionPlansPage'),
+  adminPayments: page(() => import('@/features/admin/PaymentsPage'), 'PaymentsPage'),
+  adminAiCredits: page(() => import('@/features/admin/AiCreditsPage'), 'AiCreditsPage'),
+  adminAiModels: page(() => import('@/features/admin/AiModelsPage'), 'AiModelsPage'),
+  adminApiKeys: page(() => import('@/features/admin/ApiKeysPage'), 'ApiKeysPage'),
+  adminIntegrations: page(() => import('@/features/admin/AdminIntegrationsPage'), 'AdminIntegrationsPage'),
+  adminSettings: page(() => import('@/features/admin/SystemSettingsPage'), 'SystemSettingsPage'),
+  adminAuditLogs: page(() => import('@/features/admin/AuditLogsPage'), 'AuditLogsPage'),
+  adminAnalytics: page(() => import('@/features/admin/AnalyticsPage'), 'AnalyticsPage'),
 } as const;
 
 /** Maps each `/app/*` route path to its preload function, for hover-prefetching from the sidebar. */
