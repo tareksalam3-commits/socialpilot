@@ -2,7 +2,20 @@ import { corsHeaders, errorResponse, getCallerId, jsonResponse, serviceClient } 
 
 // Whitelist of credential keys the client is allowed to touch. Keeps this
 // function from becoming a generic "write anything to any table" endpoint.
-const ALLOWED_KEYS = new Set(['meta_app_id', 'meta_app_secret', 'linkedin_client_id', 'linkedin_client_secret', 'app_url']);
+const ALLOWED_KEYS = new Set([
+  'meta_app_id',
+  'meta_app_secret',
+  'meta_config_id',
+  'linkedin_client_id',
+  'linkedin_client_secret',
+  'x_client_id',
+  'x_client_secret',
+  'threads_app_id',
+  'threads_app_secret',
+  'tiktok_client_key',
+  'tiktok_client_secret',
+  'app_url',
+]);
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });

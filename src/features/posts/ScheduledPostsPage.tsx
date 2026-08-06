@@ -9,9 +9,10 @@ import { publishingService } from '@/services/publishingService';
 import { Badge, Button, Card, EmptyState, ErrorState, Input, Modal, Table, TableRow, TableCell } from '@/ui';
 import { formatDateTime } from '@/utils/format';
 import type { Post, PostStatus, PublishingLog } from '@/types/social';
+import { PLATFORM_IDS } from '@/constants/platforms';
 
 const statusOptions: PostStatus[] = ['draft', 'scheduled', 'publishing', 'published', 'failed', 'archived'];
-const platformOptions = ['facebook', 'instagram', 'linkedin', 'linkedin_page'];
+const platformOptions = PLATFORM_IDS;
 
 export function ScheduledPostsPage() {
   const { t } = useLanguage();

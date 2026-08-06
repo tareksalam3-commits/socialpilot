@@ -9,6 +9,12 @@ const ENV_FALLBACK: Record<string, string> = {
   meta_config_id: 'META_CONFIG_ID',
   linkedin_client_id: 'LINKEDIN_CLIENT_ID',
   linkedin_client_secret: 'LINKEDIN_CLIENT_SECRET',
+  x_client_id: 'X_CLIENT_ID',
+  x_client_secret: 'X_CLIENT_SECRET',
+  threads_app_id: 'THREADS_APP_ID',
+  threads_app_secret: 'THREADS_APP_SECRET',
+  tiktok_client_key: 'TIKTOK_CLIENT_KEY',
+  tiktok_client_secret: 'TIKTOK_CLIENT_SECRET',
   app_url: 'APP_URL',
 };
 

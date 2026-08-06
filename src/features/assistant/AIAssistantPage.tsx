@@ -4,11 +4,8 @@ import {
   Bot,
   Calendar,
   CheckCircle2,
-  Facebook,
   Image as ImageIcon,
-  Instagram,
   Link2,
-  Linkedin,
   Loader2,
   Plus,
   RefreshCw,
@@ -33,20 +30,14 @@ import { runPlannerAgent, runCreatorAgent, computeScheduleTimes, findMatchingMed
 import { Badge, Button, Card, EmptyState } from '@/ui';
 import type { CampaignPlan, DraftPost, AssistantStage, MonitoredPost } from '@/types/assistant';
 import type { Post } from '@/types/social';
+import { PLATFORM_IDS, getPlatformMeta, platformLabelFallback } from '@/constants/platforms';
 
-const PLATFORM_ICON: Record<string, typeof Facebook> = {
-  facebook: Facebook,
-  instagram: Instagram,
-  linkedin: Linkedin,
-  linkedin_page: Linkedin,
-};
-
-const ALL_PLATFORMS = ['facebook', 'instagram', 'linkedin', 'linkedin_page'];
+const ALL_PLATFORMS = PLATFORM_IDS;
 
 function platformLabel(t: (k: string) => string, platform: string): string {
   const key = `ai.studio.platform.${platform}`;
   const translated = t(key);
-  return translated === key ? platform : translated;
+  return translated === key ? platformLabelFallback(platform) : translated;
 }
 
 function statusVariant(status: Post['status']): 'success' | 'info' | 'error' | 'warning' | 'default' {
@@ -419,7 +410,7 @@ export function AIAssistantPage() {
                   <div className="mt-3 flex flex-wrap items-center gap-4">
                     <div className="flex flex-wrap gap-1.5">
                       {ALL_PLATFORMS.map((p) => {
-                        const Icon = PLATFORM_ICON[p] ?? Link2;
+                        const Icon = getPlatformMeta(p)?.icon ?? Link2;
                         const active = draft.platforms.includes(p);
                         return (
                           <button

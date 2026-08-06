@@ -81,6 +81,67 @@ async function checkLinkedInAccount(
   };
 }
 
+/** Verifies an X access token by asking for the authenticated user's own
+ * profile — the cheapest authenticated v2 call available. */
+async function checkXAccount(account: AccountRow): Promise<HealthCheckOutcome> {
+  if (!account.access_token_encrypted) return { ok: false, health_status: 'error', error: 'No access token stored' };
+  const res = await fetch('https://api.twitter.com/2/users/me', { headers: { Authorization: `Bearer ${account.access_token_encrypted}` } });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { ok: false, health_status: res.status === 401 ? 'error' : 'warning', error: body?.detail ?? body?.title ?? `${res.status} ${res.statusText}` };
+  }
+  const body = await res.json();
+  return { ok: true, health_status: 'healthy', handle: body.data?.username ? `@${body.data.username}` : undefined };
+}
+
+async function checkThreadsAccount(account: AccountRow): Promise<HealthCheckOutcome> {
+  if (!account.access_token_encrypted) return { ok: false, health_status: 'error', error: 'No access token stored' };
+  const url = new URL(`https://graph.threads.net/v1.0/${account.provider_account_id}`);
+  url.searchParams.set('fields', 'id,username');
+  url.searchParams.set('access_token', account.access_token_encrypted);
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { ok: false, health_status: body?.error?.code === 190 ? 'error' : 'warning', error: body?.error?.message ?? `${res.status} ${res.statusText}` };
+  }
+  const body = await res.json();
+  return { ok: true, health_status: 'healthy', handle: body.username ? `@${body.username}` : undefined };
+}
+
+async function checkTikTokAccount(account: AccountRow): Promise<HealthCheckOutcome> {
+  if (!account.access_token_encrypted) return { ok: false, health_status: 'error', error: 'No access token stored' };
+  const url = new URL('https://open.tiktokapis.com/v2/user/info/');
+  url.searchParams.set('fields', 'display_name');
+  const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${account.access_token_encrypted}` } });
+  const body = await res.json();
+  if (!res.ok || body.error?.code !== 'ok') {
+    return { ok: false, health_status: 'warning', error: body?.error?.message ?? `${res.status} ${res.statusText}` };
+  }
+  return { ok: true, health_status: 'healthy', handle: body.data?.user?.display_name };
+}
+
+/** Telegram bot tokens don't expire, so "health" here just confirms the bot
+ * can still reach the target chat (it may have been removed as admin, kicked,
+ * or the chat deleted since connecting). */
+async function checkTelegramAccount(account: AccountRow): Promise<HealthCheckOutcome> {
+  if (!account.access_token_encrypted) return { ok: false, health_status: 'error', error: 'No bot token stored' };
+  const res = await fetch(`https://api.telegram.org/bot${account.access_token_encrypted}/getChat?chat_id=${encodeURIComponent(account.provider_account_id ?? '')}`);
+  const body = await res.json();
+  if (!body.ok) return { ok: false, health_status: 'error', error: body.description ?? 'Bot can no longer access this chat' };
+  return { ok: true, health_status: 'healthy', handle: body.result.username ? `@${body.result.username}` : body.result.title };
+}
+
+async function checkWhatsAppAccount(account: AccountRow): Promise<HealthCheckOutcome> {
+  if (!account.access_token_encrypted) return { ok: false, health_status: 'error', error: 'No access token stored' };
+  const url = new URL(`${GRAPH}/${account.provider_account_id}`);
+  url.searchParams.set('fields', 'verified_name,display_phone_number,quality_rating');
+  url.searchParams.set('access_token', account.access_token_encrypted);
+  const res = await fetch(url.toString());
+  const body = await res.json();
+  if (!res.ok) return { ok: false, health_status: body?.error?.code === 190 ? 'error' : 'warning', error: body?.error?.message ?? `${res.status} ${res.statusText}` };
+  return { ok: true, health_status: 'healthy', handle: body.verified_name ?? body.display_phone_number };
+}
+
 /** Runs the platform-appropriate health check for one connected account and
  * persists the result (health_status, sync_status, last_synced_at, and any
  * refreshed handle/expiry we learned along the way). Used by both the
@@ -94,6 +155,16 @@ export async function syncAccount(supabase: SupabaseClient, account: AccountRow)
       outcome = await checkMetaAccount(account);
     } else if (account.platform === 'linkedin' || account.platform === 'linkedin_page') {
       outcome = await checkLinkedInAccount(supabase, account);
+    } else if (account.platform === 'x') {
+      outcome = await checkXAccount(account);
+    } else if (account.platform === 'threads') {
+      outcome = await checkThreadsAccount(account);
+    } else if (account.platform === 'tiktok') {
+      outcome = await checkTikTokAccount(account);
+    } else if (account.platform === 'telegram') {
+      outcome = await checkTelegramAccount(account);
+    } else if (account.platform === 'whatsapp') {
+      outcome = await checkWhatsAppAccount(account);
     } else {
       outcome = { ok: false, health_status: 'warning', error: `Unsupported platform: ${account.platform}` };
     }

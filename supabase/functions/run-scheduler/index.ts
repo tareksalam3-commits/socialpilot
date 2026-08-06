@@ -2,6 +2,9 @@ import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
 import { log, publishPost, retryTarget } from '../_shared/orchestrator.ts';
 import { refreshMetaTokens } from '../_shared/metaRefresh.ts';
 import { refreshLinkedInTokens } from '../_shared/linkedinRefresh.ts';
+import { refreshXTokens } from '../_shared/xRefresh.ts';
+import { refreshThreadsTokens } from '../_shared/threadsRefresh.ts';
+import { refreshTikTokTokens } from '../_shared/tiktokRefresh.ts';
 import { flagExpiringLinkedInAccounts } from '../_shared/accountHealth.ts';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -81,6 +84,14 @@ Deno.serve(async (req: Request) => {
   // refresh_token on file.
   const linkedinRefresh = await refreshLinkedInTokens(supabase);
 
+  // 4b) Same idea for X, Threads, and TikTok — each keeps a scheduled post
+  // from ever failing on a token that simply expired between cron ticks.
+  // Telegram (bot tokens) and WhatsApp (System User tokens) don't expire on
+  // a schedule, so they have nothing to refresh here.
+  const xRefresh = await refreshXTokens(supabase);
+  const threadsRefresh = await refreshThreadsTokens(supabase);
+  const tiktokRefresh = await refreshTikTokTokens(supabase);
+
   // 5) LinkedIn accounts with no refresh_token can't be silently refreshed —
   // flag them warning/error as their token nears/passes expiry so the
   // Connected Accounts page surfaces the need to reconnect before a
@@ -96,6 +107,12 @@ Deno.serve(async (req: Request) => {
     linkedin_tokens_refreshed: linkedinRefresh.refreshed,
     linkedin_tokens_refresh_failed: linkedinRefresh.failed,
     linkedin_tokens_skipped: linkedinRefresh.skipped,
+    x_tokens_refreshed: xRefresh.refreshed,
+    x_tokens_refresh_failed: xRefresh.failed,
+    threads_tokens_refreshed: threadsRefresh.refreshed,
+    threads_tokens_refresh_failed: threadsRefresh.failed,
+    tiktok_tokens_refreshed: tiktokRefresh.refreshed,
+    tiktok_tokens_refresh_failed: tiktokRefresh.failed,
     checked_at: now,
   });
 });

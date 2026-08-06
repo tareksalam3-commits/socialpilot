@@ -1,6 +1,18 @@
 import { supabase } from '@/services/supabase';
 
-export type CredentialKey = 'meta_app_id' | 'meta_app_secret' | 'meta_config_id' | 'linkedin_client_id' | 'linkedin_client_secret' | 'app_url';
+export type CredentialKey =
+  | 'meta_app_id'
+  | 'meta_app_secret'
+  | 'meta_config_id'
+  | 'linkedin_client_id'
+  | 'linkedin_client_secret'
+  | 'x_client_id'
+  | 'x_client_secret'
+  | 'threads_app_id'
+  | 'threads_app_secret'
+  | 'tiktok_client_key'
+  | 'tiktok_client_secret'
+  | 'app_url';
 
 export type CredentialStatus = {
   configured: boolean;

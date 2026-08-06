@@ -6,10 +6,14 @@ export async function log(supabase: SupabaseClient, row: { workspace_id: string;
 }
 
 export async function getAccountForTarget(supabase: SupabaseClient, accountId: string, callerId: string | null) {
-  const { data: account } = await supabase.from('connected_accounts').select('provider_account_id, workspace_id').eq('id', accountId).maybeSingle();
+  const { data: account } = await supabase.from('connected_accounts').select('provider_account_id, workspace_id, metadata').eq('id', accountId).maybeSingle();
   const { data: tokens } = await supabase.rpc('get_account_tokens', { p_account_id: accountId, p_caller_id: callerId });
   if (!account || !tokens) return null;
-  return { provider_account_id: account.provider_account_id as string | null, access_token: (tokens as { access_token: string | null }).access_token };
+  return {
+    provider_account_id: account.provider_account_id as string | null,
+    access_token: (tokens as { access_token: string | null }).access_token,
+    metadata: (account.metadata as Record<string, unknown> | null) ?? {},
+  };
 }
 
 /** Retries a single failed target immediately (used by the cron scheduler
@@ -46,6 +50,7 @@ export async function retryTarget(
       account.provider_account_id,
       post.content as string,
       post.media_urls as string[],
+      { ...account.metadata, ...((post.metadata as Record<string, unknown> | null) ?? {}) },
     );
 
     await supabase.from('post_platform_targets').update({
@@ -123,7 +128,14 @@ export async function publishPost(supabase: SupabaseClient, post: Record<string,
       const account = await getAccountForTarget(supabase, target.account_id, callerId);
       if (!account?.access_token) throw new Error('No access token for this account');
 
-      const externalId = await publishToPlatform(target.platform, account.access_token, account.provider_account_id, post.content as string, post.media_urls as string[]);
+      const externalId = await publishToPlatform(
+        target.platform,
+        account.access_token,
+        account.provider_account_id,
+        post.content as string,
+        post.media_urls as string[],
+        { ...account.metadata, ...((post.metadata as Record<string, unknown> | null) ?? {}) },
+      );
 
       await supabase.from('post_platform_targets').update({
         status: 'published',

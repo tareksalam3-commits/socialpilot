@@ -6,15 +6,13 @@ import { useLanguage } from '@/providers/LanguageProvider';
 import { Badge, Button, Card, Modal, Input } from '@/ui';
 import { formatDateTime } from '@/utils/format';
 import type { Post } from '@/types/social';
+import { getPlatformMeta } from '@/constants/platforms';
 
 type ViewMode = 'month' | 'week' | 'day';
 
-const platformColors: Record<string, string> = {
-  facebook: 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
-  instagram: 'bg-pink-100 text-pink-700 dark:bg-pink-950 dark:text-pink-300',
-  linkedin: 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300',
-  linkedin_page: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300',
-};
+function platformColor(platform: string): string {
+  return getPlatformMeta(platform)?.badgeClass ?? '';
+}
 
 const statusColors: Record<string, string> = {
   draft: 'border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-800',
@@ -156,7 +154,7 @@ export function ContentCalendarPage() {
                   {dayPosts.slice(0, 3).map((p) => (
                     <div key={p.id} draggable onDragStart={(e) => e.dataTransfer.setData('text/plain', p.id)} onClick={() => setSelectedPost(p)} className={`cursor-move rounded border px-1.5 py-1 text-xs ${statusColors[p.status] ?? statusColors.draft}`}>
                       <p className="truncate">{p.title ?? (p.content.slice(0, 30) || t('calendar.untitled'))}</p>
-                      {p.platforms.slice(0, 2).map((pl) => <span key={pl} className={`mr-1 inline-block rounded px-1 text-[10px] ${platformColors[pl] ?? ''}`}>{pl.slice(0, 2)}</span>)}
+                      {p.platforms.slice(0, 2).map((pl) => <span key={pl} className={`mr-1 inline-block rounded px-1 text-[10px] ${platformColor(pl)}`}>{pl.slice(0, 2)}</span>)}
                     </div>
                   ))}
                   {dayPosts.length > 3 && <p className="text-xs text-slate-400">{t('calendar.morePosts', { count: dayPosts.length - 3 })}</p>}
@@ -205,7 +203,7 @@ function CalendarPost({ post, onClick }: { post: Post; onClick: () => void }) {
       </div>
       <p className="mt-2 text-sm font-medium text-slate-900 dark:text-white">{post.title ?? t('calendar.untitled')}</p>
       <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{post.content.slice(0, 100)}</p>
-      <div className="mt-2 flex gap-1">{post.platforms.map((pl) => <span key={pl} className={`rounded px-1.5 py-0.5 text-[10px] ${platformColors[pl] ?? ''}`}>{pl}</span>)}</div>
+      <div className="mt-2 flex gap-1">{post.platforms.map((pl) => <span key={pl} className={`rounded px-1.5 py-0.5 text-[10px] ${platformColor(pl)}`}>{pl}</span>)}</div>
     </div>
   );
 }

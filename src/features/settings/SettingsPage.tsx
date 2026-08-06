@@ -416,12 +416,18 @@ function SecurityTab() {
   );
 }
 
-const CREDENTIAL_FIELDS: { key: CredentialKey; label: string; placeholder: string; secret: boolean; group: 'meta' | 'linkedin' | 'general' }[] = [
+const CREDENTIAL_FIELDS: { key: CredentialKey; label: string; placeholder: string; secret: boolean; group: 'meta' | 'linkedin' | 'x' | 'threads' | 'tiktok' | 'general' }[] = [
   { key: 'meta_app_id', label: 'Meta App ID', placeholder: 'e.g. 1234567890123456', secret: false, group: 'meta' },
   { key: 'meta_app_secret', label: 'Meta App Secret', placeholder: 'Paste the app secret from Meta for Developers', secret: true, group: 'meta' },
   { key: 'meta_config_id', label: 'Meta Login Configuration ID (only if using Facebook Login for Business)', placeholder: 'e.g. 123456789012345', secret: false, group: 'meta' },
   { key: 'linkedin_client_id', label: 'LinkedIn Client ID', placeholder: 'e.g. 86abcxyz12345', secret: false, group: 'linkedin' },
   { key: 'linkedin_client_secret', label: 'LinkedIn Client Secret', placeholder: 'Paste the client secret from the LinkedIn app', secret: true, group: 'linkedin' },
+  { key: 'x_client_id', label: 'X (Twitter) Client ID', placeholder: 'From the X Developer Portal', secret: false, group: 'x' },
+  { key: 'x_client_secret', label: 'X (Twitter) Client Secret (confidential clients only)', placeholder: 'Leave blank for a public/PKCE-only client', secret: true, group: 'x' },
+  { key: 'threads_app_id', label: 'Threads App ID', placeholder: 'From Meta for Developers (Threads use case)', secret: false, group: 'threads' },
+  { key: 'threads_app_secret', label: 'Threads App Secret', placeholder: 'Paste the app secret', secret: true, group: 'threads' },
+  { key: 'tiktok_client_key', label: 'TikTok Client Key', placeholder: 'From TikTok for Developers', secret: false, group: 'tiktok' },
+  { key: 'tiktok_client_secret', label: 'TikTok Client Secret', placeholder: 'Paste the client secret', secret: true, group: 'tiktok' },
   { key: 'app_url', label: 'App URL', placeholder: 'https://your-app-domain.com', secret: false, group: 'general' },
 ];
 
@@ -432,7 +438,7 @@ function IntegrationsTab() {
   const [values, setValues] = useState<Partial<Record<CredentialKey, string>>>({});
   const [reveal, setReveal] = useState<Partial<Record<CredentialKey, boolean>>>({});
   const [loading, setLoading] = useState(true);
-  const [savingGroup, setSavingGroup] = useState<'meta' | 'linkedin' | 'general' | null>(null);
+  const [savingGroup, setSavingGroup] = useState<'meta' | 'linkedin' | 'x' | 'threads' | 'tiktok' | 'general' | null>(null);
 
   const load = async () => {
     try {
@@ -452,7 +458,7 @@ function IntegrationsTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const saveGroup = async (group: 'meta' | 'linkedin' | 'general') => {
+  const saveGroup = async (group: 'meta' | 'linkedin' | 'x' | 'threads' | 'tiktok' | 'general') => {
     const fields = CREDENTIAL_FIELDS.filter((f) => f.group === group);
     const payload: Partial<Record<CredentialKey, string>> = {};
     for (const f of fields) {
@@ -533,6 +539,39 @@ function IntegrationsTab() {
           <div className="space-y-4">
             {CREDENTIAL_FIELDS.filter((f) => f.group === 'linkedin').map(renderField)}
             <Button onClick={() => saveGroup('linkedin')} loading={savingGroup === 'linkedin'}>{t('settings.integrations.linkedin.save')}</Button>
+          </div>
+        )}
+      </Card>
+
+      <Card title={t('settings.integrations.x.title')} description={t('settings.integrations.x.description')}>
+        {loading ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
+        ) : (
+          <div className="space-y-4">
+            {CREDENTIAL_FIELDS.filter((f) => f.group === 'x').map(renderField)}
+            <Button onClick={() => saveGroup('x')} loading={savingGroup === 'x'}>{t('settings.integrations.x.save')}</Button>
+          </div>
+        )}
+      </Card>
+
+      <Card title={t('settings.integrations.threads.title')} description={t('settings.integrations.threads.description')}>
+        {loading ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
+        ) : (
+          <div className="space-y-4">
+            {CREDENTIAL_FIELDS.filter((f) => f.group === 'threads').map(renderField)}
+            <Button onClick={() => saveGroup('threads')} loading={savingGroup === 'threads'}>{t('settings.integrations.threads.save')}</Button>
+          </div>
+        )}
+      </Card>
+
+      <Card title={t('settings.integrations.tiktok.title')} description={t('settings.integrations.tiktok.description')}>
+        {loading ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
+        ) : (
+          <div className="space-y-4">
+            {CREDENTIAL_FIELDS.filter((f) => f.group === 'tiktok').map(renderField)}
+            <Button onClick={() => saveGroup('tiktok')} loading={savingGroup === 'tiktok'}>{t('settings.integrations.tiktok.save')}</Button>
           </div>
         )}
       </Card>

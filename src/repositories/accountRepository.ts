@@ -68,12 +68,20 @@ export const accountRepository = {
   },
 
   /** Forces an immediate token refresh for a connected account instead of
-   * waiting for the cron sweep. Facebook/Instagram Page tokens always
-   * support this; LinkedIn accounts do too as long as a refresh_token was
-   * captured at connect time (requires LinkedIn's "Programmatic Refresh
-   * Tokens" product) — otherwise the account needs reconnecting via OAuth. */
+   * waiting for the cron sweep. Facebook/Instagram, LinkedIn, X, Threads and
+   * TikTok all support this (LinkedIn/X additionally require a refresh_token
+   * captured at connect time — otherwise the account needs reconnecting via
+   * OAuth). Telegram and WhatsApp accounts don't expire on a schedule, so
+   * this is never called for them (see PlatformDefinition.supportsRefresh). */
   async refreshToken(id: string, platform: string): Promise<void> {
-    const fn = platform === 'linkedin' || platform === 'linkedin_page' ? 'linkedin-token-refresh' : 'meta-token-refresh';
+    const fnByPlatform: Record<string, string> = {
+      linkedin: 'linkedin-token-refresh',
+      linkedin_page: 'linkedin-token-refresh',
+      x: 'x-token-refresh',
+      threads: 'threads-token-refresh',
+      tiktok: 'tiktok-token-refresh',
+    };
+    const fn = fnByPlatform[platform] ?? 'meta-token-refresh';
     const { data, error } = await supabase.functions.invoke<{ refreshed: boolean }>(fn, {
       body: { account_id: id },
     });
@@ -111,6 +119,49 @@ export const accountRepository = {
     });
     if (error || !data?.url) throw new Error(error?.message ?? 'Could not start LinkedIn login');
     return data.url;
+  },
+
+  async startXOAuth(workspaceId: string): Promise<string> {
+    const { data, error } = await supabase.functions.invoke<{ url: string }>('x-oauth-connect', {
+      body: { workspace_id: workspaceId },
+    });
+    if (error || !data?.url) throw new Error(error?.message ?? 'Could not start X login');
+    return data.url;
+  },
+
+  async startThreadsOAuth(workspaceId: string): Promise<string> {
+    const { data, error } = await supabase.functions.invoke<{ url: string }>('threads-oauth-connect', {
+      body: { workspace_id: workspaceId },
+    });
+    if (error || !data?.url) throw new Error(error?.message ?? 'Could not start Threads login');
+    return data.url;
+  },
+
+  async startTikTokOAuth(workspaceId: string): Promise<string> {
+    const { data, error } = await supabase.functions.invoke<{ url: string }>('tiktok-oauth-connect', {
+      body: { workspace_id: workspaceId },
+    });
+    if (error || !data?.url) throw new Error(error?.message ?? 'Could not start TikTok login');
+    return data.url;
+  },
+
+  /** Telegram has no redirect OAuth dialog — the bot token comes from
+   * BotFather and is verified live against the Bot API on the server. */
+  async connectTelegram(workspaceId: string, botToken: string, chatId: string): Promise<void> {
+    const { data, error } = await supabase.functions.invoke<{ connected: boolean }>('telegram-connect', {
+      body: { workspace_id: workspaceId, bot_token: botToken, chat_id: chatId },
+    });
+    if (error || !data?.connected) throw new Error(error?.message ?? 'Could not connect this Telegram bot/chat');
+  },
+
+  /** WhatsApp Business Cloud API accounts are provisioned in Meta Business
+   * Manager — the System User access token + phone number ID are verified
+   * live against the Graph API on the server, same idea as Telegram. */
+  async connectWhatsApp(workspaceId: string, accessToken: string, phoneNumberId: string, wabaId: string, defaultRecipient: string): Promise<void> {
+    const { data, error } = await supabase.functions.invoke<{ connected: boolean }>('whatsapp-connect', {
+      body: { workspace_id: workspaceId, access_token: accessToken, phone_number_id: phoneNumberId, waba_id: wabaId, default_recipient: defaultRecipient },
+    });
+    if (error || !data?.connected) throw new Error(error?.message ?? 'Could not connect this WhatsApp Business number');
   },
 
   async getPendingSelection(id: string): Promise<{ platform: 'meta' | 'linkedin'; options: OAuthOption[] }> {
