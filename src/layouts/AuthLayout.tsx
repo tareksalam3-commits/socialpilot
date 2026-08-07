@@ -9,8 +9,8 @@ export function AuthLayout({ children }: { children: ReactNode }) {
       {/* Left brand panel */}
       <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-slate-900 p-12 text-white lg:flex">
         <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900" />
-        <div className="absolute -right-24 -top-24 h-96 w-96 rounded-full bg-sky-500/10 blur-3xl" />
-        <div className="absolute -bottom-24 -left-24 h-96 w-96 rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="absolute -end-24 -top-24 h-96 w-96 rounded-full bg-sky-500/10 blur-3xl" />
+        <div className="absolute -bottom-24 -start-24 h-96 w-96 rounded-full bg-emerald-500/10 blur-3xl" />
         <div className="relative z-10 flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10">
             <Sparkles className="h-5 w-5" />

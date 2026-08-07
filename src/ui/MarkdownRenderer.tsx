@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Check, Copy } from 'lucide-react';
+import { useLanguage } from '@/providers/LanguageProvider';
 
 export function MarkdownRenderer({ content }: { content: string }) {
   return <div className="space-y-3 text-sm leading-relaxed text-slate-700 dark:text-slate-300">{parseMarkdown(content)}</div>;
@@ -58,7 +59,7 @@ function parseMarkdown(text: string): ReactNode[] {
         i++;
       }
       blocks.push(
-        <ul key={key++} className="list-disc space-y-1 pl-5">
+        <ul key={key++} className="list-disc space-y-1 ps-5">
           {items.map((item, idx) => (
             <li key={idx}>{renderInline(item)}</li>
           ))}
@@ -75,7 +76,7 @@ function parseMarkdown(text: string): ReactNode[] {
         i++;
       }
       blocks.push(
-        <ol key={key++} className="list-decimal space-y-1 pl-5">
+        <ol key={key++} className="list-decimal space-y-1 ps-5">
           {items.map((item, idx) => (
             <li key={idx}>{renderInline(item)}</li>
           ))}
@@ -138,6 +139,7 @@ function renderInline(text: string): ReactNode[] {
 }
 
 function CodeBlock({ code, lang }: { code: string; lang: string }) {
+  const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
   const handleCopy = () => {
     navigator.clipboard.writeText(code);
@@ -148,11 +150,11 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
     <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
       <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-800">
         <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{lang || 'code'}</span>
-        <button onClick={handleCopy} className="text-slate-400 transition hover:text-slate-600 dark:hover:text-slate-200" aria-label="Copy code">
+        <button onClick={handleCopy} className="text-slate-400 transition hover:text-slate-600 dark:hover:text-slate-200" aria-label={t('common.copyCode')}>
           {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
         </button>
       </div>
-      <pre className="overflow-x-auto bg-slate-900 p-3 text-xs text-slate-100 dark:bg-slate-950">
+      <pre dir="ltr" className="overflow-x-auto bg-slate-900 p-3 text-xs text-slate-100 dark:bg-slate-950 text-left">
         <code>{code}</code>
       </pre>
     </div>

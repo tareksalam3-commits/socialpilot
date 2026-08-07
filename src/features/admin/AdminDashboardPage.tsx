@@ -32,7 +32,7 @@ export function AdminDashboardPage() {
     adminAnalyticsRepository
       .summary()
       .then(setSummary)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
+      .catch((e) => setError(e instanceof Error ? e.message : t('admin.error.loadFailed')))
       .finally(() => setLoading(false));
   };
 

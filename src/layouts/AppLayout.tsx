@@ -209,7 +209,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                 {initials(profile?.full_name ?? user?.email)}
               </div>
               {!collapsed && (
-                <div className="flex-1 overflow-hidden text-left">
+                <div className="flex-1 overflow-hidden text-start">
                   <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
                     {profile?.full_name ?? 'User'}
                   </p>
@@ -221,12 +221,12 @@ export function AppLayout({ children }: { children?: ReactNode }) {
         >
           <div className="px-3 py-2">
             <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-              {workspace?.name ?? 'No workspace'}
+              {workspace?.name ?? t('layout.noWorkspace')}
             </p>
           </div>
           <div className="border-t border-slate-100 dark:border-slate-800" />
           <DropdownItem onClick={() => navigate('/app/settings')}>
-            <Settings className="h-4 w-4" /> Settings
+            <Settings className="h-4 w-4" /> {t('nav.settings')}
           </DropdownItem>
           <DropdownItem onClick={handleSignOut}>
             <LogOut className="h-4 w-4" /> {t('common.signOut')}
@@ -281,16 +281,16 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             </button>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-                {workspace?.name ?? 'Your Workspace'}
+                {workspace?.name ?? t('layout.yourWorkspace')}
               </p>
               <p className="hidden truncate text-xs text-slate-500 dark:text-slate-400 sm:block">
-                {workspace?.brand_name ?? 'Set up your brand in Settings'}
+                {workspace?.brand_name ?? t('layout.setUpBrand')}
               </p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-3">
             <NotificationCenter />
-            <div className="hidden text-right md:block">
+            <div className="hidden text-end md:block">
               <p className="text-sm font-medium text-slate-900 dark:text-white">
                 {profile?.full_name ?? 'User'}
               </p>

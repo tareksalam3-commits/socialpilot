@@ -21,7 +21,7 @@ export function MediaLibraryPage() {
   const handleUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     await upload(files);
-    push({ title: `${files.length} file(s) uploaded`, variant: 'success' });
+    push({ title: t('media.toast.uploaded', { count: files.length }), variant: 'success' });
   };
 
   const handleCreateFolder = async () => {
@@ -29,7 +29,7 @@ export function MediaLibraryPage() {
     await createFolder(folderName.trim());
     setFolderName('');
     setShowFolder(false);
-    push({ title: 'Folder created', variant: 'success' });
+    push({ title: t('media.toast.folderCreated'), variant: 'success' });
   };
 
   const formatSize = (bytes: number | null) => {
@@ -43,13 +43,13 @@ export function MediaLibraryPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Media Library</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Upload, organize, and manage your media assets.</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('media.title')}</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('media.subtitle')}</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowFolder(true)}><FolderPlus className="h-4 w-4" /> Folder</Button>
+          <Button variant="outline" onClick={() => setShowFolder(true)}><FolderPlus className="h-4 w-4" /> {t('media.folder')}</Button>
           <label>
-            <Button onClick={() => {}}><Upload className="h-4 w-4" /> Upload</Button>
+            <Button onClick={() => {}}><Upload className="h-4 w-4" /> {t('media.upload')}</Button>
             <input type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
           </label>
         </div>
@@ -57,20 +57,20 @@ export function MediaLibraryPage() {
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative max-w-xs flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input type="search" placeholder="Search media…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
+          <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input type="search" placeholder={t('media.searchPlaceholder')} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white py-2 ps-9 pe-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
         </div>
         <select value={filterType ?? ''} onChange={(e) => setFilterType(e.target.value || null)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
-          <option value="">All types</option>
-          <option value="image">Images</option>
-          <option value="video">Videos</option>
-          <option value="document">Documents</option>
+          <option value="">{t('media.filter.allTypes')}</option>
+          <option value="image">{t('media.filter.images')}</option>
+          <option value="video">{t('media.filter.videos')}</option>
+          <option value="document">{t('media.filter.documents')}</option>
         </select>
       </div>
 
       {folders.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => setFilterFolder(null)} className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${!filterFolder ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-400'}`}>All</button>
+          <button onClick={() => setFilterFolder(null)} className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${!filterFolder ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-400'}`}>{t('media.filter.all')}</button>
           {folders.map((f) => (
             <div key={f.id} className="flex items-center gap-1">
               <button onClick={() => setFilterFolder(f.id)} className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${filterFolder === f.id ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-400'}`}>{f.name}</button>
@@ -83,7 +83,7 @@ export function MediaLibraryPage() {
       {loading ? (
         <p className="py-6 text-center text-sm text-slate-500">{t('common.loading')}</p>
       ) : items.length === 0 ? (
-        <Card><EmptyState icon={<ImageIcon className="h-10 w-10" />} title="No media yet" description="Upload images, videos, or documents to get started." action={<label><Button onClick={() => {}}><Upload className="h-4 w-4" /> Upload</Button><input type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} /></label>} /></Card>
+        <Card><EmptyState icon={<ImageIcon className="h-10 w-10" />} title={t('media.empty.title')} description={t('media.empty.description')} action={<label><Button onClick={() => {}}><Upload className="h-4 w-4" /> {t('media.upload')}</Button><input type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} /></label>} /></Card>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {items.map((item) => {
@@ -98,7 +98,7 @@ export function MediaLibraryPage() {
                       <Icon className={`h-10 w-10 ${typeColors[item.type]}`} />
                     </div>
                   )}
-                  <button onClick={(e) => { e.stopPropagation(); remove(item.id); }} className="absolute right-2 top-2 rounded-lg bg-white/80 p-1 text-slate-500 opacity-0 transition hover:text-rose-500 group-hover:opacity-100 dark:bg-slate-900/80"><Trash2 className="h-3.5 w-3.5" /></button>
+                  <button onClick={(e) => { e.stopPropagation(); remove(item.id); }} className="absolute end-2 top-2 rounded-lg bg-white/80 p-1 text-slate-500 opacity-0 transition hover:text-rose-500 group-hover:opacity-100 dark:bg-slate-900/80"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
                 <div className="p-2">
                   <p className="truncate text-xs font-medium text-slate-900 dark:text-white">{item.name}</p>
@@ -110,20 +110,20 @@ export function MediaLibraryPage() {
         </div>
       )}
 
-      <Modal open={showFolder} onClose={() => setShowFolder(false)} title="New Folder" size="sm" footer={<><Button variant="outline" onClick={() => setShowFolder(false)}>Cancel</Button><Button onClick={handleCreateFolder}>Create</Button></>}>
-        <Input label="Folder name" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="My folder" autoFocus />
+      <Modal open={showFolder} onClose={() => setShowFolder(false)} title={t('media.newFolder')} size="sm" footer={<><Button variant="outline" onClick={() => setShowFolder(false)}>{t('common.cancel')}</Button><Button onClick={handleCreateFolder}>{t('media.create')}</Button></>}>
+        <Input label={t('media.folderName')} value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder={t('media.folderNamePlaceholder')} autoFocus />
       </Modal>
 
-      <Modal open={!!preview} onClose={() => setPreview(null)} title={preview?.name ?? ''} size="lg" footer={<Button onClick={() => setPreview(null)}>Close</Button>}>
+      <Modal open={!!preview} onClose={() => setPreview(null)} title={preview?.name ?? ''} size="lg" footer={<Button onClick={() => setPreview(null)}>{t('common.close')}</Button>}>
         {preview && (
           <div className="space-y-3">
             {preview.type === 'image' ? <img src={preview.url} alt={preview.name} className="max-h-96 w-full rounded-lg object-contain" /> : <div className="flex h-48 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">{(() => { const Icon = typeIcons[preview.type] ?? File; return <Icon className={`h-12 w-12 ${typeColors[preview.type]}`} />; })()}</div>}
-            <div className="flex flex-wrap gap-2">{preview.tags.map((t) => <Badge key={t}>{t}</Badge>)}</div>
+            <div className="flex flex-wrap gap-2">{preview.tags.map((tag) => <Badge key={tag}>{tag}</Badge>)}</div>
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <div><span className="text-slate-500 dark:text-slate-400">Type:</span> <span className="text-slate-900 dark:text-white">{preview.type}</span></div>
-              <div><span className="text-slate-500 dark:text-slate-400">Size:</span> <span className="text-slate-900 dark:text-white">{preview.size_bytes ? (preview.size_bytes / 1024).toFixed(1) + ' KB' : '—'}</span></div>
-              <div><span className="text-slate-500 dark:text-slate-400">Uploaded:</span> <span className="text-slate-900 dark:text-white">{formatDate(preview.created_at)}</span></div>
-              <div><span className="text-slate-500 dark:text-slate-400">MIME:</span> <span className="text-slate-900 dark:text-white">{preview.mime_type ?? '—'}</span></div>
+              <div><span className="text-slate-500 dark:text-slate-400">{t('media.details.type')}:</span> <span className="text-slate-900 dark:text-white">{preview.type}</span></div>
+              <div><span className="text-slate-500 dark:text-slate-400">{t('media.details.size')}:</span> <span className="text-slate-900 dark:text-white">{preview.size_bytes ? (preview.size_bytes / 1024).toFixed(1) + ' KB' : '—'}</span></div>
+              <div><span className="text-slate-500 dark:text-slate-400">{t('media.details.uploaded')}:</span> <span className="text-slate-900 dark:text-white">{formatDate(preview.created_at)}</span></div>
+              <div><span className="text-slate-500 dark:text-slate-400">{t('media.details.mime')}:</span> <span className="text-slate-900 dark:text-white">{preview.mime_type ?? '—'}</span></div>
             </div>
           </div>
         )}

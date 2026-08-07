@@ -17,7 +17,7 @@ export function AuditLogsPage() {
     auditLogRepository
       .list()
       .then(setRows)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load audit logs'))
+      .catch((e) => setError(e instanceof Error ? e.message : t('admin.error.loadAuditLogsFailed')))
       .finally(() => setLoading(false));
   };
 

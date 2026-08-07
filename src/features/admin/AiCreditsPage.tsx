@@ -20,7 +20,7 @@ export function AiCreditsPage() {
     aiCreditsRepository
       .list()
       .then(setRows)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load AI credits'))
+      .catch((e) => setError(e instanceof Error ? e.message : t('admin.error.loadAiCreditsFailed')))
       .finally(() => setLoading(false));
   };
 

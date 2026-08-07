@@ -152,7 +152,7 @@ export function CommandBar() {
             </div>
             <div className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">
               {result}
-              {generating && <span className="ml-1 inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
+              {generating && <span className="ms-1 inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
             </div>
             <div className="mt-4 flex gap-2">
               <button onClick={() => navigate('/app/playground')} className="text-xs text-sky-600 hover:underline dark:text-sky-400">{t('ai.commandBar.continueInPlayground')}</button>
@@ -170,7 +170,7 @@ export function CommandBar() {
                 <button
                   key={cmd.id}
                   onClick={() => handleSelect(cmd)}
-                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-start transition hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                     <cmd.icon className="h-4 w-4" />

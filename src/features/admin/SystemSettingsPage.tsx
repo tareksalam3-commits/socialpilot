@@ -29,7 +29,7 @@ export function SystemSettingsPage() {
         setSettings(rows);
         setDrafts(Object.fromEntries(rows.map((r) => [r.key, stringifyValue(r.value)])));
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load settings'))
+      .catch((e) => setError(e instanceof Error ? e.message : t('admin.error.loadSettingsFailed')))
       .finally(() => setLoading(false));
   };
 

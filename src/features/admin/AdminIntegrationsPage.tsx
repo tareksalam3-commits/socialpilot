@@ -5,19 +5,21 @@ import { useLanguage } from '@/providers/LanguageProvider';
 import { Badge, Button, Card, Input } from '@/ui';
 import { platformCredentialsRepository, type CredentialKey, type CredentialStatus } from '@/repositories/platformCredentialsRepository';
 
-const CREDENTIAL_FIELDS: { key: CredentialKey; label: string; placeholder: string; secret: boolean; group: 'meta' | 'linkedin' | 'x' | 'threads' | 'tiktok' | 'general' }[] = [
-  { key: 'meta_app_id', label: 'Meta App ID', placeholder: 'e.g. 1234567890123456', secret: false, group: 'meta' },
-  { key: 'meta_app_secret', label: 'Meta App Secret', placeholder: 'Paste the app secret from Meta for Developers', secret: true, group: 'meta' },
-  { key: 'meta_config_id', label: 'Meta Login Configuration ID (only if using Facebook Login for Business)', placeholder: 'e.g. 123456789012345', secret: false, group: 'meta' },
-  { key: 'linkedin_client_id', label: 'LinkedIn Client ID', placeholder: 'e.g. 86abcxyz12345', secret: false, group: 'linkedin' },
-  { key: 'linkedin_client_secret', label: 'LinkedIn Client Secret', placeholder: 'Paste the client secret from the LinkedIn app', secret: true, group: 'linkedin' },
-  { key: 'x_client_id', label: 'X (Twitter) Client ID', placeholder: 'From the X Developer Portal', secret: false, group: 'x' },
-  { key: 'x_client_secret', label: 'X (Twitter) Client Secret (confidential clients only)', placeholder: 'Leave blank for a public/PKCE-only client', secret: true, group: 'x' },
-  { key: 'threads_app_id', label: 'Threads App ID', placeholder: 'From Meta for Developers (Threads use case)', secret: false, group: 'threads' },
-  { key: 'threads_app_secret', label: 'Threads App Secret', placeholder: 'Paste the app secret', secret: true, group: 'threads' },
-  { key: 'tiktok_client_key', label: 'TikTok Client Key', placeholder: 'From TikTok for Developers', secret: false, group: 'tiktok' },
-  { key: 'tiktok_client_secret', label: 'TikTok Client Secret', placeholder: 'Paste the client secret', secret: true, group: 'tiktok' },
-  { key: 'app_url', label: 'App URL', placeholder: 'https://your-app-domain.com', secret: false, group: 'general' },
+type CredentialFieldDef = { key: CredentialKey; labelKey: string; placeholderKey: string; secret: boolean; group: 'meta' | 'linkedin' | 'x' | 'threads' | 'tiktok' | 'general' };
+
+const CREDENTIAL_FIELDS: CredentialFieldDef[] = [
+  { key: 'meta_app_id', labelKey: 'admin.integrations.field.metaAppId.label', placeholderKey: 'admin.integrations.field.metaAppId.placeholder', secret: false, group: 'meta' },
+  { key: 'meta_app_secret', labelKey: 'admin.integrations.field.metaAppSecret.label', placeholderKey: 'admin.integrations.field.metaAppSecret.placeholder', secret: true, group: 'meta' },
+  { key: 'meta_config_id', labelKey: 'admin.integrations.field.metaConfigId.label', placeholderKey: 'admin.integrations.field.metaConfigId.placeholder', secret: false, group: 'meta' },
+  { key: 'linkedin_client_id', labelKey: 'admin.integrations.field.linkedinClientId.label', placeholderKey: 'admin.integrations.field.linkedinClientId.placeholder', secret: false, group: 'linkedin' },
+  { key: 'linkedin_client_secret', labelKey: 'admin.integrations.field.linkedinClientSecret.label', placeholderKey: 'admin.integrations.field.linkedinClientSecret.placeholder', secret: true, group: 'linkedin' },
+  { key: 'x_client_id', labelKey: 'admin.integrations.field.xClientId.label', placeholderKey: 'admin.integrations.field.xClientId.placeholder', secret: false, group: 'x' },
+  { key: 'x_client_secret', labelKey: 'admin.integrations.field.xClientSecret.label', placeholderKey: 'admin.integrations.field.xClientSecret.placeholder', secret: true, group: 'x' },
+  { key: 'threads_app_id', labelKey: 'admin.integrations.field.threadsAppId.label', placeholderKey: 'admin.integrations.field.threadsAppId.placeholder', secret: false, group: 'threads' },
+  { key: 'threads_app_secret', labelKey: 'admin.integrations.field.threadsAppSecret.label', placeholderKey: 'admin.integrations.field.threadsAppSecret.placeholder', secret: true, group: 'threads' },
+  { key: 'tiktok_client_key', labelKey: 'admin.integrations.field.tiktokClientKey.label', placeholderKey: 'admin.integrations.field.tiktokClientKey.placeholder', secret: false, group: 'tiktok' },
+  { key: 'tiktok_client_secret', labelKey: 'admin.integrations.field.tiktokClientSecret.label', placeholderKey: 'admin.integrations.field.tiktokClientSecret.placeholder', secret: true, group: 'tiktok' },
+  { key: 'app_url', labelKey: 'admin.integrations.field.appUrl.label', placeholderKey: 'admin.integrations.field.appUrl.placeholder', secret: false, group: 'general' },
 ];
 
 export function AdminIntegrationsPage() {
@@ -75,12 +77,12 @@ export function AdminIntegrationsPage() {
     }
   };
 
-  const renderField = (f: (typeof CREDENTIAL_FIELDS)[number]) => {
+  const renderField = (f: CredentialFieldDef) => {
     const configured = status?.[f.key]?.configured;
     return (
       <div key={f.key} className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">{f.label}</label>
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">{t(f.labelKey)}</label>
           {configured && <Badge variant="success">{t('settings.integrations.configured')}</Badge>}
         </div>
         <div className="relative">
@@ -88,14 +90,14 @@ export function AdminIntegrationsPage() {
             type={f.secret && !reveal[f.key] ? 'password' : 'text'}
             value={values[f.key] ?? ''}
             onChange={(e) => setValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-            placeholder={configured ? t('settings.integrations.alreadySet') : f.placeholder}
-            className={f.secret ? 'pr-10' : undefined}
+            placeholder={configured ? t('settings.integrations.alreadySet') : t(f.placeholderKey)}
+            className={f.secret ? 'pe-10' : undefined}
           />
           {f.secret && (
             <button
               type="button"
               onClick={() => setReveal((prev) => ({ ...prev, [f.key]: !prev[f.key] }))}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              className="absolute end-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
             >
               {reveal[f.key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>

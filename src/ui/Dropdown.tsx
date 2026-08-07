@@ -70,7 +70,7 @@ export function DropdownItem({
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition-colors duration-100 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 ${className}`}
+      className={`flex w-full items-center gap-2 px-3 py-2 text-start text-sm text-slate-700 transition-colors duration-100 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 ${className}`}
     >
       {children}
     </button>

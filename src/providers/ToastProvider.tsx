@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
+import { useLanguage } from '@/providers/LanguageProvider';
 
 export type Toast = {
   id: string;
@@ -72,6 +73,7 @@ function ToastViewport({ toasts, dismiss }: { toasts: Toast[]; dismiss: (id: str
 }
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
+  const { t } = useLanguage();
   const [leaving, setLeaving] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const style = variantStyles[toast.variant];
@@ -108,7 +110,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
         <button
           onClick={close}
           className="shrink-0 rounded p-0.5 opacity-60 transition hover:opacity-100"
-          aria-label="Dismiss"
+          aria-label={t('common.dismiss')}
         >
           <X className="h-3.5 w-3.5" />
         </button>

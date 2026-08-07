@@ -29,7 +29,7 @@ export function AllWorkspacesPage() {
     adminWorkspacesRepository
       .list()
       .then(setRows)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load workspaces'))
+      .catch((e) => setError(e instanceof Error ? e.message : t('admin.error.loadWorkspacesFailed')))
       .finally(() => setLoading(false));
   };
 

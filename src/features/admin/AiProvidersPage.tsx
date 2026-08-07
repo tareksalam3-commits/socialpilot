@@ -93,10 +93,10 @@ function ProviderKeyRow({
             <Badge>{t('ai.settings.providers.notConfigured')}</Badge>
           )}
           {testState === 'connected' && (
-            <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" /> {t('ai.settings.apiKey.connected')}</Badge>
+            <Badge variant="success"><CheckCircle2 className="me-1 h-3 w-3" /> {t('ai.settings.apiKey.connected')}</Badge>
           )}
           {testState === 'failed' && (
-            <Badge variant="error"><XCircle className="mr-1 h-3 w-3" /> {t('ai.settings.apiKey.failed')}</Badge>
+            <Badge variant="error"><XCircle className="me-1 h-3 w-3" /> {t('ai.settings.apiKey.failed')}</Badge>
           )}
         </div>
         <span className="font-mono text-[11px] text-slate-400">{provider.default_model}</span>
@@ -352,10 +352,10 @@ export function AiProvidersPage() {
               <Zap className="h-4 w-4" /> {t('ai.settings.provider.loadModels')}
             </Button>
             {connState === 'connected' && (
-              <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" /> {t('ai.settings.apiKey.connected')}</Badge>
+              <Badge variant="success"><CheckCircle2 className="me-1 h-3 w-3" /> {t('ai.settings.apiKey.connected')}</Badge>
             )}
             {connState === 'failed' && (
-              <Badge variant="error"><XCircle className="mr-1 h-3 w-3" /> {t('ai.settings.apiKey.failed')}</Badge>
+              <Badge variant="error"><XCircle className="me-1 h-3 w-3" /> {t('ai.settings.apiKey.failed')}</Badge>
             )}
             {models.length > 0 && (
               <span className="text-xs text-slate-500 dark:text-slate-400">

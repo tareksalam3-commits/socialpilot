@@ -10,7 +10,12 @@ export function useAccounts() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!workspace) return;
+    if (!workspace) {
+      // No workspace yet (e.g. still being created) — don't leave the UI stuck spinning.
+      setAccounts([]);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);

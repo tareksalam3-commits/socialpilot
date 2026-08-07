@@ -172,7 +172,7 @@ export function AIAssistantPage() {
     // Best-effort thread so this run shows up alongside Playground
     // conversations in AI History — never blocks the pipeline.
     conversationRepository
-      .create({ workspace_id: workspace.id, title: requestText.slice(0, 60) || 'AI Assistant campaign', model: aiParams.model })
+      .create({ workspace_id: workspace.id, title: requestText.slice(0, 60) || t('assistant.defaultCampaignTitle'), model: aiParams.model })
       .then((conv) => {
         if (runIdRef.current !== runId) return;
         setConversationId(conv.id);

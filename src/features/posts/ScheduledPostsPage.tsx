@@ -107,8 +107,8 @@ export function ScheduledPostsPage() {
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative max-w-xs flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input type="search" placeholder={t('posts.searchPlaceholder')} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
+          <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input type="search" placeholder={t('posts.searchPlaceholder')} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white py-2 ps-9 pe-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
         </div>
         <select value={filterStatus ?? ''} onChange={(e) => setFilterStatus(e.target.value as PostStatus || null)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
           <option value="">{t('posts.filter.allStatuses')}</option>

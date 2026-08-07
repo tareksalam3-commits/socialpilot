@@ -24,7 +24,7 @@ export function AllUsersPage() {
     adminUsersRepository
       .list()
       .then((res) => setUsers(res.users))
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load users'))
+      .catch((e) => setError(e instanceof Error ? e.message : t('admin.error.loadUsersFailed')))
       .finally(() => setLoading(false));
   };
 

@@ -9,7 +9,7 @@ export type TableProps = {
 export function Table({ headers, children, empty }: TableProps) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
+      <table className="w-full text-start text-sm">
         <thead>
           <tr className="border-b border-slate-200 dark:border-slate-800">
             {headers.map((h, i) => (

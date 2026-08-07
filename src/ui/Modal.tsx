@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { useLanguage } from '@/providers/LanguageProvider';
 
 export type ModalProps = {
   open: boolean;
@@ -21,6 +22,7 @@ const sizeClasses = {
 const EXIT_MS = 160;
 
 export function Modal({ open, onClose, title, description, children, footer, size = 'md' }: ModalProps) {
+  const { t } = useLanguage();
   // Keep the modal mounted briefly after `open` flips to false so the
   // closing animation can play instead of the dialog vanishing instantly.
   const [rendered, setRendered] = useState(open);
@@ -83,7 +85,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
           <button
             onClick={onClose}
             className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
-            aria-label="Close"
+            aria-label={t('common.close')}
           >
             <X className="h-5 w-5" />
           </button>

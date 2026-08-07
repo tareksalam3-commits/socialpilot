@@ -147,7 +147,7 @@ export function AdminLayout() {
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500/20 text-xs font-semibold text-indigo-300">
                 {initials(profile?.full_name ?? user?.email)}
               </div>
-              <div className="flex-1 overflow-hidden text-left">
+              <div className="flex-1 overflow-hidden text-start">
                 <p className="truncate text-sm font-medium text-white">{profile?.full_name ?? 'Super Admin'}</p>
                 <p className="truncate text-xs text-slate-400">{user?.email}</p>
               </div>

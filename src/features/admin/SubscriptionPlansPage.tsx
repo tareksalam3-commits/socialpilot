@@ -47,7 +47,7 @@ export function SubscriptionPlansPage() {
     plansRepository
       .list()
       .then(setPlans)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load plans'))
+      .catch((e) => setError(e instanceof Error ? e.message : t('admin.error.loadPlansFailed')))
       .finally(() => setLoading(false));
   };
 

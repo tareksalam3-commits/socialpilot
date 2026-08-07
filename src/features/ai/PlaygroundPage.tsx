@@ -55,8 +55,8 @@ export function PlaygroundPage() {
 
   useEffect(() => {
     if (search) {
-      const t = setTimeout(() => searchConversations(search), 300);
-      return () => clearTimeout(t);
+      const timer = setTimeout(() => searchConversations(search), 300);
+      return () => clearTimeout(timer);
     }
   }, [search, searchConversations]);
 
@@ -285,7 +285,7 @@ function ConversationItem({
         </div>
       ) : (
         <>
-          <button onClick={onClick} className="flex-1 truncate text-left text-sm text-slate-700 dark:text-slate-300">
+          <button onClick={onClick} className="flex-1 truncate text-start text-sm text-slate-700 dark:text-slate-300">
             {conv.title}
           </button>
           <div className="hidden gap-1 group-hover:flex">
@@ -343,7 +343,7 @@ function MessageBubble({
         ) : (
           <MarkdownRenderer content={content} />
         )}
-        {streaming && <span className="ml-1 inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
+        {streaming && <span className="ms-1 inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
         {!streaming && !isUser && (
           <div className="mt-2 flex items-center gap-3 border-t border-slate-200/50 pt-2 text-xs text-slate-500 dark:border-slate-700/50 dark:text-slate-400">
             {model && <span className="font-mono">{model}</span>}

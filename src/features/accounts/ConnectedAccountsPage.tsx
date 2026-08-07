@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Facebook, Link2, Linkedin, Loader2, MessageCircle, Plus, RefreshCw, RotateCw, Send, Trash2, XCircle } from 'lucide-react';
+import { useAuth } from '@/providers/AuthProvider';
+import { CheckCircle2, Link2, Loader2, Plus, RotateCw, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
 import { accountRepository, type LinkedInOAuthOption, type MetaOAuthOption, type OAuthOption } from '@/repositories/accountRepository';
-import { Badge, Button, Card, EmptyState, ErrorState, Modal, Input } from '@/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, Modal, Input, Skeleton } from '@/ui';
 import { formatDate } from '@/utils/format';
 import type { ExtendedConnectedAccount } from '@/types/social';
-import { MESSAGING_PLATFORMS, PLATFORM_DEFINITIONS, SOCIAL_PLATFORMS, getPlatformMeta, platformLabelFallback } from '@/constants/platforms';
+import { PLATFORM_DEFINITIONS, getPlatformMeta, platformLabelFallback } from '@/constants/platforms';
 
 type RedirectOAuthPlatform = 'meta' | 'linkedin' | 'x' | 'threads' | 'tiktok';
 const REDIRECT_OAUTH_LABEL: Record<RedirectOAuthPlatform, string> = {
@@ -22,10 +23,21 @@ const REDIRECT_OAUTH_LABEL: Record<RedirectOAuthPlatform, string> = {
 
 export function ConnectedAccountsPage() {
   const { accounts, loading, error, disconnect, remove, reload, refreshToken, refreshingId, syncAccount, syncingId, syncAll, syncingAll } = useAccounts();
-  const { workspace } = useWorkspace();
+  const { user } = useAuth();
+  const { workspace, loading: wsLoading, ensureWorkspace } = useWorkspace();
   const { push } = useToast();
   const { t } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [preparingWorkspace, setPreparingWorkspace] = useState(false);
+
+  // Make sure the user has a workspace before they try to connect anything.
+  // Without this, every OAuth button silently no-ops when workspace is null.
+  useEffect(() => {
+    if (!wsLoading && !workspace && user) {
+      setPreparingWorkspace(true);
+      ensureWorkspace().finally(() => setPreparingWorkspace(false));
+    }
+  }, [wsLoading, workspace, user, ensureWorkspace]);
 
   const [showConnect, setShowConnect] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -79,7 +91,10 @@ export function ConnectedAccountsPage() {
   }, []);
 
   const startRedirectOAuth = async (platform: RedirectOAuthPlatform, starter: () => Promise<string>, failToastKey: string) => {
-    if (!workspace) return;
+    if (!workspace) {
+      push({ title: t('accounts.workspaceNotReady.title'), description: t('accounts.workspaceNotReady.description'), variant: 'error' });
+      return;
+    }
     setOauthLoading(platform);
     try {
       const url = await starter();
@@ -108,7 +123,7 @@ export function ConnectedAccountsPage() {
     setFinalizing(true);
     try {
       const count = await accountRepository.finalizeSelection(selection.id, selected);
-      push({ title: `${count} account${count === 1 ? '' : 's'} connected`, variant: 'success' });
+      push({ title: t('accounts.toast.accountsConnectedCount', { count }), variant: 'success' });
       setSelection(null);
       setChecked({});
       setIgChecked({});
@@ -125,7 +140,7 @@ export function ConnectedAccountsPage() {
       push({ title: t('accounts.toast.tokenAndIdRequired'), variant: 'error' });
       return;
     }
-    if (!workspace) return;
+    if (!workspace) { push({ title: t('accounts.workspaceNotReady.title'), description: t('accounts.workspaceNotReady.description'), variant: 'error' }); return; }
     setConnecting(true);
     try {
       await accountRepository.connect({
@@ -135,7 +150,7 @@ export function ConnectedAccountsPage() {
         provider_account_id: connectForm.providerAccountId,
         access_token: connectForm.accessToken,
       });
-      push({ title: 'Account connected', description: 'Your social account is now linked.', variant: 'success' });
+      push({ title: t('accounts.toast.accountConnected'), description: t('accounts.toast.accountConnectedDesc'), variant: 'success' });
       setShowConnect(false);
       setConnectForm({ platform: 'facebook', handle: '', accessToken: '', providerAccountId: '' });
       reload();
@@ -151,7 +166,7 @@ export function ConnectedAccountsPage() {
       push({ title: t('accounts.toast.telegramFieldsRequired'), variant: 'error' });
       return;
     }
-    if (!workspace) return;
+    if (!workspace) { push({ title: t('accounts.workspaceNotReady.title'), description: t('accounts.workspaceNotReady.description'), variant: 'error' }); return; }
     setConnectingTelegram(true);
     try {
       await accountRepository.connectTelegram(workspace.id, telegramForm.botToken.trim(), telegramForm.chatId.trim());
@@ -171,7 +186,7 @@ export function ConnectedAccountsPage() {
       push({ title: t('accounts.toast.whatsappFieldsRequired'), variant: 'error' });
       return;
     }
-    if (!workspace) return;
+    if (!workspace) { push({ title: t('accounts.workspaceNotReady.title'), description: t('accounts.workspaceNotReady.description'), variant: 'error' }); return; }
     setConnectingWhatsApp(true);
     try {
       await accountRepository.connectWhatsApp(workspace.id, whatsappForm.accessToken.trim(), whatsappForm.phoneNumberId.trim(), whatsappForm.wabaId.trim(), whatsappForm.defaultRecipient.trim());
@@ -188,13 +203,13 @@ export function ConnectedAccountsPage() {
 
   const handleDisconnect = async (account: ExtendedConnectedAccount) => {
     await disconnect(account.id);
-    push({ title: 'Account disconnected', variant: 'success' });
+    push({ title: t('accounts.toast.accountDisconnected'), variant: 'success' });
   };
 
   const handleRefreshToken = async (account: ExtendedConnectedAccount) => {
     try {
       await refreshToken(account.id, account.platform);
-      push({ title: 'Token refreshed', description: `${platformLabelFallback(account.platform)} will stay connected for longer.`, variant: 'success' });
+      push({ title: t('accounts.toast.tokenRefreshed'), description: t('accounts.toast.tokenRefreshedDesc', { platform: platformLabelFallback(account.platform) }), variant: 'success' });
     } catch (e) {
       push({ title: t('accounts.toast.refreshFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
     }
@@ -203,7 +218,7 @@ export function ConnectedAccountsPage() {
   const handleSync = async (account: ExtendedConnectedAccount) => {
     try {
       await syncAccount(account.id);
-      push({ title: 'Account synced', description: `${platformLabelFallback(account.platform)} status is up to date.`, variant: 'success' });
+      push({ title: t('accounts.toast.accountSynced'), description: t('accounts.toast.accountSyncedDesc', { platform: platformLabelFallback(account.platform) }), variant: 'success' });
     } catch (e) {
       push({ title: t('accounts.toast.syncFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
     }
@@ -212,7 +227,7 @@ export function ConnectedAccountsPage() {
   const handleSyncAll = async () => {
     try {
       await syncAll();
-      push({ title: 'Accounts synced', variant: 'success' });
+      push({ title: t('accounts.toast.accountsSynced'), variant: 'success' });
     } catch (e) {
       push({ title: t('accounts.toast.syncAllFailed'), description: e instanceof Error ? e.message : '', variant: 'error' });
     }
@@ -221,44 +236,78 @@ export function ConnectedAccountsPage() {
   const socialAccounts = accounts.filter((a) => getPlatformMeta(a.platform)?.category !== 'messaging');
   const messagingAccounts = accounts.filter((a) => getPlatformMeta(a.platform)?.category === 'messaging');
 
+  const connectedCount = accounts.filter((a) => a.status === 'connected').length;
+  const workspaceReady = !!workspace && !preparingWorkspace;
+
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Connected Accounts</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Manage your social and messaging accounts and their health.</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('accounts.title')}</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('accounts.subtitle')}</p>
+          <div className="mt-3 flex items-center gap-2">
+            <Badge variant={connectedCount > 0 ? 'success' : 'default'}>
+              {t('accounts.connectedCount', { count: connectedCount })}
+            </Badge>
+            {preparingWorkspace && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('accounts.settingUpWorkspace')}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={handleSyncAll} loading={syncingAll} disabled={accounts.length === 0}>
-            <RotateCw className="h-4 w-4" /> Sync all
+            <RotateCw className="h-4 w-4" /> {t('accounts.syncAll')}
           </Button>
           <Button variant="ghost" onClick={() => setShowConnect(true)}>
-            <Plus className="h-4 w-4" /> Manual
+            <Plus className="h-4 w-4" /> {t('accounts.manual')}
           </Button>
         </div>
       </div>
 
       <section className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Social Networks</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Meta, LinkedIn, X, Threads, and TikTok.</p>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{t('accounts.socialNetworks')}</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t('accounts.socialNetworksDesc')}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={handleMetaConnect} loading={oauthLoading === 'meta'} disabled={oauthLoading !== null}>
-            <Facebook className="h-4 w-4" /> Connect Meta (Facebook & Instagram)
-          </Button>
-          <Button onClick={handleLinkedInConnect} loading={oauthLoading === 'linkedin'} disabled={oauthLoading !== null} variant="outline">
-            <Linkedin className="h-4 w-4" /> Connect LinkedIn
-          </Button>
-          <Button onClick={handleXConnect} loading={oauthLoading === 'x'} disabled={oauthLoading !== null} variant="outline">
-            <PlatformIcon platform="x" /> Connect X
-          </Button>
-          <Button onClick={handleThreadsConnect} loading={oauthLoading === 'threads'} disabled={oauthLoading !== null} variant="outline">
-            <PlatformIcon platform="threads" /> Connect Threads
-          </Button>
-          <Button onClick={handleTikTokConnect} loading={oauthLoading === 'tiktok'} disabled={oauthLoading !== null} variant="outline">
-            <PlatformIcon platform="tiktok" /> Connect TikTok
-          </Button>
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
+          <ConnectTile
+            platformId="facebook"
+            label="Meta"
+            sublabel="Facebook & Instagram"
+            onClick={handleMetaConnect}
+            loading={oauthLoading === 'meta'}
+            disabled={oauthLoading !== null || !workspaceReady}
+          />
+          <ConnectTile
+            platformId="linkedin"
+            label="LinkedIn"
+            onClick={handleLinkedInConnect}
+            loading={oauthLoading === 'linkedin'}
+            disabled={oauthLoading !== null || !workspaceReady}
+          />
+          <ConnectTile
+            platformId="x"
+            label="X"
+            onClick={handleXConnect}
+            loading={oauthLoading === 'x'}
+            disabled={oauthLoading !== null || !workspaceReady}
+          />
+          <ConnectTile
+            platformId="threads"
+            label="Threads"
+            onClick={handleThreadsConnect}
+            loading={oauthLoading === 'threads'}
+            disabled={oauthLoading !== null || !workspaceReady}
+          />
+          <ConnectTile
+            platformId="tiktok"
+            label="TikTok"
+            onClick={handleTikTokConnect}
+            loading={oauthLoading === 'tiktok'}
+            disabled={oauthLoading !== null || !workspaceReady}
+          />
         </div>
 
         {socialAccounts.length > 0 && (
@@ -281,16 +330,23 @@ export function ConnectedAccountsPage() {
 
       <section className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Messaging Channels</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Telegram and WhatsApp Business.</p>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{t('accounts.messagingChannels')}</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t('accounts.messagingChannelsDesc')}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => setShowTelegram(true)} variant="outline">
-            <Send className="h-4 w-4" /> Connect Telegram
-          </Button>
-          <Button onClick={() => setShowWhatsApp(true)} variant="outline">
-            <MessageCircle className="h-4 w-4" /> Connect WhatsApp Business
-          </Button>
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
+          <ConnectTile
+            platformId="telegram"
+            label="Telegram"
+            onClick={() => setShowTelegram(true)}
+            disabled={!workspaceReady}
+          />
+          <ConnectTile
+            platformId="whatsapp"
+            label="WhatsApp"
+            sublabel="Business"
+            onClick={() => setShowWhatsApp(true)}
+            disabled={!workspaceReady}
+          />
         </div>
 
         {messagingAccounts.length > 0 && (
@@ -312,21 +368,27 @@ export function ConnectedAccountsPage() {
       </section>
 
       {error && <ErrorState description={error} />}
-      {loading && accounts.length === 0 && <p className="text-center text-sm text-slate-500">{t('accounts.loading')}</p>}
-      {!loading && accounts.length === 0 && !error && (
-        <Card><EmptyState icon={<Link2 className="h-10 w-10" />} title="No accounts connected" description="Connect a social network or messaging channel above to start publishing." /></Card>
+      {(loading || wsLoading) && accounts.length === 0 && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <CardSkeletonAccount />
+          <CardSkeletonAccount />
+          <CardSkeletonAccount />
+        </div>
+      )}
+      {!loading && !wsLoading && accounts.length === 0 && !error && (
+        <Card><EmptyState icon={<Link2 className="h-10 w-10" />} title={t('accounts.empty.title')} description={t('accounts.empty.description')} /></Card>
       )}
 
       <Modal
         open={!!selection}
         onClose={() => setSelection(null)}
-        title={selection?.platform === 'linkedin' ? 'Select LinkedIn accounts' : 'Select Facebook Pages'}
-        description="Choose which accounts to connect to this workspace."
+        title={selection?.platform === 'linkedin' ? t('accounts.modal.selectLinkedin') : t('accounts.modal.selectFacebook')}
+        description={t('accounts.modal.selectDescription')}
         size="md"
         footer={
           <>
-            <Button variant="outline" onClick={() => setSelection(null)}>Cancel</Button>
-            <Button onClick={handleFinalizeSelection} loading={finalizing}>Connect selected</Button>
+            <Button variant="outline" onClick={() => setSelection(null)}>{t('common.cancel')}</Button>
+            <Button onClick={handleFinalizeSelection} loading={finalizing}>{t('accounts.modal.connectSelected')}</Button>
           </>
         }
       >
@@ -339,14 +401,14 @@ export function ConnectedAccountsPage() {
                   {page.name}
                 </label>
                 {page.instagram && (
-                  <label className="mt-2 flex items-center gap-2 pl-6 text-xs text-slate-600 dark:text-slate-400">
+                  <label className="mt-2 flex items-center gap-2 ps-6 text-xs text-slate-600 dark:text-slate-400">
                     <input
                       type="checkbox"
                       disabled={!checked[page.id]}
                       checked={!!igChecked[page.id]}
                       onChange={(e) => setIgChecked({ ...igChecked, [page.id]: e.target.checked })}
                     />
-                    Also connect Instagram @{page.instagram.username}
+                    {t('accounts.modal.alsoConnectInstagram', { username: page.instagram.username })}
                   </label>
                 )}
               </div>
@@ -355,44 +417,43 @@ export function ConnectedAccountsPage() {
             (selection.options as LinkedInOAuthOption[]).map((opt) => (
               <label key={opt.id} className="flex items-center gap-2 rounded-lg border border-slate-200 p-3 text-sm font-medium text-slate-900 dark:border-slate-700 dark:text-white">
                 <input type="checkbox" checked={!!checked[opt.id]} onChange={(e) => setChecked({ ...checked, [opt.id]: e.target.checked })} />
-                {opt.name} <span className="text-xs font-normal text-slate-500">{opt.type === 'personal' ? '(Personal profile)' : '(Company Page)'}</span>
+                {opt.name} <span className="text-xs font-normal text-slate-500">{opt.type === 'personal' ? t('accounts.modal.personalProfile') : t('accounts.modal.companyPage')}</span>
               </label>
             ))}
-          {selection && selection.options.length === 0 && <p className="text-sm text-slate-500">Nothing found to connect.</p>}
+          {selection && selection.options.length === 0 && <p className="text-sm text-slate-500">{t('accounts.modal.nothingToConnect')}</p>}
         </div>
       </Modal>
 
       <Modal
         open={showTelegram}
         onClose={() => setShowTelegram(false)}
-        title="Connect Telegram"
-        description="Create a bot with @BotFather, add it as an admin to your channel/group, then paste its token and the chat ID below."
+        title={t('accounts.modal.connectTelegram')}
+        description={t('accounts.modal.connectTelegramDesc')}
         size="md"
-        footer={<><Button variant="outline" onClick={() => setShowTelegram(false)}>Cancel</Button><Button onClick={handleTelegramConnect} loading={connectingTelegram}>Connect</Button></>}
+        footer={<><Button variant="outline" onClick={() => setShowTelegram(false)}>{t('common.cancel')}</Button><Button onClick={handleTelegramConnect} loading={connectingTelegram}>{t('accounts.modal.connect')}</Button></>}
       >
         <div className="space-y-4">
-          <Input label="Bot Token" type="password" value={telegramForm.botToken} onChange={(e) => setTelegramForm({ ...telegramForm, botToken: e.target.value })} placeholder="123456789:AA…" />
-          <Input label="Chat ID or @channelusername" value={telegramForm.chatId} onChange={(e) => setTelegramForm({ ...telegramForm, chatId: e.target.value })} placeholder="@mychannel or -1001234567890" />
-          <p className="text-xs text-slate-500 dark:text-slate-400">We verify the bot token and confirm it can access this chat before connecting.</p>
+          <Input label={t('accounts.modal.botToken')} type="password" value={telegramForm.botToken} onChange={(e) => setTelegramForm({ ...telegramForm, botToken: e.target.value })} placeholder="123456789:AA…" />
+          <Input label={t('accounts.modal.chatId')} value={telegramForm.chatId} onChange={(e) => setTelegramForm({ ...telegramForm, chatId: e.target.value })} placeholder="@mychannel or -1001234567890" />
+          <p className="text-xs text-slate-500 dark:text-slate-400">{t('accounts.modal.telegramVerifyNote')}</p>
         </div>
       </Modal>
 
       <Modal
         open={showWhatsApp}
         onClose={() => setShowWhatsApp(false)}
-        title="Connect WhatsApp Business"
-        description="From Meta Business Manager, provision a System User access token and the phone number ID for your WhatsApp Business Account."
+        title={t('accounts.modal.connectWhatsapp')}
+        description={t('accounts.modal.connectWhatsappDesc')}
         size="md"
-        footer={<><Button variant="outline" onClick={() => setShowWhatsApp(false)}>Cancel</Button><Button onClick={handleWhatsAppConnect} loading={connectingWhatsApp}>Connect</Button></>}
+        footer={<><Button variant="outline" onClick={() => setShowWhatsApp(false)}>{t('common.cancel')}</Button><Button onClick={handleWhatsAppConnect} loading={connectingWhatsApp}>{t('accounts.modal.connect')}</Button></>}
       >
         <div className="space-y-4">
-          <Input label="System User Access Token" type="password" value={whatsappForm.accessToken} onChange={(e) => setWhatsappForm({ ...whatsappForm, accessToken: e.target.value })} placeholder="EAAB…" />
-          <Input label="Phone Number ID" value={whatsappForm.phoneNumberId} onChange={(e) => setWhatsappForm({ ...whatsappForm, phoneNumberId: e.target.value })} placeholder="1234567890" />
-          <Input label="WhatsApp Business Account ID (optional)" value={whatsappForm.wabaId} onChange={(e) => setWhatsappForm({ ...whatsappForm, wabaId: e.target.value })} placeholder="1234567890" />
-          <Input label="Default recipient number" value={whatsappForm.defaultRecipient} onChange={(e) => setWhatsappForm({ ...whatsappForm, defaultRecipient: e.target.value })} placeholder="+201234567890" />
+          <Input label={t('accounts.modal.systemUserToken')} type="password" value={whatsappForm.accessToken} onChange={(e) => setWhatsappForm({ ...whatsappForm, accessToken: e.target.value })} placeholder="EAAB…" />
+          <Input label={t('accounts.modal.phoneNumberId')} value={whatsappForm.phoneNumberId} onChange={(e) => setWhatsappForm({ ...whatsappForm, phoneNumberId: e.target.value })} placeholder="1234567890" />
+          <Input label={t('accounts.modal.wabaId')} value={whatsappForm.wabaId} onChange={(e) => setWhatsappForm({ ...whatsappForm, wabaId: e.target.value })} placeholder="1234567890" />
+          <Input label={t('accounts.modal.defaultRecipient')} value={whatsappForm.defaultRecipient} onChange={(e) => setWhatsappForm({ ...whatsappForm, defaultRecipient: e.target.value })} placeholder="+201234567890" />
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            WhatsApp has no public feed — posts to this account are sent as messages to the recipient above (or a per-post recipient), and must use an approved Message
-            Template outside an open 24-hour customer conversation.
+            {t('accounts.modal.whatsappNote')}
           </p>
         </div>
       </Modal>
@@ -400,24 +461,83 @@ export function ConnectedAccountsPage() {
       <Modal
         open={showConnect}
         onClose={() => setShowConnect(false)}
-        title="Connect Manually"
-        description="Advanced: paste an access token directly, for platforms without OAuth set up yet."
+        title={t('accounts.modal.connectManually')}
+        description={t('accounts.modal.connectManuallyDesc')}
         size="md"
-        footer={<><Button variant="outline" onClick={() => setShowConnect(false)}>Cancel</Button><Button onClick={handleConnect} loading={connecting}>Connect</Button></>}
+        footer={<><Button variant="outline" onClick={() => setShowConnect(false)}>{t('common.cancel')}</Button><Button onClick={handleConnect} loading={connecting}>{t('accounts.modal.connect')}</Button></>}
       >
         <div className="space-y-4">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Platform</label>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('accounts.modal.platform')}</label>
             <select value={connectForm.platform} onChange={(e) => setConnectForm({ ...connectForm, platform: e.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
               {PLATFORM_DEFINITIONS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
           </div>
-          <Input label="Handle (optional)" value={connectForm.handle} onChange={(e) => setConnectForm({ ...connectForm, handle: e.target.value })} placeholder="@yourbrand" />
-          <Input label="Provider Account ID" value={connectForm.providerAccountId} onChange={(e) => setConnectForm({ ...connectForm, providerAccountId: e.target.value })} placeholder="123456789" />
-          <Input label="Access Token" type="password" value={connectForm.accessToken} onChange={(e) => setConnectForm({ ...connectForm, accessToken: e.target.value })} placeholder="EAAB…" />
-          <p className="text-xs text-slate-500 dark:text-slate-400">Your access token is stored server-side and never exposed back to the browser.</p>
+          <Input label={t('accounts.modal.handleOptional')} value={connectForm.handle} onChange={(e) => setConnectForm({ ...connectForm, handle: e.target.value })} placeholder="@yourbrand" />
+          <Input label={t('accounts.modal.providerAccountId')} value={connectForm.providerAccountId} onChange={(e) => setConnectForm({ ...connectForm, providerAccountId: e.target.value })} placeholder="123456789" />
+          <Input label={t('accounts.modal.accessToken')} type="password" value={connectForm.accessToken} onChange={(e) => setConnectForm({ ...connectForm, accessToken: e.target.value })} placeholder="EAAB…" />
+          <p className="text-xs text-slate-500 dark:text-slate-400">{t('accounts.modal.tokenStorageNote')}</p>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+function ConnectTile({
+  platformId,
+  label,
+  sublabel,
+  onClick,
+  loading = false,
+  disabled = false,
+}: {
+  platformId: string;
+  label: string;
+  sublabel?: string;
+  onClick: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+}) {
+  const meta = getPlatformMeta(platformId);
+  const Icon = meta?.icon ?? Loader2;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || loading}
+      title={sublabel ? `${label} — ${sublabel}` : label}
+      className="press-effect group relative flex flex-col items-center gap-2 rounded-xl border border-slate-200 bg-white p-4 text-center shadow-subtle transition-all duration-150 ease-snappy hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-subtle dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:focus-visible:ring-offset-slate-950"
+    >
+      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 transition-colors duration-150 group-hover:bg-slate-200 dark:bg-slate-800 dark:group-hover:bg-slate-700">
+        {loading ? (
+          <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
+        ) : (
+          <Icon className={`h-5 w-5 ${meta?.color ?? 'text-slate-500'}`} />
+        )}
+      </span>
+      <span className="text-xs font-semibold leading-tight text-slate-900 dark:text-white">{label}</span>
+      <span className="absolute end-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-slate-900 text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 dark:bg-white dark:text-slate-900">
+        <Plus className="h-2.5 w-2.5" />
+      </span>
+    </button>
+  );
+}
+
+function CardSkeletonAccount() {
+  return (
+    <div className="animate-fade-in rounded-xl border border-slate-200 bg-white p-5 shadow-subtle dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex items-center gap-3">
+        <Skeleton className="h-10 w-10 shrink-0 rounded-lg" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-3.5 w-2/5" />
+          <Skeleton className="h-3 w-1/3" />
+        </div>
+      </div>
+      <div className="mt-4 space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+        <Skeleton className="h-3 w-full" />
+        <Skeleton className="h-3 w-full" />
+        <Skeleton className="h-3 w-2/3" />
+      </div>
     </div>
   );
 }
@@ -439,6 +559,7 @@ function AccountCard({
   refreshing: boolean;
   syncing: boolean;
 }) {
+  const { t } = useLanguage();
   const meta = getPlatformMeta(account.platform);
   return (
     <Card>
@@ -449,23 +570,23 @@ function AccountCard({
           </div>
           <div>
             <p className="text-sm font-semibold text-slate-900 dark:text-white">{platformLabelFallback(account.platform)}</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">{account.handle ?? 'Connected'}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{account.handle ?? t('accounts.card.connectedFallback')}</p>
           </div>
         </div>
         <HealthBadge status={account.health_status} />
       </div>
       <div className="mt-4 space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
         <div className="flex items-center justify-between text-xs">
-          <span className="text-slate-500 dark:text-slate-400">Status</span>
+          <span className="text-slate-500 dark:text-slate-400">{t('accounts.card.status')}</span>
           <Badge variant={account.status === 'connected' ? 'success' : 'error'}>{account.status}</Badge>
         </div>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-slate-500 dark:text-slate-400">Sync</span>
+          <span className="text-slate-500 dark:text-slate-400">{t('accounts.card.sync')}</span>
           <Badge variant={account.sync_status === 'synced' ? 'success' : account.sync_status === 'error' ? 'error' : 'default'}>{account.sync_status}</Badge>
         </div>
         {account.token_expires_at && (
           <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-500 dark:text-slate-400">Token expires</span>
+            <span className="text-slate-500 dark:text-slate-400">{t('accounts.card.tokenExpires')}</span>
             <span className={isExpiringSoon(account.token_expires_at) ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}>
               {formatDate(account.token_expires_at)}
             </span>
@@ -473,26 +594,26 @@ function AccountCard({
         )}
         {!account.token_expires_at && !meta?.supportsRefresh && (
           <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-500 dark:text-slate-400">Token</span>
-            <span className="text-slate-700 dark:text-slate-300">Doesn't expire</span>
+            <span className="text-slate-500 dark:text-slate-400">{t('accounts.card.token')}</span>
+            <span className="text-slate-700 dark:text-slate-300">{t('accounts.card.noExpiry')}</span>
           </div>
         )}
         <div className="flex items-center justify-between text-xs">
-          <span className="text-slate-500 dark:text-slate-400">Connected</span>
+          <span className="text-slate-500 dark:text-slate-400">{t('accounts.card.connectedAt')}</span>
           <span className="text-slate-700 dark:text-slate-300">{formatDate(account.created_at)}</span>
         </div>
         <div className="flex flex-wrap gap-2 pt-2">
           {account.status === 'connected' && meta?.supportsRefresh && (
             <Button size="sm" variant="outline" onClick={onRefresh} loading={refreshing}>
-              <RefreshCw className="h-3.5 w-3.5" /> Refresh token
+              <RefreshCw className="h-3.5 w-3.5" /> {t('accounts.card.refreshToken')}
             </Button>
           )}
           {account.status === 'connected' && (
             <Button size="sm" variant="outline" onClick={onSync} loading={syncing}>
-              <RotateCw className="h-3.5 w-3.5" /> Sync
+              <RotateCw className="h-3.5 w-3.5" /> {t('accounts.card.syncAction')}
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={onDisconnect}>Disconnect</Button>
+          <Button size="sm" variant="outline" onClick={onDisconnect}>{t('accounts.card.disconnect')}</Button>
           <Button size="sm" variant="ghost" onClick={onRemove}><Trash2 className="h-3.5 w-3.5" /></Button>
         </div>
       </div>
@@ -512,8 +633,9 @@ function PlatformIcon({ platform }: { platform: string }) {
 }
 
 function HealthBadge({ status }: { status: string }) {
-  if (status === 'healthy') return <Badge variant="success"><CheckCircle2 className="mr-1 h-3 w-3" /> Healthy</Badge>;
-  if (status === 'warning') return <Badge variant="warning">Warning</Badge>;
-  if (status === 'error') return <Badge variant="error"><XCircle className="mr-1 h-3 w-3" /> Error</Badge>;
-  return <Badge>Unknown</Badge>;
+  const { t } = useLanguage();
+  if (status === 'healthy') return <Badge variant="success"><CheckCircle2 className="me-1 h-3 w-3" /> {t('accounts.card.healthy')}</Badge>;
+  if (status === 'warning') return <Badge variant="warning">{t('accounts.card.warning')}</Badge>;
+  if (status === 'error') return <Badge variant="error"><XCircle className="me-1 h-3 w-3" /> {t('accounts.card.error')}</Badge>;
+  return <Badge>{t('accounts.card.unknown')}</Badge>;
 }

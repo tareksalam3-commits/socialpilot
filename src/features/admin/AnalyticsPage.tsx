@@ -19,7 +19,7 @@ export function AnalyticsPage() {
         setSummary(s);
         setCredits(c);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load analytics'))
+      .catch((e) => setError(e instanceof Error ? e.message : t('admin.error.loadAnalyticsFailed')))
       .finally(() => setLoading(false));
   };
 

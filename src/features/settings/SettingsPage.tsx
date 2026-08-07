@@ -245,8 +245,8 @@ function WorkspaceTab() {
   return (
     <Card title={t('settings.workspace.title')} description={t('settings.workspace.description')}>
       <div className="space-y-4">
-        <Input label={t('settings.workspace.name')} value={name} onChange={(e) => setName(e.target.value)} placeholder="My Workspace" />
-        <Input label={t('settings.workspace.brandName')} value={brandName} onChange={(e) => setBrandName(e.target.value)} placeholder="Acme Inc." />
+        <Input label={t('settings.workspace.name')} value={name} onChange={(e) => setName(e.target.value)} placeholder={t('settings.workspace.namePlaceholder')} />
+        <Input label={t('settings.workspace.brandName')} value={brandName} onChange={(e) => setBrandName(e.target.value)} placeholder={t('settings.workspace.brandNamePlaceholder')} />
         <Input label={t('settings.workspace.logoUrl')} value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…" />
         <div>
           <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('settings.workspace.contentLanguage')}</label>
@@ -375,14 +375,14 @@ function SecurityTab() {
             type={show ? 'text' : 'password'}
             value={next}
             onChange={(e) => setNext(e.target.value)}
-            placeholder="At least 6 characters"
+            placeholder={t('settings.password.newPlaceholder')}
           />
           <Input
             label={t('settings.security.confirmNewPassword')}
             type={show ? 'text' : 'password'}
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
-            placeholder="Re-enter new password"
+            placeholder={t('settings.password.confirmPlaceholder')}
           />
           <div className="flex items-center justify-between">
             <button

@@ -328,7 +328,7 @@ export function ContentStudioPage() {
             {output ? (
               <div>
                 <MarkdownRenderer content={output} />
-                {streaming && <span className="ml-1 inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
+                {streaming && <span className="ms-1 inline-block h-3 w-1.5 animate-pulse bg-slate-400" />}
                 {!streaming && model && (
                   <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
                     <Badge variant="info">{model}</Badge>

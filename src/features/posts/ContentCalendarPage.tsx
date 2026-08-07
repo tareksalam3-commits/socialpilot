@@ -154,7 +154,7 @@ export function ContentCalendarPage() {
                   {dayPosts.slice(0, 3).map((p) => (
                     <div key={p.id} draggable onDragStart={(e) => e.dataTransfer.setData('text/plain', p.id)} onClick={() => setSelectedPost(p)} className={`cursor-move rounded border px-1.5 py-1 text-xs ${statusColors[p.status] ?? statusColors.draft}`}>
                       <p className="truncate">{p.title ?? (p.content.slice(0, 30) || t('calendar.untitled'))}</p>
-                      {p.platforms.slice(0, 2).map((pl) => <span key={pl} className={`mr-1 inline-block rounded px-1 text-[10px] ${platformColor(pl)}`}>{pl.slice(0, 2)}</span>)}
+                      {p.platforms.slice(0, 2).map((pl) => <span key={pl} className={`me-1 inline-block rounded px-1 text-[10px] ${platformColor(pl)}`}>{pl.slice(0, 2)}</span>)}
                     </div>
                   ))}
                   {dayPosts.length > 3 && <p className="text-xs text-slate-400">{t('calendar.morePosts', { count: dayPosts.length - 3 })}</p>}

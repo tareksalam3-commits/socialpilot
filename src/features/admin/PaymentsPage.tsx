@@ -23,7 +23,7 @@ export function PaymentsPage() {
     paymentsRepository
       .list()
       .then(setRows)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load payments'))
+      .catch((e) => setError(e instanceof Error ? e.message : t('admin.error.loadPaymentsFailed')))
       .finally(() => setLoading(false));
   };
 
