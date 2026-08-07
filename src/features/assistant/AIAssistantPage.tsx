@@ -4,12 +4,14 @@ import {
   Bot,
   Calendar,
   CheckCircle2,
+  Database,
   Image as ImageIcon,
   Link2,
   Loader2,
   Plus,
   RefreshCw,
   Send,
+  ShieldCheck,
   Sparkles,
   Trash2,
   Wand2,
@@ -26,9 +28,16 @@ import { usePosts } from '@/hooks/usePosts';
 import { publishingService } from '@/services/publishingService';
 import { conversationRepository, messageRepository } from '@/repositories/conversationRepository';
 import { supabase } from '@/services/supabase';
-import { runPlannerAgent, runCreatorAgent, computeScheduleTimes, findMatchingMedia } from '@/services/assistantOrchestrator';
+import {
+  runPlannerAgent,
+  runCreatorAgent,
+  computeScheduleTimes,
+  findMatchingMedia,
+  collectContentContext,
+  verifyPost,
+} from '@/services/assistantOrchestrator';
 import { Badge, Button, Card, EmptyState } from '@/ui';
-import type { CampaignPlan, DraftPost, AssistantStage, MonitoredPost } from '@/types/assistant';
+import type { CampaignPlan, DraftPost, AssistantStage, MonitoredPost, UsedContentSource } from '@/types/assistant';
 import type { Post } from '@/types/social';
 import { PLATFORM_IDS, getPlatformMeta, platformLabelFallback } from '@/constants/platforms';
 
@@ -78,6 +87,8 @@ export function AIAssistantPage() {
   const [drafts, setDrafts] = useState<DraftPost[]>([]);
   const [monitored, setMonitored] = useState<MonitoredPost[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [usedSources, setUsedSources] = useState<UsedContentSource[]>([]);
+  const contentTextRef = useRef<string | null>(null);
   const runIdRef = useRef(0);
 
   const connectedPlatforms = useMemo(
@@ -103,6 +114,15 @@ export function AIAssistantPage() {
         if (prevEntry.status === updated.status) return prev;
         if (updated.status === 'published') {
           push({ title: t('assistant.toast.postPublished'), description: prevEntry.title, variant: 'success' });
+          // Verified step: confirm every platform target actually stored a
+          // platform post ID before showing the "Verified" badge — reuses
+          // the same post_platform_targets rows the Publishing Engine wrote.
+          verifyPost(updated.id)
+            .then((ok) => {
+              if (!ok) return;
+              setMonitored((cur) => cur.map((m) => (m.postId === updated.id ? { ...m, verified: true } : m)));
+            })
+            .catch(() => {});
         } else if (updated.status === 'failed') {
           push({ title: t('assistant.toast.postFailed'), description: updated.error_message ?? prevEntry.title, variant: 'error' });
         }
@@ -134,6 +154,8 @@ export function AIAssistantPage() {
     setConversationId(null);
     setRequestText('');
     setCreatingProgress({ done: 0, total: 0 });
+    setUsedSources([]);
+    contentTextRef.current = null;
   }, []);
 
   const runPipeline = useCallback(async () => {
@@ -145,6 +167,7 @@ export function AIAssistantPage() {
     setDrafts([]);
     setMonitored([]);
     setPlanWarning(null);
+    setUsedSources([]);
 
     // Best-effort thread so this run shows up alongside Playground
     // conversations in AI History — never blocks the pipeline.
@@ -164,13 +187,32 @@ export function AIAssistantPage() {
     setPlan(newPlan);
     if (plannerError) setPlanWarning(t('assistant.plan.fallbackWarning'));
 
-    // 2. Creator Agent — automatically chained, no user action needed here.
+    // 2. Content Sources step — collect, clean and summarize only when the
+    // request implies it. Reuses the Content Sources module end-to-end.
+    let contentText: string | null = null;
+    if (newPlan.use_content_sources) {
+      setStage('collecting');
+      const { contentText: text, used, error: sourcesError } = await collectContentContext(workspace.id);
+      if (runIdRef.current !== runId) return;
+      contentText = text;
+      contentTextRef.current = text;
+      setUsedSources(used);
+      if (sourcesError === 'no_sources') {
+        push({ title: t('assistant.toast.noContentSources'), variant: 'error' });
+      } else if (sourcesError === 'no_new_items') {
+        push({ title: t('assistant.toast.noNewContentItems'), variant: 'error' });
+      } else if (sourcesError) {
+        push({ title: t('assistant.toast.contentSourcesFailed'), description: sourcesError, variant: 'error' });
+      }
+    }
+
+    // 3. Creator Agent — automatically chained, no user action needed here.
     setStage('creating');
     setCreatingProgress({ done: 0, total: newPlan.post_count });
     const scheduleTimes = computeScheduleTimes(newPlan, newPlan.post_count);
     const created: DraftPost[] = [];
     for (let i = 0; i < newPlan.post_count; i++) {
-      const { content, error } = await runCreatorAgent(workspace.id, newPlan, i, aiParams);
+      const { content, error } = await runCreatorAgent(workspace.id, newPlan, i, aiParams, contentText);
       if (runIdRef.current !== runId) return;
       const finalContent = content || t('assistant.draft.generationFailedPlaceholder');
       if (error) push({ title: t('assistant.toast.postGenerationIssue', { index: i + 1 }), description: error, variant: 'error' });
@@ -186,7 +228,7 @@ export function AIAssistantPage() {
       setDrafts([...created]);
     }
 
-    // 3. Publisher Agent — build the preview. Nothing is saved yet.
+    // 4. Publisher Agent — build the preview. Nothing is saved yet.
     setStage('preparing');
     await new Promise((r) => setTimeout(r, 250));
     if (runIdRef.current !== runId) return;
@@ -217,7 +259,7 @@ export function AIAssistantPage() {
     const index = drafts.findIndex((d) => d.local_id === localId);
     if (index === -1) return;
     updateDraft(localId, { generating: true });
-    const { content, error } = await runCreatorAgent(workspace.id, plan, index, aiParams);
+    const { content, error } = await runCreatorAgent(workspace.id, plan, index, aiParams, contentTextRef.current);
     if (error) {
       push({ title: t('assistant.toast.regenerateFailed'), description: error, variant: 'error' });
       updateDraft(localId, { generating: false });
@@ -250,7 +292,10 @@ export function AIAssistantPage() {
         push({ title: t('assistant.toast.saveFailed'), description: draft.content.slice(0, 60), variant: 'error' });
         continue;
       }
-      results.push({ postId: post.id, title: post.title ?? deriveTitle(draft.content), status: post.status, error_message: null });
+      // Saving here already puts the post on the Calendar, the Publishing
+      // Queue and the Posts list — they all read the same `posts` row live,
+      // so there is nothing extra to "add" it to.
+      results.push({ postId: post.id, title: post.title ?? deriveTitle(draft.content), status: post.status, error_message: null, verified: false });
 
       // Due-now posts get published immediately instead of waiting on the
       // once-a-minute scheduler, using the same edge function Manual
@@ -323,8 +368,24 @@ export function AIAssistantPage() {
         <Card>
           <div className="flex flex-wrap items-center gap-4">
             <PipelineStep icon={Bot} label={t('assistant.stage.planning')} active={stage === 'planning'} done={stage !== 'planning'} />
+            {plan?.use_content_sources && (
+              <>
+                <StepConnector />
+                <PipelineStep
+                  icon={Database}
+                  label={t('assistant.stage.collecting')}
+                  active={stage === 'collecting'}
+                  done={!['planning', 'collecting'].includes(stage)}
+                />
+              </>
+            )}
             <StepConnector />
-            <PipelineStep icon={Wand2} label={t('assistant.stage.creating')} active={stage === 'creating'} done={!['planning', 'creating'].includes(stage)} />
+            <PipelineStep
+              icon={Wand2}
+              label={t('assistant.stage.creating')}
+              active={stage === 'creating'}
+              done={!['planning', 'collecting', 'creating'].includes(stage)}
+            />
             <StepConnector />
             <PipelineStep
               icon={Calendar}
@@ -333,11 +394,32 @@ export function AIAssistantPage() {
               done={stage === 'review' || stage === 'monitoring'}
             />
           </div>
+          {stage === 'collecting' && (
+            <p className="mt-3 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <Loader2 className="h-3 w-3 animate-spin" /> {t('assistant.stage.collectingHint')}
+            </p>
+          )}
           {stage === 'creating' && creatingProgress.total > 0 && (
             <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
               {t('assistant.stage.creatingProgress', { done: creatingProgress.done, total: creatingProgress.total })}
             </p>
           )}
+        </Card>
+      )}
+
+      {usedSources.length > 0 && stage !== 'idle' && (
+        <Card title={t('assistant.sources.title')} description={t('assistant.sources.description')}>
+          <ul className="space-y-1.5">
+            {usedSources.map((s, i) => (
+              <li key={`${s.source_id}-${i}`} className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300">
+                <Database className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                <span className="min-w-0 truncate">
+                  {s.title}
+                  {s.source_name && <span className="text-slate-400"> — {s.source_name}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
         </Card>
       )}
 
@@ -409,7 +491,7 @@ export function AIAssistantPage() {
 
                   <div className="mt-3 flex flex-wrap items-center gap-4">
                     <div className="flex flex-wrap gap-1.5">
-                      {ALL_PLATFORMS.map((p) => {
+                      {(connectedPlatforms.length ? connectedPlatforms : ALL_PLATFORMS).map((p) => {
                         const Icon = getPlatformMeta(p)?.icon ?? Link2;
                         const active = draft.platforms.includes(p);
                         return (
@@ -472,9 +554,16 @@ export function AIAssistantPage() {
                     <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{m.title}</p>
                     {m.error_message && <p className="mt-0.5 truncate text-xs text-rose-600 dark:text-rose-400">{m.error_message}</p>}
                   </div>
-                  <Badge variant={statusVariant(m.status)} dot>
-                    {t(`post.status.${m.status}`)}
-                  </Badge>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {m.verified && (
+                      <span className="flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                        <ShieldCheck className="h-3.5 w-3.5" /> {t('assistant.monitor.verified')}
+                      </span>
+                    )}
+                    <Badge variant={statusVariant(m.status)} dot>
+                      {t(`post.status.${m.status}`)}
+                    </Badge>
+                  </div>
                 </li>
               ))}
             </ul>
