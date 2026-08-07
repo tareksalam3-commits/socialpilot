@@ -9,6 +9,7 @@ const corsHeaders = {
 const REQUEST_TIMEOUT_MS = 60_000;
 const MODELS_TIMEOUT_MS = 15_000;
 const TEST_TIMEOUT_MS = 10_000;
+const IMAGE_TIMEOUT_MS = 45_000;
 const MAX_MODEL_ATTEMPTS_PER_PROVIDER = 3;
 const RETRY_DELAY_MS = 600;
 
@@ -30,6 +31,21 @@ type ChatRequestBody = {
   // block so the model treats it as reference material for the user's prompt,
   // separate from brand voice instructions.
   content_text?: string | null;
+};
+
+// AI-generated post images (the Assistant's "Create Images" step) — a
+// no-API-key text-to-image endpoint, kept separate from the
+// PROVIDER_CATALOG chat providers above since none of them expose image
+// generation over an OpenAI-compatible endpoint. Images are streamed
+// straight into the workspace's existing `media` Storage bucket, so the
+// result is a normal Media Library item like any manual upload.
+const IMAGE_PROVIDER_BASE_URL = 'https://image.pollinations.ai/prompt';
+
+type ImageRequestBody = {
+  workspace_id: string;
+  prompt: string;
+  width?: number;
+  height?: number;
 };
 
 type ModelInfo = {
@@ -628,6 +644,43 @@ async function handleTestConnection(
   }
 }
 
+// Generates one image for the AI Assistant's campaign pipeline and stores it
+// in the workspace's existing `media` bucket — never returns a bare remote
+// URL, so every generated image shows up in the Media Library exactly like
+// a manually uploaded file (same table, same bucket, same RLS) rather than
+// creating a parallel "AI images" concept.
+async function handleImageGeneration(
+  supabase: ReturnType<typeof createClient>,
+  body: ImageRequestBody,
+): Promise<Response> {
+  const prompt = (body.prompt || '').trim();
+  if (!prompt) return errorResponse('prompt is required', 400);
+
+  const width = Math.min(1440, Math.max(256, Math.round(body.width || 1024)));
+  const height = Math.min(1440, Math.max(256, Math.round(body.height || 1024)));
+  const seed = Math.floor(Math.random() * 1_000_000_000);
+  const imageUrl = `${IMAGE_PROVIDER_BASE_URL}/${encodeURIComponent(prompt)}?width=${width}&height=${height}&nologo=true&seed=${seed}`;
+
+  let bytes: ArrayBuffer;
+  try {
+    const res = await fetchWithTimeout(imageUrl, { method: 'GET' }, IMAGE_TIMEOUT_MS);
+    if (!res.ok) return errorResponse(`Image generation failed (${res.status})`, 502);
+    bytes = await res.arrayBuffer();
+  } catch (e) {
+    return errorResponse(e instanceof Error ? e.message : 'Image generation timed out', 502);
+  }
+
+  const path = `${body.workspace_id}/ai-generated/${Date.now()}-${seed}.png`;
+  const { error: uploadError } = await supabase.storage.from('media').upload(path, bytes, {
+    contentType: 'image/png',
+    upsert: false,
+  });
+  if (uploadError) return errorResponse(`Could not save generated image: ${uploadError.message}`, 500);
+
+  const { data: urlData } = supabase.storage.from('media').getPublicUrl(path);
+  return jsonResponse({ url: urlData.publicUrl, width, height, provider: 'pollinations' });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -697,7 +750,14 @@ Deno.serve(async (req: Request) => {
       return await handleChatCompletion(supabase, body, settings, providerKeys, callerId);
     }
 
-    return errorResponse('Unknown action. Use ?action=chat|models|test|providers', 400);
+    if (action === 'image') {
+      const body: ImageRequestBody = await req.json();
+      if (!body.workspace_id) return errorResponse('workspace_id is required', 400);
+      if (!(await isWorkspaceMember(supabase, body.workspace_id, callerId))) return errorResponse('Forbidden', 403);
+      return await handleImageGeneration(supabase, body);
+    }
+
+    return errorResponse('Unknown action. Use ?action=chat|image|models|test|providers', 400);
   } catch (err) {
     return errorResponse(err instanceof Error ? err.message : 'Internal server error', 500);
   }

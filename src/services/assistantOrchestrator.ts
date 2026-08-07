@@ -4,6 +4,7 @@ import { brandVoiceRepository } from '@/repositories/brandVoiceRepository';
 import { contentSourceRepository } from '@/repositories/contentSourceRepository';
 import { contentExtraction } from '@/services/contentExtraction';
 import { postRepository } from '@/repositories/postRepository';
+import { mediaRepository } from '@/repositories/mediaRepository';
 import type { ChatMessage } from '@/types/ai';
 import type { MediaItem } from '@/types/social';
 import type { CampaignPlan, Cadence, CampaignStart, UsedContentSource } from '@/types/assistant';
@@ -284,6 +285,31 @@ export async function verifyPost(postId: string): Promise<boolean> {
   const targets = await postRepository.getTargets(postId);
   if (targets.length === 0) return false;
   return targets.every((t) => t.status === 'published' && !!t.external_id);
+}
+
+/** The "Create Images" step of the pipeline. Only called when the Media
+ * Library has no usable match (findMatchingMedia comes back empty) and the
+ * user enabled image generation — the assistant prefers reusing existing
+ * brand assets over generating new ones. Saves the result through
+ * mediaRepository.create so the generated image is a normal Media Library
+ * item afterwards (searchable, reusable, deletable) rather than a one-off
+ * URL only this campaign knows about. Never throws — a failed image
+ * generation should degrade to "no image" rather than break the post. */
+export async function generateDraftImage(
+  workspaceId: string,
+  plan: CampaignPlan,
+  postContent: string,
+): Promise<{ url: string | null; error: string | null }> {
+  const prompt = `Professional, brand-safe social media photo. Campaign: ${plan.objective}. Audience: ${plan.audience}. Context: ${postContent.slice(0, 200)}. No embedded text, no watermark, no logos.`;
+  try {
+    const { url } = await aiGateway.generateImage({ workspaceId, prompt, width: 1024, height: 1024 });
+    mediaRepository
+      .create({ workspace_id: workspaceId, name: `${plan.objective.slice(0, 40) || 'AI campaign'} — AI image`, type: 'image', url, tags: ['ai-generated', 'assistant'] })
+      .catch(() => {});
+    return { url, error: null };
+  } catch (e) {
+    return { url: null, error: e instanceof Error ? e.message : 'Image generation failed' };
+  }
 }
 
 /** Best-effort image match against the workspace Media Library — the

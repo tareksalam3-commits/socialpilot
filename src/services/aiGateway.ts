@@ -111,6 +111,28 @@ export const aiGateway = {
     };
   },
 
+  // Generates one image and returns its public URL — the edge function
+  // already saved it into the workspace's `media` Storage bucket, so the
+  // only thing left for the caller to do is register it as a MediaItem
+  // (mediaRepository.create) if it should show up in the Media Library.
+  async generateImage(opts: { workspaceId: string; prompt: string; width?: number; height?: number }): Promise<{ url: string; width: number; height: number }> {
+    const res = await fetch(`${FUNCTION_URL}?action=image`, {
+      method: 'POST',
+      headers: await getAuthHeaders(),
+      body: JSON.stringify({
+        workspace_id: opts.workspaceId,
+        prompt: opts.prompt,
+        width: opts.width,
+        height: opts.height,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Image generation failed' }));
+      throw new Error(err.error ?? `Request failed (${res.status})`);
+    }
+    return await res.json();
+  },
+
   // Provider/model management is platform-wide (Super Admin only) — no
   // workspace_id here, the edge function checks is_super_admin() instead.
   async listModels(provider?: string): Promise<{ models: ModelInfo[]; free_count: number; total_count: number }> {

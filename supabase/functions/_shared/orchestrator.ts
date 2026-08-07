@@ -5,6 +5,32 @@ export async function log(supabase: SupabaseClient, row: { workspace_id: string;
   await supabase.from('publishing_logs').insert(row);
 }
 
+/** Seeds the Analytics module the moment a target actually publishes —
+ * the Analytics page (`useAnalytics`) already reads `post_analytics`, but
+ * nothing ever inserted a row into it, so it stayed empty forever. This
+ * writes the zeroed baseline row for that platform right after a
+ * successful publish; a later account-sync pass can update the same row
+ * with real reach/engagement once the platform APIs report it. Best-effort
+ * — never blocks or fails the publish itself. */
+async function seedPostAnalytics(supabase: SupabaseClient, workspaceId: string, postId: string, platform: string) {
+  try {
+    await supabase.from('post_analytics').insert({
+      post_id: postId,
+      workspace_id: workspaceId,
+      platform,
+      reach: 0,
+      impressions: 0,
+      engagement: 0,
+      clicks: 0,
+      likes: 0,
+      comments: 0,
+      shares: 0,
+    });
+  } catch {
+    // analytics seeding is best-effort and must never fail a publish
+  }
+}
+
 export async function getAccountForTarget(supabase: SupabaseClient, accountId: string, callerId: string | null) {
   const { data: account } = await supabase.from('connected_accounts').select('provider_account_id, workspace_id, metadata').eq('id', accountId).maybeSingle();
   const { data: tokens } = await supabase.rpc('get_account_tokens', { p_account_id: accountId, p_caller_id: callerId });
@@ -62,6 +88,7 @@ export async function retryTarget(
       updated_at: new Date().toISOString(),
     }).eq('id', targetId);
     await log(supabase, { workspace_id: workspaceId, post_id: post.id as string, target_id: targetId, platform: target.platform as string, event: 'success' });
+    await seedPostAnalytics(supabase, workspaceId, post.id as string, target.platform as string);
 
     const { data: siblings } = await supabase.from('post_platform_targets').select('status').eq('post_id', post.id as string);
     if (siblings?.every((s) => s.status === 'published')) {
@@ -147,6 +174,7 @@ export async function publishPost(supabase: SupabaseClient, post: Record<string,
       }).eq('id', target.id);
 
       await log(supabase, { workspace_id: workspaceId, post_id: postId, target_id: target.id, platform: target.platform, event: 'success' });
+      await seedPostAnalytics(supabase, workspaceId, postId, target.platform);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unknown error';
       const retryCount = (target.retry_count as number) ?? 0;

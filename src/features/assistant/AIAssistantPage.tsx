@@ -33,6 +33,7 @@ import {
   runCreatorAgent,
   computeScheduleTimes,
   findMatchingMedia,
+  generateDraftImage,
   collectContentContext,
   verifyPost,
 } from '@/services/assistantOrchestrator';
@@ -216,7 +217,24 @@ export function AIAssistantPage() {
       if (runIdRef.current !== runId) return;
       const finalContent = content || t('assistant.draft.generationFailedPlaceholder');
       if (error) push({ title: t('assistant.toast.postGenerationIssue', { index: i + 1 }), description: error, variant: 'error' });
-      const media_urls = imagesEnabled ? [findMatchingMedia(`${newPlan.objective} ${finalContent}`, mediaItems)].filter((u): u is string => !!u) : [];
+
+      // Create Images step: reuse a matching Media Library asset first —
+      // only generate a brand-new AI image when nothing already fits.
+      let media_urls: string[] = [];
+      if (imagesEnabled) {
+        const matched = findMatchingMedia(`${newPlan.objective} ${finalContent}`, mediaItems);
+        if (matched) {
+          media_urls = [matched];
+        } else {
+          const { url: generatedUrl, error: imageError } = await generateDraftImage(workspace.id, newPlan, finalContent);
+          if (runIdRef.current !== runId) return;
+          if (generatedUrl) {
+            media_urls = [generatedUrl];
+          } else if (imageError) {
+            push({ title: t('assistant.toast.imageGenerationFailed', { index: i + 1 }), description: imageError, variant: 'error' });
+          }
+        }
+      }
       created.push({
         local_id: nextLocalId(),
         content: finalContent,
