@@ -1,33 +1,53 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Copy,
   Download,
   Facebook,
+  FileSpreadsheet,
+  FileText,
+  Globe,
   Hash,
   ImageIcon,
   Instagram,
+  Layers,
   Linkedin,
   ListChecks,
   ListOrdered,
   Lightbulb,
+  Loader2,
   Megaphone,
   PencilLine,
   Plus,
   Repeat2,
+  Rss,
   Scissors,
   Sparkles,
   Target,
   Type,
   Wand2,
+  Youtube,
   Zap,
 } from 'lucide-react';
 import { useAI } from '@/hooks/useAI';
 import { useAISettings } from '@/hooks/useAISettings';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useContentSources } from '@/hooks/useContentSources';
 import { useAuth } from '@/providers/AuthProvider';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
-import { Button, Card, MarkdownRenderer, Badge, EmptyState } from '@/ui';
+import { Button, Card, MarkdownRenderer, Badge, EmptyState, Modal } from '@/ui';
+import type { ContentSourceType } from '@/types/contentSources';
+
+function sourceIcon(type: ContentSourceType) {
+  switch (type) {
+    case 'rss': return Rss;
+    case 'url': return Globe;
+    case 'youtube': return Youtube;
+    case 'excel': return FileSpreadsheet;
+    default: return FileText;
+  }
+}
 
 type ActionType =
   | 'generate'
@@ -158,11 +178,24 @@ export function ContentStudioPage() {
   const { generate, loading, model, tokensIn, tokensOut, responseTimeMs } = useAI();
   const { settings } = useAISettings();
   const { push } = useToast();
+  const navigate = useNavigate();
   const [input, setInput] = useState('');
   const [platform, setPlatform] = useState<string>('facebook');
   const [audience, setAudience] = useState<AudienceType>('general');
   const [output, setOutput] = useState('');
   const [streaming, setStreaming] = useState(false);
+
+  // Content Sources integration — lets the user pull freshly-fetched
+  // material from their configured sources straight into the Studio input.
+  const { sources, fetching, proposedItems, fetchNewContent } = useContentSources();
+  const [sourcesModalOpen, setSourcesModalOpen] = useState(false);
+
+  const handleUseProposedItem = (item: (typeof proposedItems)[number], append: boolean) => {
+    const block = `${item.title}\n\n${item.summary}${item.url ? `\n\n${item.url}` : ''}`;
+    setInput((prev) => (append && prev.trim() ? `${prev.trim()}\n\n---\n\n${block}` : block));
+    setSourcesModalOpen(false);
+    push({ title: t(append ? 'ai.studio.sources.toast.appended' : 'ai.studio.sources.toast.inserted'), variant: 'success' });
+  };
 
   const runAction = async (action: ActionType) => {
     if (!input.trim() || !workspace || !user) {
@@ -277,7 +310,15 @@ export function ContentStudioPage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Input */}
-        <Card title={t('ai.studio.input.title')} description={t('ai.studio.input.description')}>
+        <Card
+          title={t('ai.studio.input.title')}
+          description={t('ai.studio.input.description')}
+          action={
+            <Button variant="outline" size="sm" onClick={() => setSourcesModalOpen(true)}>
+              <Layers className="h-3.5 w-3.5" /> {t('ai.studio.sources.button')}
+            </Button>
+          }
+        >
           <div className="space-y-4">
             <textarea
               value={input}
@@ -364,6 +405,87 @@ export function ContentStudioPage() {
           ))}
         </div>
       </Card>
+
+      {/* Use content from Content Sources */}
+      <Modal
+        open={sourcesModalOpen}
+        onClose={() => setSourcesModalOpen(false)}
+        title={t('ai.studio.sources.modalTitle')}
+        size="lg"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t('ai.studio.sources.modalDescription')}</p>
+
+          {sources.length === 0 ? (
+            <EmptyState
+              icon={<Layers className="h-6 w-6" />}
+              title={t('ai.studio.sources.empty.title')}
+              description={t('ai.studio.sources.empty.description')}
+              action={
+                <Button onClick={() => { setSourcesModalOpen(false); navigate('/app/content-sources'); }}>
+                  {t('ai.studio.sources.empty.action')}
+                </Button>
+              }
+            />
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap gap-2">
+                  {sources.map((source) => {
+                    const Icon = sourceIcon(source.type);
+                    return (
+                      <Badge key={source.id} variant={source.status === 'ready' ? 'success' : 'default'}>
+                        <Icon className="h-3 w-3" /> {source.name ?? source.source_url ?? t(`contentSources.type.${source.type}`)}
+                      </Badge>
+                    );
+                  })}
+                </div>
+                <Button variant="outline" size="sm" onClick={() => fetchNewContent()} loading={fetching}>
+                  <Sparkles className="h-3.5 w-3.5" /> {t('ai.studio.sources.fetchButton')}
+                </Button>
+              </div>
+
+              {fetching && (
+                <div className="flex items-center gap-2 py-6 text-sm text-slate-500 dark:text-slate-400">
+                  <Loader2 className="h-4 w-4 animate-spin" /> {t('ai.studio.sources.fetching')}
+                </div>
+              )}
+
+              {!fetching && proposedItems.length === 0 && (
+                <p className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">{t('ai.studio.sources.noProposed')}</p>
+              )}
+
+              {!fetching && proposedItems.length > 0 && (
+                <div className="max-h-96 space-y-2 overflow-y-auto">
+                  {proposedItems.map((item) => {
+                    const Icon = sourceIcon(item.source_type);
+                    return (
+                      <div
+                        key={item.content_hash}
+                        className="flex items-start gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800"
+                      >
+                        <Icon className="mt-1 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{item.title}</p>
+                          <p className="mt-1 line-clamp-2 text-sm text-slate-600 dark:text-slate-400">{item.summary}</p>
+                        </div>
+                        <div className="flex shrink-0 flex-col gap-1">
+                          <Button size="sm" onClick={() => handleUseProposedItem(item, false)}>{t('ai.studio.sources.useButton')}</Button>
+                          {input.trim() && (
+                            <Button size="sm" variant="ghost" onClick={() => handleUseProposedItem(item, true)}>
+                              <Plus className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }
