@@ -17,7 +17,11 @@ export function useAutomation() {
   const [actioningId, setActioningId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!workspace) return;
+    if (!workspace) {
+      // No workspace yet (e.g. still being created) — don't leave the UI stuck spinning.
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);

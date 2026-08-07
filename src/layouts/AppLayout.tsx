@@ -97,11 +97,21 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const { user, profile, signOut } = useAuth();
-  const { workspace } = useWorkspace();
+  const { workspace, ensureWorkspace, loading: wsLoading } = useWorkspace();
   const { t, dir } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
   const scrollRef = useRef<HTMLElement>(null);
+
+  // Ensure every signed-in user has a workspace, no matter which /app/*
+  // page they land on first — previously this only ran on Dashboard/Accounts,
+  // so visiting any other page first (Brand Voice, Automation, Settings...)
+  // left `workspace` permanently null and those pages stuck loading forever.
+  useEffect(() => {
+    if (!wsLoading && !workspace && user) {
+      ensureWorkspace();
+    }
+  }, [wsLoading, workspace, user, ensureWorkspace]);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
