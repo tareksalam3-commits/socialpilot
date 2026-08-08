@@ -1,5 +1,5 @@
 import { supabase } from '@/services/supabase';
-import type { AiProvider, ProviderStatus } from '@/types/ai';
+import type { AiProvider, ProviderDailyUsage, ProviderStatus } from '@/types/ai';
 
 // ai_provider_keys is a global pool of keys (one row per provider), managed
 // by super admins only — see list_ai_provider_status() and the RLS policies
@@ -9,6 +9,16 @@ export const providerKeysRepository = {
     const { data, error } = await supabase.rpc('list_ai_provider_status');
     if (error) throw error;
     return (data ?? []) as ProviderStatus[];
+  },
+
+  // Aggregates today's ai_usage_events per provider (UTC day) — this is the
+  // shared, platform-wide "how much of today's free quota did we burn"
+  // view, since ai_provider_keys is a single global pool of keys rather
+  // than one per workspace. See get_ai_provider_daily_usage() migration.
+  async getDailyUsage(): Promise<ProviderDailyUsage[]> {
+    const { data, error } = await supabase.rpc('get_ai_provider_daily_usage');
+    if (error) throw error;
+    return (data ?? []) as ProviderDailyUsage[];
   },
 
   async saveKey(provider: AiProvider, apiKey: string, extra?: { baseUrl?: string | null; accountId?: string | null }): Promise<void> {

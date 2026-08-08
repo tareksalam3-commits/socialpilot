@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, KeyRound, Loader2, Plug, Save, Trash2, XCircle, Zap } from 'lucide-react';
+import { CheckCircle2, Gauge, KeyRound, Loader2, Plug, Save, Trash2, XCircle, Zap } from 'lucide-react';
 import { useAISettings } from '@/hooks/useAISettings';
 import { useProviderKeys } from '@/hooks/useProviderKeys';
 import { useToast } from '@/providers/ToastProvider';
@@ -9,6 +9,19 @@ import { Badge, Button, Card, Input, Skeleton } from '@/ui';
 import type { AiProvider, ModelInfo, ProviderInfo, ProviderStatus } from '@/types/ai';
 
 type ConnState = 'idle' | 'testing' | 'connected' | 'failed';
+
+// Free-tier quota shape per provider — not exposed live via any provider
+// API (only OpenRouter documents a simple, stable daily-cap rule), so this
+// is informational context next to the *measured* request count below, not
+// a claimed "remaining" figure. Keys must match ProviderInfo.id.
+const QUOTA_NOTE_KEYS: Record<string, string> = {
+  openrouter: 'ai.settings.usage.note.openrouter',
+  groq: 'ai.settings.usage.note.groq',
+  cerebras: 'ai.settings.usage.note.cerebras',
+  nvidia: 'ai.settings.usage.note.nvidia',
+  mistral: 'ai.settings.usage.note.mistral',
+  zai: 'ai.settings.usage.note.zai',
+};
 
 // Fallback shown while the live list loads from the edge function (?action=providers),
 // which is the source of truth for which providers are actually wired up server-side.
@@ -128,7 +141,7 @@ function ProviderKeyRow({
 export function AiProvidersPage() {
   const { t } = useLanguage();
   const { settings, loading, update } = useAISettings();
-  const { loading: keysLoading, saveKey, clearKey, statusFor } = useProviderKeys();
+  const { loading: keysLoading, saveKey, clearKey, statusFor, usageFor } = useProviderKeys();
   const { push } = useToast();
 
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
@@ -217,6 +230,40 @@ export function AiProvidersPage() {
             ))}
           </div>
         )}
+      </Card>
+
+      {/* Today's usage per provider — counted from our own ai_usage_events
+          log (every chat attempt is recorded there), not a live number from
+          the provider itself. Free-tier caps are provider-defined and, aside
+          from OpenRouter's simple documented rule, aren't queryable via any
+          API, so we show what we can prove (requests made today) next to an
+          informational note instead of a guessed "remaining" figure. */}
+      <Card title={t('ai.settings.usage.title')} description={t('ai.settings.usage.description')}>
+        <div className="space-y-2">
+          {providers.map((p) => {
+            const status = statusFor(p.id);
+            const usage = usageFor(p.id);
+            if (!status?.configured) return null;
+            return (
+              <div key={p.id} className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Gauge className="h-4 w-4 text-slate-400" />
+                    <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{p.label}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <Badge variant="info">{t('ai.settings.usage.requestsToday', { count: usage.requests_today })}</Badge>
+                    {usage.failed_today > 0 && <Badge variant="error">{t('ai.settings.usage.failedToday', { count: usage.failed_today })}</Badge>}
+                  </div>
+                </div>
+                <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">{t(QUOTA_NOTE_KEYS[p.id] ?? 'ai.settings.usage.note.default')}</p>
+              </div>
+            );
+          })}
+          {providers.every((p) => !statusFor(p.id)?.configured) && (
+            <p className="text-sm text-slate-500 dark:text-slate-400">{t('ai.settings.usage.noneConfigured')}</p>
+          )}
+        </div>
       </Card>
 
       {/* Model selection mode: auto lets the gateway dynamically fall back

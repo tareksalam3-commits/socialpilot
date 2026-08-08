@@ -158,6 +158,12 @@ export type ProviderStatus = {
   updated_at: string | null;
 };
 
+export type ProviderDailyUsage = {
+  provider: AiProvider;
+  requests_today: number;
+  failed_today: number;
+};
+
 export type AiAnalytics = {
   totalRequests: number;
   totalTokensIn: number;
