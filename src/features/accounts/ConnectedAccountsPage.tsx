@@ -11,14 +11,26 @@ import { Badge, Button, Card, EmptyState, ErrorState, Modal, Input, Skeleton } f
 import { formatDate } from '@/utils/format';
 import type { ExtendedConnectedAccount } from '@/types/social';
 import { PLATFORM_DEFINITIONS, getPlatformMeta, platformLabelFallback } from '@/constants/platforms';
+import {
+  startOAuthConnect,
+  isRedirectConnectMethod,
+  REDIRECT_CONNECT_LABEL,
+  getAccountDisplayStatus,
+  needsReconnect,
+  type RedirectConnectMethod,
+  type AccountDisplayStatus,
+} from '@/integrations/integrationManager';
 
+// Kept for the query-string contract with the OAuth callback redirects
+// (?platform=meta|linkedin|x|threads|tiktok) — those Edge Functions are
+// untouched, so the values here must keep matching exactly what they send.
 type RedirectOAuthPlatform = 'meta' | 'linkedin' | 'x' | 'threads' | 'tiktok';
-const REDIRECT_OAUTH_LABEL: Record<RedirectOAuthPlatform, string> = {
-  meta: 'Meta (Facebook & Instagram)',
-  linkedin: 'LinkedIn',
-  x: 'X',
-  threads: 'Threads',
-  tiktok: 'TikTok',
+const PLATFORM_TO_CONNECT_METHOD: Record<RedirectOAuthPlatform, RedirectConnectMethod> = {
+  meta: 'meta_oauth',
+  linkedin: 'linkedin_oauth',
+  x: 'x_oauth',
+  threads: 'threads_oauth',
+  tiktok: 'tiktok_oauth',
 };
 
 export function ConnectedAccountsPage() {
@@ -68,13 +80,13 @@ export function ConnectedAccountsPage() {
     const oauthError = searchParams.get('error');
 
     if (oauthError) {
-      push({ title: t('accounts.toast.oauthConnectionFailed', { platform: platform ? REDIRECT_OAUTH_LABEL[platform] ?? platform : 'Platform' }), description: oauthError.replace(/_/g, ' '), variant: 'error' });
+      push({ title: t('accounts.toast.oauthConnectionFailed', { platform: platform ? REDIRECT_CONNECT_LABEL[PLATFORM_TO_CONNECT_METHOD[platform]] ?? platform : 'Platform' }), description: oauthError.replace(/_/g, ' '), variant: 'error' });
       setSearchParams((p) => { p.delete('error'); p.delete('platform'); return p; }, { replace: true });
       return;
     }
 
     if (connected && platform) {
-      push({ title: t('accounts.toast.platformConnected', { platform: REDIRECT_OAUTH_LABEL[platform] ?? platform }), variant: 'success' });
+      push({ title: t('accounts.toast.platformConnected', { platform: REDIRECT_CONNECT_LABEL[PLATFORM_TO_CONNECT_METHOD[platform]] ?? platform }), variant: 'success' });
       setSearchParams((p) => { p.delete('connected'); p.delete('platform'); return p; }, { replace: true });
       reload();
       return;
@@ -90,26 +102,29 @@ export function ConnectedAccountsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const startRedirectOAuth = async (platform: RedirectOAuthPlatform, starter: () => Promise<string>, failToastKey: string) => {
+  // Single Integration Manager entry point for every redirect-OAuth
+  // platform: picks the right Edge Function via connectMethod instead of
+  // each platform having its own copy-pasted handler. Meta and LinkedIn go
+  // through this exact same path they always did — only the dispatch is
+  // unified, not the underlying OAuth call.
+  const startRedirectOAuth = async (platform: RedirectOAuthPlatform) => {
     if (!workspace) {
       push({ title: t('accounts.workspaceNotReady.title'), description: t('accounts.workspaceNotReady.description'), variant: 'error' });
       return;
     }
     setOauthLoading(platform);
     try {
-      const url = await starter();
+      const url = await startOAuthConnect(PLATFORM_TO_CONNECT_METHOD[platform], workspace.id);
       window.location.href = url;
     } catch (e) {
-      push({ title: t(failToastKey), description: e instanceof Error ? e.message : '', variant: 'error' });
+      push({
+        title: t('accounts.toast.oauthConnectionFailed', { platform: REDIRECT_CONNECT_LABEL[PLATFORM_TO_CONNECT_METHOD[platform]] }),
+        description: e instanceof Error ? e.message : '',
+        variant: 'error',
+      });
       setOauthLoading(null);
     }
   };
-
-  const handleMetaConnect = () => startRedirectOAuth('meta', () => accountRepository.startMetaOAuth(workspace!.id), 'accounts.toast.facebookLoginFailed');
-  const handleLinkedInConnect = () => startRedirectOAuth('linkedin', () => accountRepository.startLinkedInOAuth(workspace!.id), 'accounts.toast.linkedinLoginFailed');
-  const handleXConnect = () => startRedirectOAuth('x', () => accountRepository.startXOAuth(workspace!.id), 'accounts.toast.xLoginFailed');
-  const handleThreadsConnect = () => startRedirectOAuth('threads', () => accountRepository.startThreadsOAuth(workspace!.id), 'accounts.toast.threadsLoginFailed');
-  const handleTikTokConnect = () => startRedirectOAuth('tiktok', () => accountRepository.startTikTokOAuth(workspace!.id), 'accounts.toast.tiktokLoginFailed');
 
   const handleFinalizeSelection = async () => {
     if (!selection) return;
@@ -224,6 +239,31 @@ export function ConnectedAccountsPage() {
     }
   };
 
+  // Unified Reconnect action (rule: every card gets one Reconnect path,
+  // regardless of platform). Redirect-OAuth platforms restart the exact same
+  // connect flow as a first-time Connect; manual platforms (Telegram/
+  // WhatsApp) reopen their form so the user can re-verify/replace the token.
+  const handleReconnect = (account: ExtendedConnectedAccount) => {
+    const meta = getPlatformMeta(account.platform);
+    if (!meta) return;
+    if (isRedirectConnectMethod(meta.connectMethod)) {
+      if (!workspace) {
+        push({ title: t('accounts.workspaceNotReady.title'), description: t('accounts.workspaceNotReady.description'), variant: 'error' });
+        return;
+      }
+      setOauthLoading(meta.connectMethod.replace('_oauth', '') as RedirectOAuthPlatform);
+      startOAuthConnect(meta.connectMethod, workspace.id)
+        .then((url) => { window.location.href = url; })
+        .catch((e) => {
+          push({ title: t('accounts.toast.oauthConnectionFailed', { platform: meta.label }), description: e instanceof Error ? e.message : '', variant: 'error' });
+          setOauthLoading(null);
+        });
+      return;
+    }
+    if (account.platform === 'telegram') setShowTelegram(true);
+    else if (account.platform === 'whatsapp') setShowWhatsApp(true);
+  };
+
   const handleSyncAll = async () => {
     try {
       await syncAll();
@@ -276,35 +316,35 @@ export function ConnectedAccountsPage() {
             platformId="facebook"
             label="Meta"
             sublabel="Facebook & Instagram"
-            onClick={handleMetaConnect}
+            onClick={() => startRedirectOAuth('meta')}
             loading={oauthLoading === 'meta'}
             disabled={oauthLoading !== null || !workspaceReady}
           />
           <ConnectTile
             platformId="linkedin"
             label="LinkedIn"
-            onClick={handleLinkedInConnect}
+            onClick={() => startRedirectOAuth('linkedin')}
             loading={oauthLoading === 'linkedin'}
             disabled={oauthLoading !== null || !workspaceReady}
           />
           <ConnectTile
             platformId="x"
             label="X"
-            onClick={handleXConnect}
+            onClick={() => startRedirectOAuth('x')}
             loading={oauthLoading === 'x'}
             disabled={oauthLoading !== null || !workspaceReady}
           />
           <ConnectTile
             platformId="threads"
             label="Threads"
-            onClick={handleThreadsConnect}
+            onClick={() => startRedirectOAuth('threads')}
             loading={oauthLoading === 'threads'}
             disabled={oauthLoading !== null || !workspaceReady}
           />
           <ConnectTile
             platformId="tiktok"
             label="TikTok"
-            onClick={handleTikTokConnect}
+            onClick={() => startRedirectOAuth('tiktok')}
             loading={oauthLoading === 'tiktok'}
             disabled={oauthLoading !== null || !workspaceReady}
           />
@@ -320,6 +360,7 @@ export function ConnectedAccountsPage() {
                 onRemove={() => remove(account.id)}
                 onRefresh={() => handleRefreshToken(account)}
                 onSync={() => handleSync(account)}
+                onReconnect={() => handleReconnect(account)}
                 refreshing={refreshingId === account.id}
                 syncing={syncingId === account.id}
               />
@@ -359,6 +400,7 @@ export function ConnectedAccountsPage() {
                 onRemove={() => remove(account.id)}
                 onRefresh={() => handleRefreshToken(account)}
                 onSync={() => handleSync(account)}
+                onReconnect={() => handleReconnect(account)}
                 refreshing={refreshingId === account.id}
                 syncing={syncingId === account.id}
               />
@@ -548,6 +590,7 @@ function AccountCard({
   onRemove,
   onRefresh,
   onSync,
+  onReconnect,
   refreshing,
   syncing,
 }: {
@@ -556,11 +599,14 @@ function AccountCard({
   onRemove: () => void;
   onRefresh: () => void;
   onSync: () => void;
+  onReconnect: () => void;
   refreshing: boolean;
   syncing: boolean;
 }) {
   const { t } = useLanguage();
   const meta = getPlatformMeta(account.platform);
+  const displayStatus = getAccountDisplayStatus(account);
+  const showReconnect = needsReconnect(account);
   return (
     <Card>
       <div className="flex items-start justify-between">
@@ -573,7 +619,7 @@ function AccountCard({
             <p className="text-xs text-slate-500 dark:text-slate-400">{account.handle ?? t('accounts.card.connectedFallback')}</p>
           </div>
         </div>
-        <HealthBadge status={account.health_status} />
+        <StatusBadge status={displayStatus} />
       </div>
       <div className="mt-4 space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
         <div className="flex items-center justify-between text-xs">
@@ -587,7 +633,7 @@ function AccountCard({
         {account.token_expires_at && (
           <div className="flex items-center justify-between text-xs">
             <span className="text-slate-500 dark:text-slate-400">{t('accounts.card.tokenExpires')}</span>
-            <span className={isExpiringSoon(account.token_expires_at) ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}>
+            <span className={displayStatus === 'expired' || isExpiringSoon(account.token_expires_at) ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}>
               {formatDate(account.token_expires_at)}
             </span>
           </div>
@@ -603,6 +649,11 @@ function AccountCard({
           <span className="text-slate-700 dark:text-slate-300">{formatDate(account.created_at)}</span>
         </div>
         <div className="flex flex-wrap gap-2 pt-2">
+          {showReconnect && (
+            <Button size="sm" onClick={onReconnect}>
+              <RefreshCw className="h-3.5 w-3.5" /> {t('accounts.card.reconnect')}
+            </Button>
+          )}
           {account.status === 'connected' && meta?.supportsRefresh && (
             <Button size="sm" variant="outline" onClick={onRefresh} loading={refreshing}>
               <RefreshCw className="h-3.5 w-3.5" /> {t('accounts.card.refreshToken')}
@@ -632,10 +683,15 @@ function PlatformIcon({ platform }: { platform: string }) {
   return <Icon className={`h-5 w-5 ${match?.color ?? 'text-slate-500'}`} />;
 }
 
-function HealthBadge({ status }: { status: string }) {
+/** Renders the Integration Manager's five-state status
+ * (connected/disconnected/expired/error/warning) consistently across every
+ * platform card. */
+function StatusBadge({ status }: { status: AccountDisplayStatus }) {
   const { t } = useLanguage();
-  if (status === 'healthy') return <Badge variant="success"><CheckCircle2 className="me-1 h-3 w-3" /> {t('accounts.card.healthy')}</Badge>;
+  if (status === 'connected') return <Badge variant="success"><CheckCircle2 className="me-1 h-3 w-3" /> {t('accounts.card.healthy')}</Badge>;
+  if (status === 'expired') return <Badge variant="warning"><XCircle className="me-1 h-3 w-3" /> {t('accounts.card.expired')}</Badge>;
   if (status === 'warning') return <Badge variant="warning">{t('accounts.card.warning')}</Badge>;
   if (status === 'error') return <Badge variant="error"><XCircle className="me-1 h-3 w-3" /> {t('accounts.card.error')}</Badge>;
+  if (status === 'disconnected') return <Badge>{t('accounts.card.disconnected')}</Badge>;
   return <Badge>{t('accounts.card.unknown')}</Badge>;
 }
