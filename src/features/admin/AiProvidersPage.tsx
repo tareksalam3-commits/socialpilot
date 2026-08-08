@@ -256,7 +256,15 @@ export function AiProvidersPage() {
             </label>
             <select
               value={settings?.provider ?? 'openrouter'}
-              onChange={(e) => handleUpdate({ provider: e.target.value })}
+              onChange={(e) => {
+                const nextProviderId = e.target.value;
+                // Switching providers with the old default_model left behind (e.g.
+                // "openrouter/auto" while Provider = Groq) produced a mismatched,
+                // unusable combination. Re-sync the model field to the newly
+                // selected provider's own default model at the same time.
+                const nextEntry = providers.find((p) => p.id === nextProviderId);
+                handleUpdate({ provider: nextProviderId, default_model: nextEntry?.default_model ?? 'openrouter/auto' });
+              }}
               className="w-full max-w-xs rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               {providers.map((p) => (
@@ -269,6 +277,7 @@ export function AiProvidersPage() {
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">{t('ai.settings.model.defaultModelLabel')}</label>
             <input
+              key={`${settings?.provider ?? 'openrouter'}-${settings?.default_model ?? ''}`}
               type="text"
               defaultValue={settings?.default_model ?? 'openrouter/auto'}
               onBlur={(e) => handleUpdate({ default_model: e.target.value })}
@@ -342,7 +351,12 @@ export function AiProvidersPage() {
       {/* Live model catalog for the active/default provider — fetched
           straight from the provider's API, the same way OpenRouter's model
           list works, instead of a manually-curated local table. */}
-      <Card title={t('ai.settings.provider.title')} description={t('ai.settings.provider.description')}>
+      <Card
+        title={t('ai.settings.provider.title')}
+        description={t('ai.settings.provider.description', {
+          provider: providers.find((p) => p.id === (settings?.provider ?? 'openrouter'))?.label ?? 'OpenRouter',
+        })}
+      >
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-3">
             <Button variant="outline" size="sm" onClick={handleTest} loading={connState === 'testing'}>
