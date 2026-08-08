@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { NotificationCenter } from '@/features/notifications/NotificationCenter';
 import {
   BarChart3,
@@ -242,6 +242,17 @@ export function AppLayout({ children }: { children?: ReactNode }) {
             <LogOut className="h-4 w-4" /> {t('common.signOut')}
           </DropdownItem>
         </Dropdown>
+        {!collapsed && (
+          <p className="mt-1.5 px-2 text-center text-[11px] text-slate-400 dark:text-slate-600">
+            <Link to="/terms" className="hover:text-slate-600 dark:hover:text-slate-300">
+              {t('legal.terms')}
+            </Link>
+            <span className="mx-1.5">·</span>
+            <Link to="/privacy" className="hover:text-slate-600 dark:hover:text-slate-300">
+              {t('legal.privacy')}
+            </Link>
+          </p>
+        )}
       </div>
     </>
   );

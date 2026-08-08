@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Check, Copy, Eye, EyeOff } from 'lucide-react';
 import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
 import { Badge, Button, Card, Input } from '@/ui';
@@ -30,6 +30,24 @@ export function AdminIntegrationsPage() {
   const [reveal, setReveal] = useState<Partial<Record<CredentialKey, boolean>>>({});
   const [loading, setLoading] = useState(true);
   const [savingGroup, setSavingGroup] = useState<'meta' | 'linkedin' | 'x' | 'threads' | 'tiktok' | 'general' | null>(null);
+  const [copied, setCopied] = useState<'terms' | 'privacy' | null>(null);
+
+  // Built from the current origin so the URLs always match whichever domain
+  // is actually serving the app (production or a Vercel preview deploy),
+  // rather than depending on the separately-configured app_url setting.
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const termsUrl = `${origin}/terms`;
+  const privacyUrl = `${origin}/privacy`;
+
+  const copyToClipboard = async (kind: 'terms' | 'privacy', value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(kind);
+      window.setTimeout(() => setCopied(null), 1500);
+    } catch {
+      // Clipboard API can fail silently (e.g. insecure context); no-op.
+    }
+  };
 
   const load = async () => {
     try {
@@ -168,6 +186,37 @@ export function AdminIntegrationsPage() {
           <div className="space-y-4">
             {CREDENTIAL_FIELDS.filter((f) => f.group === 'tiktok').map(renderField)}
             <Button onClick={() => saveGroup('tiktok')} loading={savingGroup === 'tiktok'}>{t('settings.integrations.tiktok.save')}</Button>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                {t('settings.integrations.tiktok.legalUrls.title')}
+              </p>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                {t('settings.integrations.tiktok.legalUrls.description')}
+              </p>
+              <div className="mt-3 space-y-2">
+                {([
+                  ['terms', termsUrl, t('settings.integrations.tiktok.legalUrls.terms')],
+                  ['privacy', privacyUrl, t('settings.integrations.tiktok.legalUrls.privacy')],
+                ] as const).map(([kind, url, label]) => (
+                  <div key={kind} className="space-y-1">
+                    <label className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</label>
+                    <div className="flex items-center gap-2">
+                      <Input readOnly value={url} className="font-mono text-xs" />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => copyToClipboard(kind, url)}
+                        aria-label={t('settings.integrations.tiktok.legalUrls.copy')}
+                      >
+                        {copied === kind ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </Card>

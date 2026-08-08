@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 import { useLanguage } from '@/providers/LanguageProvider';
 
@@ -26,8 +27,17 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         <p className="relative z-10 text-sm text-slate-400">© {new Date().getFullYear()} SocialPilot AI</p>
       </div>
       {/* Right form panel */}
-      <div className="flex w-full items-center justify-center p-6 lg:w-1/2">
+      <div className="flex w-full flex-col items-center justify-center gap-6 p-6 lg:w-1/2">
         <div className="w-full max-w-sm animate-slide-up">{children}</div>
+        <p className="text-center text-xs text-slate-400 dark:text-slate-500">
+          <Link to="/terms" className="hover:text-slate-600 dark:hover:text-slate-300">
+            {t('legal.terms')}
+          </Link>
+          <span className="mx-2">·</span>
+          <Link to="/privacy" className="hover:text-slate-600 dark:hover:text-slate-300">
+            {t('legal.privacy')}
+          </Link>
+        </p>
       </div>
     </div>
   );

@@ -18,6 +18,8 @@ const {
   register: { Component: RegisterPage },
   forgotPassword: { Component: ForgotPasswordPage },
   resetPassword: { Component: ResetPasswordPage },
+  terms: { Component: TermsOfServicePage },
+  privacy: { Component: PrivacyPolicyPage },
   dashboard: { Component: DashboardPage },
   assistant: { Component: AIAssistantPage },
   settings: { Component: SettingsPage },
@@ -75,6 +77,11 @@ function App() {
                 <Route path="/register" element={<RegisterPage />} />
                 <Route path="/forgot-password" element={<ForgotPasswordPage />} />
                 <Route path="/reset-password" element={<ResetPasswordPage />} />
+                {/* Public legal pages — intentionally outside ProtectedRoute so they
+                    load with no login required (needed for TikTok app review and
+                    for anyone to read them before creating an account). */}
+                <Route path="/terms" element={<TermsOfServicePage />} />
+                <Route path="/privacy" element={<PrivacyPolicyPage />} />
                 <Route
                   path="/app"
                   element={

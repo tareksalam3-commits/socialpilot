@@ -71,6 +71,10 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     'nav.brandVoice': 'صوت العلامة التجارية',
     'nav.settings': 'الإعدادات',
 
+    // legal / public pages
+    'legal.terms': 'شروط الخدمة',
+    'legal.privacy': 'سياسة الخصوصية',
+
     // settings page
     'settings.title': 'الإعدادات',
     'settings.subtitle': 'إدارة حسابك ومساحة العمل والتفضيلات.',
@@ -325,6 +329,12 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     'settings.integrations.tiktok.title': 'TikTok',
     'settings.integrations.tiktok.description': 'الصق بيانات اعتماد تطبيق TikTok for Developers لتفعيل تسجيل الدخول ونشر الفيديوهات عبر TikTok.',
     'settings.integrations.tiktok.save': 'حفظ بيانات اعتماد TikTok',
+    'settings.integrations.tiktok.legalUrls.title': 'روابط مطلوبة لإعدادات تطبيق TikTok',
+    'settings.integrations.tiktok.legalUrls.description': 'الصق هذين الرابطين في حقلي Terms of Service URL وPrivacy Policy URL داخل TikTok for Developers. يعملان مباشرةً بدون تسجيل دخول.',
+    'settings.integrations.tiktok.legalUrls.terms': 'Terms of Service URL',
+    'settings.integrations.tiktok.legalUrls.privacy': 'Privacy Policy URL',
+    'settings.integrations.tiktok.legalUrls.copy': 'نسخ',
+    'settings.integrations.tiktok.legalUrls.copied': 'تم النسخ',
     'settings.integrations.appUrl.title': 'رابط التطبيق',
     'settings.integrations.appUrl.description': 'العنوان الذي يُعاد توجيه المستخدمين إليه بعد ربط حساباتهم عبر OAuth.',
 
@@ -1304,6 +1314,10 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     'nav.brandVoice': 'Brand Voice',
     'nav.settings': 'Settings',
 
+    // legal / public pages
+    'legal.terms': 'Terms of Service',
+    'legal.privacy': 'Privacy Policy',
+
     'settings.title': 'Settings',
     'settings.subtitle': 'Manage your account, workspace, and preferences.',
     'settings.tab.general': 'General',
@@ -1557,6 +1571,12 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     'settings.integrations.tiktok.title': 'TikTok',
     'settings.integrations.tiktok.description': 'Paste your TikTok for Developers app credentials to enable TikTok OAuth and video publishing.',
     'settings.integrations.tiktok.save': 'Save TikTok credentials',
+    'settings.integrations.tiktok.legalUrls.title': 'URLs required for your TikTok app settings',
+    'settings.integrations.tiktok.legalUrls.description': 'Paste these into the Terms of Service URL and Privacy Policy URL fields on TikTok for Developers. Both load with no login required.',
+    'settings.integrations.tiktok.legalUrls.terms': 'Terms of Service URL',
+    'settings.integrations.tiktok.legalUrls.privacy': 'Privacy Policy URL',
+    'settings.integrations.tiktok.legalUrls.copy': 'Copy',
+    'settings.integrations.tiktok.legalUrls.copied': 'Copied',
     'settings.integrations.appUrl.title': 'App URL',
     'settings.integrations.appUrl.description': 'Where OAuth redirects send people back after connecting an account.',
 
