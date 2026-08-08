@@ -13,13 +13,12 @@ export const providerKeysRepository = {
 
   async saveKey(provider: AiProvider, apiKey: string, extra?: { baseUrl?: string | null; accountId?: string | null }): Promise<void> {
     // Every provider already has a row (seeded once when the table was
-    // globalized), so a plain UPDATE is enough. We rely solely on `error`
-    // here — the `count: 'exact'` fallback this used to have was unreliable
-    // (the update could succeed with a 204 yet report a falsy count), which
-    // triggered a bogus INSERT fallback that collided with the existing row
-    // and surfaced as a false "save failed" even though the key had already
-    // been saved.
-    const { error } = await supabase
+    // globalized), so a plain UPDATE is enough. We check `error` AND the
+    // returned rows: RLS silently filters out rows the caller isn't allowed
+    // to touch (super-admin-only here) without raising a PostgREST error,
+    // so a 0-row result on success is actually a permissions failure and
+    // must not be reported as "saved".
+    const { data, error } = await supabase
       .from('ai_provider_keys')
       .update({
         api_key_encrypted: apiKey,
@@ -27,15 +26,23 @@ export const providerKeysRepository = {
         account_id: extra?.accountId ?? null,
         updated_at: new Date().toISOString(),
       })
-      .eq('provider', provider);
+      .eq('provider', provider)
+      .select('provider');
     if (error) throw error;
+    if (!data || data.length === 0) {
+      throw new Error('لم يتم حفظ المفتاح: الحساب الحالي ليس Super Admin أو المزوّد غير موجود.');
+    }
   },
 
   async clearKey(provider: AiProvider): Promise<void> {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('ai_provider_keys')
       .update({ api_key_encrypted: null, last_test_status: null, last_tested_at: null, updated_at: new Date().toISOString() })
-      .eq('provider', provider);
+      .eq('provider', provider)
+      .select('provider');
     if (error) throw error;
+    if (!data || data.length === 0) {
+      throw new Error('لم يتم حذف المفتاح: الحساب الحالي ليس Super Admin أو المزوّد غير موجود.');
+    }
   },
 };
