@@ -11,7 +11,7 @@ Deno.serve(async (req: Request) => {
     platform: 'threads',
     clientIdCredentialKey: 'threads_app_id',
     clientIdMissingMessage: 'Threads App ID is not configured. Set it in Settings > Integrations.',
-    authorizeUrl: 'https://threads.net/oauth/authorize',
+    authorizeUrl: 'https://threads.com/oauth/authorize',
     clientIdParam: 'client_id',
     scope: THREADS_SCOPES,
     usesPkce: false,
