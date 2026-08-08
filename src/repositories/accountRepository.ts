@@ -1,4 +1,5 @@
 import { supabase } from '@/services/supabase';
+import { describeEdgeFunctionError } from '@/utils/edgeFunctionError';
 import type { ExtendedConnectedAccount } from '@/types/social';
 
 export const accountRepository = {
@@ -141,7 +142,13 @@ export const accountRepository = {
     const { data, error } = await supabase.functions.invoke<{ url: string }>('tiktok-oauth-connect', {
       body: { workspace_id: workspaceId },
     });
-    if (error || !data?.url) throw new Error(error?.message ?? 'Could not start TikTok login');
+    if (error || !data?.url) {
+      // supabase-js collapses every non-2xx response into the generic
+      // "Edge Function returned a non-2xx status code" — describeEdgeFunctionError
+      // pulls the real `{ error: "..." }` reason tiktok-oauth-connect sent back
+      // (missing credentials, forbidden workspace, etc.) out of the response body.
+      throw new Error(await describeEdgeFunctionError(error, 'Could not start TikTok login'));
+    }
     return data.url;
   },
 

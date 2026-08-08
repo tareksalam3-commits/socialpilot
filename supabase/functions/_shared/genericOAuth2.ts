@@ -27,13 +27,22 @@ export async function startOAuth2Connect(supabase: SupabaseClient, req: Request,
   if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
 
   const clientId = await getCredential(supabase, config.clientIdCredentialKey);
-  if (!clientId) return errorResponse(config.clientIdMissingMessage, 500);
+  if (!clientId) {
+    console.error(`[${config.platform}-oauth-connect] ${config.clientIdMissingMessage}`);
+    return errorResponse(config.clientIdMissingMessage, 500);
+  }
 
   const callerId = await getCallerId(supabase, req);
-  if (!callerId) return errorResponse('Unauthorized', 401);
+  if (!callerId) {
+    console.error(`[${config.platform}-oauth-connect] Unauthorized: missing or invalid bearer token`);
+    return errorResponse('Unauthorized', 401);
+  }
 
   const { workspace_id } = await req.json().catch(() => ({}));
-  if (!workspace_id) return errorResponse('workspace_id is required', 400);
+  if (!workspace_id) {
+    console.error(`[${config.platform}-oauth-connect] workspace_id missing from request body`);
+    return errorResponse('workspace_id is required', 400);
+  }
 
   const { data: membership } = await supabase
     .from('workspace_members')
@@ -41,7 +50,10 @@ export async function startOAuth2Connect(supabase: SupabaseClient, req: Request,
     .eq('workspace_id', workspace_id)
     .eq('user_id', callerId)
     .maybeSingle();
-  if (!membership) return errorResponse('Forbidden', 403);
+  if (!membership) {
+    console.error(`[${config.platform}-oauth-connect] Forbidden: user ${callerId} is not a member of workspace ${workspace_id}`);
+    return errorResponse('Forbidden', 403);
+  }
 
   const state = randomState();
   const codeVerifier = config.usesPkce ? generateCodeVerifier() : null;
@@ -53,7 +65,13 @@ export async function startOAuth2Connect(supabase: SupabaseClient, req: Request,
     platform: config.platform,
     code_verifier: codeVerifier,
   });
-  if (error) return errorResponse('Could not start OAuth flow', 500);
+  // Surface the actual DB error (e.g. a stale platform CHECK constraint, or a
+  // missing oauth_states.code_verifier column) instead of a generic message —
+  // this is what used to show up to the user as an opaque "non-2xx" toast.
+  if (error) {
+    console.error(`[${config.platform}-oauth-connect] oauth_states insert failed: ${error.message}`);
+    return errorResponse(`Could not start OAuth flow: ${error.message}`, 500);
+  }
 
   const functionsUrl = Deno.env.get('SUPABASE_URL')!.replace('.supabase.co', '.supabase.co/functions/v1');
   const redirectUri = `${functionsUrl}/${config.redirectUriFunctionName}`;
