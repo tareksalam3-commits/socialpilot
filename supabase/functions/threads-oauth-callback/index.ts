@@ -30,8 +30,13 @@ async function exchangeForLongLivedToken(clientSecret: string, shortLivedToken: 
   return (await res.json()) as { access_token: string; expires_in: number };
 }
 
-async function fetchProfile(userId: string, accessToken: string) {
-  const url = new URL(`${GRAPH}/v1.0/${userId}`);
+async function fetchProfile(accessToken: string) {
+  // Threads only allows fetching the profile of the app-scoped user tied to
+  // the access token — /me is the documented way to address it. Using the
+  // raw numeric user_id returned from the token exchange can trigger a
+  // "does not exist / missing permissions" error (code 100, subcode 33)
+  // even though the token itself is valid.
+  const url = new URL(`${GRAPH}/v1.0/me`);
   url.searchParams.set('fields', 'id,username');
   url.searchParams.set('access_token', accessToken);
   const res = await fetch(url.toString());
@@ -61,7 +66,7 @@ Deno.serve(async (req: Request) => {
   try {
     const shortLived = await exchangeShortLivedCode(creds.threads_app_id, creds.threads_app_secret, redirectUri, code);
     const longLived = await exchangeForLongLivedToken(creds.threads_app_secret, shortLived.access_token);
-    const profile = await fetchProfile(shortLived.user_id, longLived.access_token);
+    const profile = await fetchProfile(longLived.access_token);
     const expiresAt = new Date(Date.now() + longLived.expires_in * 1000).toISOString();
 
     const { error } = await supabase.from('connected_accounts').upsert(
