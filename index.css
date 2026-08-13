@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+    /* Stop the whole page from rubber-banding/bouncing on iOS; individual
+       scroll containers (e.g. <main>) opt back into their own scrolling. */
+    overscroll-behavior-y: none;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+    transition: background-color 200ms ease;
+    overscroll-behavior-y: none;
+    /* Remove the gray flash Android/Chrome shows on tap — buttons/links use
+       .press-effect for their own tactile feedback instead. */
+    -webkit-tap-highlight-color: transparent;
+    /* Standalone/PWA launches shouldn't let the user pinch-zoom the chrome
+       like a webpage; inputs still zoom-to-focus as expected on iOS. */
+    touch-action: manipulation;
+  }
+
+  /* Long-press showing iOS's link/image callout on chrome elements (nav,
+     buttons, icons) reads as "web page", not "app". Scoped with a class
+     rather than applied globally so text content stays normally
+     selectable/copyable everywhere (AI output, post bodies, chat, etc). */
+  .no-callout {
+    -webkit-touch-callout: none;
+  }
+
+  /* Consistent, accessible focus ring app-wide instead of default browser outline */
+  :focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px theme('colors.white'), 0 0 0 4px theme('colors.slate.400');
+    border-radius: 6px;
+  }
+  .dark :focus-visible {
+    box-shadow: 0 0 0 2px theme('colors.slate.950'), 0 0 0 4px theme('colors.slate.500');
+  }
+
+  /* Thin, unobtrusive scrollbars so overflow areas feel native/premium */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.slate.300') transparent;
+  }
+  .dark * {
+    scrollbar-color: theme('colors.slate.700') transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: theme('colors.slate.300');
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  .dark ::-webkit-scrollbar-thumb {
+    background-color: theme('colors.slate.700');
+    background-clip: content-box;
+  }
+
+  img {
+    @apply select-none;
+  }
+
+  /* Respect reduced-motion preferences: strip animation/transition without breaking layout */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Skeleton shimmer: a soft light sweep over a flat base, calmer than plain pulse */
+  .skeleton-shimmer {
+    background-image: linear-gradient(
+      100deg,
+      theme('colors.slate.200') 30%,
+      theme('colors.slate.100') 45%,
+      theme('colors.slate.100') 55%,
+      theme('colors.slate.200') 70%
+    );
+    background-size: 200% 100%;
+  }
+  .dark .skeleton-shimmer {
+    background-image: linear-gradient(
+      100deg,
+      theme('colors.slate.800') 30%,
+      theme('colors.slate.700') 45%,
+      theme('colors.slate.700') 55%,
+      theme('colors.slate.800') 70%
+    );
+  }
+
+  /* Route transition: quick fade + rise, keyed by pathname in AppLayout.
+     This wrapper is a direct ancestor of every routed page's content —
+     including every Modal/Dialog rendered inline inside those pages — so
+     what happens to ITS computed style matters far beyond this element.
+
+     Fill mode is intentionally `backwards`, not `both`. `both` would keep
+     applying the final keyframe state (`transform: translateY(0)`) forever
+     after the 220ms animation finishes, because `animation-fill-mode:
+     forwards` (which `both` includes) freezes the end state. Even an
+     identity `translateY(0)` is a non-'none' transform, and per spec ANY
+     element with an active transform becomes the containing block for its
+     `position: fixed` descendants — so every Modal opened on any page would
+     silently be positioned/clipped relative to this div instead of the
+     viewport, instead of covering the full screen as a top-level overlay
+     should. `backwards` still applies the initial (pre-animation) keyframe
+     state to avoid a flash of unstyled content, but drops back to the
+     default (no transform) once the animation completes. */
+  .page-transition {
+    animation: fade-in 220ms cubic-bezier(0.16, 1, 0.3, 1) backwards, slide-up 220ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  /* Shared "pressable" affordance for buttons/interactive tiles */
+  .press-effect {
+    transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .press-effect:active {
+    transform: scale(0.97);
+  }
+}
+
+@layer utilities {
+  .animation-delay-75 {
+    animation-delay: 75ms;
+  }
+  .animation-delay-150 {
+    animation-delay: 150ms;
+  }
+  .animation-delay-225 {
+    animation-delay: 225ms;
+  }
+
+  /* Notch/home-indicator aware spacing, for anything fixed to a screen edge
+     (bottom tab bar, floating action buttons, toast stacks, sheets). */
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-area-bottom {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 1px);
+  }
+}
