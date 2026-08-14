@@ -102,11 +102,31 @@ const KNOWN_BAD_ARABIC_PATTERNS = [
   'تتدحرج الأداء إلى معضلة',
 ];
 
+/** Any script that is neither Arabic nor Latin (CJK, Hiragana/Katakana,
+ * Hangul, Cyrillic, Devanagari, Thai, Hebrew, ...). A ratio-based check like
+ * excessive_latin_mixing below is useless against a single stray non-Latin
+ * character buried in an otherwise-long Arabic post (its share of the text
+ * never crosses a percentage threshold) — and these characters are counted
+ * by neither the Arabic nor the Latin regex, so previously they were
+ * invisible to this guard entirely. Zero tolerance: legitimate Arabic
+ * content never contains these scripts, so a single occurrence fails. */
+const FOREIGN_SCRIPT_RE = /[\u4E00-\u9FFF\u3040-\u30FF\u31F0-\u31FF\uAC00-\uD7AF\u0400-\u04FF\u0900-\u097F\u0E00-\u0E7F\u0590-\u05FF]/;
+
+/** A Latin-script word carrying a non-ASCII diacritic (é, ñ, ü, ã, ç, ...).
+ * Same blind spot as FOREIGN_SCRIPT_RE: a single leaked French/Spanish/
+ * Portuguese word (e.g. "Estratégias") is invisible to excessive_latin_mixing
+ * because one word's character count never reaches 60% of a long post's
+ * Arabic character count. Legitimate Egyptian-Arabic business content uses
+ * plain ASCII English terms (SaaS, CRM, ROI...), never accented Latin, so
+ * this is a safe zero-tolerance signal rather than a ratio.  */
+const ACCENTED_LATIN_WORD_RE = /[a-zA-Z]*[àâäáãåāèéêëēìíîïīòóôöõøōùúûüūçñÿ][a-zA-Z]*/;
+
 /** Cheap, deterministic pre-check for obviously broken Arabic — run before
  * the AI QC pass, not instead of it. Only catches clear-cut failure
  * patterns (garbled word salad, abnormal repetition, heavy Latin
- * intrusion, known bad fragments, leaked system labels); anything subtler
- * is left to the AI QC agent's Arabic Naturalness scoring. */
+ * intrusion, non-Arabic script leaks, known bad fragments, leaked system
+ * labels); anything subtler is left to the AI QC agent's Arabic
+ * Naturalness scoring. */
 export function arabicNaturalnessGuard(text: string): { pass: boolean; reasons: string[] } {
   const trimmed = text.trim();
   const reasons: string[] = [];
@@ -116,6 +136,9 @@ export function arabicNaturalnessGuard(text: string): { pass: boolean; reasons: 
   const arabicChars = (trimmed.match(/[\u0600-\u06FF]/g) ?? []).length;
   const latinChars = (trimmed.match(/[a-zA-Z]/g) ?? []).length;
   if (arabicChars > 0 && latinChars > arabicChars * 0.6) reasons.push('excessive_latin_mixing');
+
+  if (FOREIGN_SCRIPT_RE.test(trimmed)) reasons.push('non_arabic_script_leak');
+  if (arabicChars > 0 && ACCENTED_LATIN_WORD_RE.test(trimmed)) reasons.push('accented_latin_word_leak');
 
   if (/(\S+)(\s+\1){2,}/.test(trimmed)) reasons.push('abnormal_repetition');
 
