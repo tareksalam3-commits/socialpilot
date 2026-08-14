@@ -1,0 +1,15 @@
+# Dependencies and build artifacts
+node_modules/
+dist/
+
+# Local environment files and secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Tooling and operating-system files
+coverage/
+.vite/
+*.log
+.DS_Store
