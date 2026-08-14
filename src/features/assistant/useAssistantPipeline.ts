@@ -5,13 +5,15 @@ import { useToast } from '@/providers/ToastProvider';
 import { useLanguage } from '@/providers/LanguageProvider';
 import { useAISettings } from '@/hooks/useAISettings';
 import { useAccounts } from '@/hooks/useAccounts';
+import { useMedia } from '@/hooks/useMedia';
 import { usePosts } from '@/hooks/usePosts';
 import { publishingService } from '@/services/publishingService';
-import { updateGeneratedContent } from '@/services/contentPersistence';
+import { persistGeneratedContent, updateGeneratedContent } from '@/services/contentPersistence';
 import { contentGenerationJobRepository, type PersistedCampaignJob } from '@/repositories/contentGenerationJobRepository';
 import { conversationRepository, messageRepository } from '@/repositories/conversationRepository';
 import { contentCharacteristicsRepository } from '@/repositories/contentCharacteristicsRepository';
 import { buildContentCharacteristics } from '@/engines/contentEngine/contentCharacteristics';
+import { buildOptimizationContext, renderOptimizationContextBlock } from '@/engines/contentEngine/optimizationContext';
 import { supabase } from '@/services/supabase';
 import {
   runPlannerAgent,
@@ -20,12 +22,19 @@ import {
   runRewriteAgent,
   reviewGeneratedContent,
   computeScheduleTimes,
+  findMatchingMedia,
+  generateDraftImage,
+  collectContentContext,
   verifyPost,
   sanitizeGeneratedContent,
   evaluateContentApproval,
   validateFinalPostContent,
   isLinkedInPlatform,
   buildWorkspaceContext,
+  runStrategyAgent,
+  runResearchDecision,
+  runResearchAgent,
+  runHookAgent,
   runPlatformAdaptationAgent,
   evaluateAIDecision,
   recordAIDecision,
@@ -49,9 +58,47 @@ import type { Post } from '@/types/social';
 // color in the UI lives in the page component, next to qcBadgeVariant.)
 const MAX_QC_ATTEMPTS = 3;
 
+// How many posts within the same campaign the Creator/QC/Image/Platform-
+// Adaptation pipeline runs at once. Previously every post in a campaign was
+// generated one after another (a full author→QC→image→adapt round trip
+// each), so an 8-post campaign could take minutes. A small pool keeps
+// several posts in flight together — enough to meaningfully cut wall-clock
+// time — without hammering the provider chain hard enough to trip
+// per-provider rate limits the way full unlimited parallelism would.
+const CREATION_CONCURRENCY = 3;
+
 function deriveTitle(content: string): string {
   const firstLine = content.split('\n').find((l) => l.trim().length > 0) ?? content;
   return firstLine.trim().slice(0, 80);
+}
+
+let localIdCounter = 0;
+function nextLocalId(): string {
+  localIdCounter += 1;
+  return `draft-${Date.now()}-${localIdCounter}`;
+}
+
+/** Runs `task` for each index in [0, count) with at most `concurrency`
+ * running at once, calling `onSettled` as each one finishes (in whatever
+ * order they complete, not necessarily index order) so callers can update
+ * progressive UI state immediately rather than waiting for the whole batch.
+ * A cheap hand-rolled pool instead of a dependency: grab the next index,
+ * await it, repeat, with `concurrency` of these workers running together. */
+async function runWithConcurrency<T>(
+  count: number,
+  concurrency: number,
+  task: (index: number) => Promise<T>,
+  onSettled: (index: number, result: T) => void,
+): Promise<void> {
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < count) {
+      const index = cursor++;
+      const result = await task(index);
+      onSettled(index, result);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, count) }, () => worker()));
 }
 
 /** Owns every piece of state and every pipeline step (Planner → Audience
@@ -66,6 +113,7 @@ export function useAssistantPipeline() {
   const { push } = useToast();
   const { settings } = useAISettings();
   const { accounts } = useAccounts();
+  const { items: mediaItems } = useMedia();
   const { create: createPost } = usePosts();
 
   const [requestText, setRequestText] = useState('');
@@ -440,6 +488,273 @@ export function useAssistantPipeline() {
       });
     }
   }, [campaignJobId, workspace, push, t]);
+
+  // Phase 2 of the pipeline: Content Generation → Quality Control → Preview.
+  // Split out so it can run either right after Planning (in principle) or —
+  // as actually wired up below — only once the user has approved or edited
+  // the Audience Inference suggestion. `planForRun` always carries the
+  // final, user-approved audience.
+  const runCreationPhase = useCallback(
+    async (runId: number, planForRun: CampaignPlan) => {
+      if (!workspace) return;
+
+      // 1.75 Strategy Agent (Phase 2, STEP 6) + Research Decision/Agent
+      // (STEP 7) — both now AWAITED (no longer fire-and-forget like in
+      // STEP 5/6/7's own commits) because STEP 8 (Content Agent, right
+      // below) is the first thing that actually reads them: Content
+      // Generation needs the real Strategy/Research result, not whatever
+      // happened to have resolved in the background by the time it runs.
+      // Still fully defensive — either call failing just means Content
+      // Generation proceeds with strategy/research as null, exactly like
+      // every other optional-context failure in this pipeline.
+      strategyRef.current = null;
+      researchRef.current = null;
+      hookRef.current = null;
+      const creationDialect = resolveWorkspaceDialect(workspace);
+      try {
+        const { strategy } = await runStrategyAgent(workspace.id, planForRun, workspaceContextRef.current, aiParams);
+        if (runIdRef.current !== runId) return;
+        strategyRef.current = strategy;
+      } catch {
+        // strategyRef.current stays null — Content Agent below treats a
+        // missing strategy the same as a missing Brand Voice: optional
+        // context, never a blocker.
+      }
+      // Hook Agent (Phase 2, STEP 9) — only needs WorkspaceContext +
+      // Strategy (just resolved above), never Research/content text, so it
+      // runs here rather than after the Content Sources step. Same
+      // non-blocking contract: a failure leaves hookRef.current null and
+      // the Creator falls back to writing its own opening line.
+      try {
+        const { result } = await runHookAgent(workspace.id, planForRun, workspaceContextRef.current, strategyRef.current, aiParams, creationDialect);
+        if (runIdRef.current !== runId) return;
+        hookRef.current = result.best;
+      } catch {
+        // hookRef.current stays null — same optional-context contract.
+      }
+      // Phase 3, STEP 9 — Optimization Context. Deterministic, no AI call
+      // (see optimizationContext.ts); scoped to this run's platforms so
+      // learnings from other platforms never leak in (section 20).
+      // Non-blocking like everything else here — an empty context just
+      // means no block gets injected into the Creator's prompt.
+      try {
+        const optimizationContext = await buildOptimizationContext(workspace.id, planForRun.platforms);
+        optimizationContextRef.current = renderOptimizationContextBlock(optimizationContext);
+      } catch {
+        optimizationContextRef.current = null;
+      }
+      try {
+        const { decision } = await runResearchDecision(workspace.id, requestText, planForRun, aiParams);
+        if (runIdRef.current !== runId) return;
+        if (decision.research_required) {
+          researchRef.current = await runResearchAgent(workspace.id, decision, aiParams);
+        } else {
+          researchRef.current = { research_required: false, research_available: false, evidence: [], sources: [], verified_context: null, reason: decision.reason };
+        }
+        if (runIdRef.current !== runId) return;
+      } catch {
+        // researchRef.current stays null — same non-blocking contract.
+      }
+
+      // 2. Content Sources step — collect, clean and summarize only when the
+      // request implies it. Reuses the Content Sources module end-to-end.
+      let contentText: string | null = null;
+      if (planForRun.use_content_sources) {
+        setStage('collecting');
+        const { contentText: text, used, error: sourcesError } = await collectContentContext(workspace.id);
+        if (runIdRef.current !== runId) return;
+        contentText = text;
+        contentTextRef.current = text;
+        setUsedSources(used);
+        if (sourcesError === 'no_sources') {
+          push({ title: t('assistant.toast.noContentSources'), variant: 'error' });
+        } else if (sourcesError === 'no_new_items') {
+          push({ title: t('assistant.toast.noNewContentItems'), variant: 'error' });
+        } else if (sourcesError) {
+          push({ title: t('assistant.toast.contentSourcesFailed'), description: sourcesError, variant: 'error' });
+        }
+      }
+
+      // 3. Creator Agent — automatically chained, no user action needed here.
+      // Posts within the campaign now generate in parallel (up to
+      // CREATION_CONCURRENCY at once) instead of one full author→QC→
+      // image→adapt round trip after another. Placeholders (generating:
+      // true, same UI state regenerateDraft already uses for a single
+      // draft) go up front so every slot is visible immediately and fills
+      // in as it completes, in whatever order that happens to be —
+      // `created` stays indexed by post position so the final list the
+      // user sees is still in original order regardless.
+      setStage('creating');
+      setCreatingProgress({ done: 0, total: planForRun.post_count });
+      const scheduleTimes = computeScheduleTimes(planForRun, planForRun.post_count);
+      const created: DraftPost[] = Array.from({ length: planForRun.post_count }, (_, i) => ({
+        local_id: nextLocalId(),
+        content: '',
+        platforms: planForRun.platforms,
+        scheduled_for: scheduleTimes[i].toISOString(),
+        media_urls: [],
+        generating: true,
+      }));
+      setDrafts([...created]);
+      let doneCount = 0;
+
+      const generateOnePost = async (i: number): Promise<DraftPost> => {
+        const { content, quality, needsReview, approved, quality_error, genError } = await generateWithQualityControl(planForRun, i, contentText);
+        if (runIdRef.current !== runId) return created[i];
+        const finalContent = content || t('assistant.draft.generationFailedPlaceholder');
+        if (genError) push({ title: t('assistant.toast.postGenerationIssue', { index: i + 1 }), description: genError, variant: 'error' });
+        if (needsReview) push({ title: t('assistant.toast.needsReview', { index: i + 1 }), variant: 'info' });
+
+        // Create Images step: reuse a matching Media Library asset first —
+        // only generate a brand-new AI image when nothing already fits.
+        let media_urls: string[] = [];
+        if (imagesEnabled) {
+          const matched = findMatchingMedia(`${planForRun.objective} ${finalContent}`, mediaItems);
+          if (matched) {
+            media_urls = [matched];
+          } else {
+            const { url: generatedUrl, error: imageError } = await generateDraftImage(workspace.id, planForRun, finalContent);
+            if (runIdRef.current !== runId) return created[i];
+            if (generatedUrl) {
+              media_urls = [generatedUrl];
+            } else if (imageError) {
+              push({ title: t('assistant.toast.imageGenerationFailed', { index: i + 1 }), description: imageError, variant: 'error' });
+            }
+          }
+        }
+
+        // Platform Adaptation Engine (Phase 2, STEP 10) — only worth
+        // running once there's real, QC'd content to adapt. Best-effort:
+        // a failure here just leaves platformVariants empty, and the
+        // Master Content (`finalContent`) stays what's shown/published for
+        // every platform in `platformForRun.platforms`, same as before
+        // this step existed.
+        let platformVariants: Record<string, string> | undefined;
+        if (content) {
+          try {
+            const { result } = await runPlatformAdaptationAgent(
+              workspace.id,
+              finalContent,
+              planForRun.platforms,
+              workspaceContextRef.current,
+              aiParams,
+              resolveWorkspaceDialect(workspace),
+            );
+            if (runIdRef.current !== runId) return created[i];
+            platformVariants = Object.keys(result.variants).length ? result.variants : undefined;
+          } catch {
+            // platformVariants stays undefined — optional context, never a blocker.
+          }
+        }
+
+        // AI Decision Layer (Phase 2, STEP 13, section 24) — the central
+        // task-level verdict for this draft's generation, computed from
+        // this draft's own Quality Decision (STEP 11) plus whether Research
+        // actually landed when it was required (researchRef.current is the
+        // same run-wide ResearchResult passed to the Creator above).
+        // Purely informational at this point — see aiDecisionLayer.ts and
+        // DraftPost.aiDecision for why it doesn't gate anything yet.
+        const aiDecision: AIDecision = evaluateAIDecision('draft_generation', quality, researchRef.current);
+        recordAIDecision(workspace.id, aiDecision, {
+          contextVersion: workspaceContextRef.current?.context_version,
+          qualityScore: quality?.score ?? null,
+        }).catch(() => {});
+
+        // Persist immediately after generation and QC. The same `posts` row
+        // then travels through editing, review, scheduling and publishing;
+        // this avoids a page-local draft that disappears on navigation.
+        let persistedPostId: string | undefined;
+        try {
+          const persisted = await persistGeneratedContent({
+            workspaceId: workspace.id,
+            title: deriveTitle(finalContent),
+            content: finalContent,
+            platforms: planForRun.platforms,
+            mediaUrls: media_urls,
+            scheduledFor: scheduleTimes[i].toISOString(),
+            source: 'ai_assistant',
+            sourceLabel: 'AI Assistant',
+            stage: approved ? 'approved' : 'in_review',
+            quality,
+            needsReview: needsReview || quality_error,
+            platformVariants,
+            metadata: {
+              assistant: {
+                source_request: requestText,
+                quality,
+                approved: !!approved,
+                needs_review: !!needsReview,
+                quality_error: !!quality_error,
+                platform_variants: platformVariants ?? null,
+                ai_decision: aiDecision,
+              },
+            },
+          });
+          persistedPostId = persisted.id;
+        } catch (persistError) {
+          // A visible warning keeps the current review UI usable while making
+          // a persistence failure explicit instead of silently losing work.
+          push({
+            title: t('assistant.toast.saveFailed'),
+            description: persistError instanceof Error ? persistError.message : finalContent.slice(0, 60),
+            variant: 'error',
+          });
+        }
+
+        return {
+          local_id: created[i].local_id,
+          post_id: persistedPostId,
+          content: finalContent,
+          platforms: planForRun.platforms,
+          scheduled_for: scheduleTimes[i].toISOString(),
+          media_urls,
+          quality,
+          needsReview,
+          approved,
+          quality_error,
+          reviewedContent: content ? finalContent : undefined,
+          platformVariants,
+          aiDecision,
+        };
+      };
+
+      await runWithConcurrency(planForRun.post_count, CREATION_CONCURRENCY, generateOnePost, (i, draft) => {
+        if (runIdRef.current !== runId) return;
+        created[i] = draft;
+        doneCount += 1;
+        setCreatingProgress({ done: doneCount, total: planForRun.post_count });
+        setDrafts([...created]);
+      });
+      if (runIdRef.current !== runId) return;
+
+      // 4. Quality Review — a standalone stage, separate from 'creating'.
+      // Every draft above already ran through the Content Quality Control
+      // pass (generateWithQualityControl's own auto-fix + re-review loop,
+      // up to MAX_QC_ATTEMPTS), so each draft's `approved` flag is already
+      // final; this stage's job is only to surface that result clearly and
+      // enforce it as a hard gate before the Publisher Agent runs. Pause
+      // briefly so the per-draft status (تم الاعتماد / يحتاج تعديل) is
+      // actually visible rather than flashing through instantly.
+      setStage('quality');
+      await new Promise((r) => setTimeout(r, 400));
+      if (runIdRef.current !== runId) return;
+      if (created.length > 0 && created.every((d) => d.approved)) {
+        // مراجعة الجودة ✓ — every draft passed, so (and only so) we're
+        // allowed through to Publisher Agent / تحضير النشر.
+        setStage('preparing');
+        await new Promise((r) => setTimeout(r, 250));
+        if (runIdRef.current !== runId) return;
+        setStage('review');
+      }
+      // else: stays on 'quality'. Flagged drafts need a fix — regenerateDraft()
+      // (auto-fix + re-review) or a manual edit — and the user must call
+      // proceedFromQuality() once every draft is approved. There is no
+      // other path from here into 'preparing'.
+    },
+    [workspace, imagesEnabled, mediaItems, generateWithQualityControl, aiParams, requestText, push, t],
+  );
+  // Retained as the documented phase implementation for future resume wiring.
+  void runCreationPhase;
 
   // Manual continue out of Quality Review once every flagged draft has been
   // fixed. Re-checks the approval condition itself rather than trusting the

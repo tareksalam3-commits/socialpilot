@@ -43,11 +43,11 @@ function statusVariant(status: Post['status']): 'success' | 'info' | 'error' | '
 // Arabic Content Quality Control: minimum passing score used only for the
 // badge color below (the actual pass bar lives in evaluateContentApproval,
 // used inside useAssistantPipeline).
-const QC_PASS_SCORE = 80;
+const QC_PASS_SCORE = 90;
 
 function qcBadgeVariant(score: number): 'success' | 'warning' | 'error' {
   if (score >= QC_PASS_SCORE) return 'success';
-  if (score >= 60) return 'warning';
+  if (score >= 70) return 'warning';
   return 'error';
 }
 

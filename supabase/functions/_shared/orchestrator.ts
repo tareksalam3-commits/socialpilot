@@ -1,6 +1,44 @@
 import { SupabaseClient } from 'npm:@supabase/supabase-js@2.57.4';
 import { nextRetryDelayMs, publishToPlatform } from './publish.ts';
 
+const QC_MIN_SCORE = 90;
+const QC_MIN_ARABIC = 90;
+const QC_MIN_LINKEDIN = 90;
+const QC_MIN_BRAND = 90;
+
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function isLinkedIn(platform: string): boolean { return platform.toLowerCase().includes('linkedin'); }
+
+async function assertPublishable(post: Record<string, unknown>, platform?: string): Promise<void> {
+  const proof = post.quality_proof as Record<string, unknown> | null;
+  const content = typeof post.content === 'string' ? post.content : '';
+  if (!proof || proof.approved !== true) throw new Error('Publish blocked: post has no approved quality proof');
+  const expectedHash = typeof post.content_hash === 'string' ? post.content_hash : '';
+  const proofHash = typeof proof.content_hash === 'string' ? proof.content_hash : '';
+  const actualHash = await sha256(content);
+  if (!expectedHash || expectedHash !== proofHash || actualHash !== expectedHash) throw new Error('Publish blocked: content hash does not match the approved text');
+  if (typeof proof.reviewed_content !== 'string' || proof.reviewed_content !== content) throw new Error('Publish blocked: approved proof is for different content');
+  if (Number(proof.score) < QC_MIN_SCORE || Number(proof.arabic_quality) < QC_MIN_ARABIC || Number(proof.brand_fit) < QC_MIN_BRAND) throw new Error('Publish blocked: quality thresholds are below 90');
+  if (isLinkedIn(platform ?? '') && Number(proof.linkedin_fit) < QC_MIN_LINKEDIN) throw new Error('Publish blocked: LinkedIn fit is below 90');
+  if (Array.isArray(proof.critical_issues) && proof.critical_issues.length > 0) throw new Error('Publish blocked: critical quality issue exists');
+}
+
+async function assertTargetPublishable(post: Record<string, unknown>, platform: string): Promise<void> {
+  const targetContent = resolveTargetContent(post, platform);
+  if (targetContent === post.content) return assertPublishable(post, platform);
+  const metadata = (post.metadata as Record<string, unknown> | null) ?? {};
+  const assistant = (metadata.assistant as Record<string, unknown> | null) ?? {};
+  const variantProofs = (assistant.platform_variant_proofs as Record<string, unknown> | null) ?? {};
+  const variantProof = variantProofs[platform] as Record<string, unknown> | undefined;
+  if (!variantProof) throw new Error('Publish blocked: platform variant was not reviewed');
+  const clone = { ...post, content: targetContent, content_hash: variantProof.content_hash, quality_proof: variantProof };
+  await assertPublishable(clone, platform);
+}
+
 export async function log(supabase: SupabaseClient, row: { workspace_id: string; post_id?: string; target_id?: string; platform?: string; event: string; message?: string }) {
   await supabase.from('publishing_logs').insert(row);
 }
@@ -90,6 +128,7 @@ export async function retryTarget(
     if (!account?.access_token) throw new Error('No access token for this account');
 
     const targetContent = resolveTargetContent(post, target.platform as string);
+    await assertTargetPublishable(post, target.platform as string);
     const externalId = await publishToPlatform(
       target.platform as string,
       account.access_token,
@@ -142,6 +181,7 @@ export async function retryTarget(
 export async function publishPost(supabase: SupabaseClient, post: Record<string, unknown>, callerId: string | null): Promise<'published' | 'failed'> {
   const postId = post.id as string;
   const workspaceId = post.workspace_id as string;
+  await assertPublishable(post);
 
   const { data: targets } = await supabase.from('post_platform_targets').select('*').eq('post_id', postId);
 
@@ -177,6 +217,7 @@ export async function publishPost(supabase: SupabaseClient, post: Record<string,
       if (!account?.access_token) throw new Error('No access token for this account');
 
       const targetContent = resolveTargetContent(post, target.platform);
+      await assertTargetPublishable(post, target.platform);
       const externalId = await publishToPlatform(
         target.platform,
         account.access_token,

@@ -26,10 +26,10 @@ export function stripFence(text: string): string {
     .trim();
 }
 
-const QC_MIN_SCORE = 80;
-const QC_MIN_ARABIC_QUALITY = 80;
-const QC_MIN_LINKEDIN_FIT = 75;
-const QC_MIN_BRAND_FIT = 75;
+export const QC_MIN_SCORE = 90;
+export const QC_MIN_ARABIC_QUALITY = 90;
+export const QC_MIN_LINKEDIN_FIT = 90;
+export const QC_MIN_BRAND_FIT = 90;
 
 /** Preview/publishing/QC metadata markers that must never appear inside
  * `posts.content` — these belong only in Preview UI, never in the post
@@ -110,7 +110,7 @@ const KNOWN_BAD_ARABIC_PATTERNS = [
  * by neither the Arabic nor the Latin regex, so previously they were
  * invisible to this guard entirely. Zero tolerance: legitimate Arabic
  * content never contains these scripts, so a single occurrence fails. */
-const FOREIGN_SCRIPT_RE = /(?:[\u4E00-\u9FFF]|[\u3040-\u30FF]|[\u31F0-\u31FF]|[\uAC00-\uD7AF]|[\u0400-\u04FF]|[\u0900-\u097F]|[\u0E00-\u0E7F]|[\u0590-\u05FF])/;
+const FOREIGN_SCRIPT_RE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|\p{Script=Cyrillic}|\p{Script=Devanagari}|\p{Script=Thai}|\p{Script=Hebrew}/u;
 
 /** A Latin-script word carrying a non-ASCII diacritic (é, ñ, ü, ã, ç, ...).
  * Same blind spot as FOREIGN_SCRIPT_RE: a single leaked French/Spanish/
@@ -182,16 +182,15 @@ export function evaluateContentApproval(
     reasons.push(...quality.critical_issues.map((i) => `critical:${i}`));
   }
   if (!quality.approved) reasons.push('qc_not_approved');
-  if (quality.score < QC_MIN_SCORE) reasons.push('score_below_minimum');
-  if (typeof quality.arabic_quality === 'number' && quality.arabic_quality < QC_MIN_ARABIC_QUALITY) {
-    reasons.push('arabic_quality_below_minimum');
+  if (typeof quality.score !== 'number' || quality.score < QC_MIN_SCORE) reasons.push('score_below_minimum');
+  if (typeof quality.arabic_quality !== 'number') reasons.push('arabic_quality_missing');
+  else if (quality.arabic_quality < QC_MIN_ARABIC_QUALITY) reasons.push('arabic_quality_below_minimum');
+  if (linkedInTarget) {
+    if (typeof quality.linkedin_fit !== 'number') reasons.push('linkedin_fit_missing');
+    else if (quality.linkedin_fit < QC_MIN_LINKEDIN_FIT) reasons.push('linkedin_fit_below_minimum');
   }
-  if (linkedInTarget && typeof quality.linkedin_fit === 'number' && quality.linkedin_fit < QC_MIN_LINKEDIN_FIT) {
-    reasons.push('linkedin_fit_below_minimum');
-  }
-  if (typeof quality.brand_fit === 'number' && quality.brand_fit < QC_MIN_BRAND_FIT) {
-    reasons.push('brand_fit_below_minimum');
-  }
+  if (typeof quality.brand_fit !== 'number') reasons.push('brand_fit_missing');
+  else if (quality.brand_fit < QC_MIN_BRAND_FIT) reasons.push('brand_fit_below_minimum');
 
   return { approved: guard.pass && reasons.length === 0, reasons };
 }

@@ -39,6 +39,8 @@ export const postRepository = {
     media_urls?: string[];
     scheduled_for?: string | null;
     metadata?: Record<string, unknown>;
+    content_hash?: string | null;
+    quality_proof?: Record<string, unknown> | null;
   }): Promise<Post> {
     const { data: userData } = await supabase.auth.getUser();
     const { data, error } = await supabase
@@ -53,6 +55,8 @@ export const postRepository = {
         media_urls: input.media_urls ?? [],
         scheduled_for: input.scheduled_for ?? null,
         metadata: input.metadata ?? {},
+        content_hash: input.content_hash ?? null,
+        quality_proof: input.quality_proof ?? null,
       })
       .select()
       .single();

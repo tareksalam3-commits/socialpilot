@@ -33,7 +33,7 @@ function parseQCResult(raw: string): ContentQualityResult | null {
   try {
     const json = JSON.parse(stripFence(raw)) as Record<string, unknown>;
     const score = clampScore(json.score);
-    const approved = typeof json.approved === 'boolean' ? json.approved : score >= 80;
+    const approved = typeof json.approved === 'boolean' ? json.approved : score >= 90;
     const issues = Array.isArray(json.issues) ? (json.issues as unknown[]).filter((i): i is string => typeof i === 'string') : [];
     const suggestions = Array.isArray(json.suggestions)
       ? (json.suggestions as unknown[]).filter((i): i is string => typeof i === 'string')
@@ -138,9 +138,9 @@ ${linkedInTarget ? 'المنصة المستهدفة تتضمن LinkedIn — طب
 - يحتوي على أي معلومات UI أو تشغيلية (مثل Preview، Platform، Account، Scheduled، Status، Awaiting Confirmation، Content Score، Quality Score).
 - يبدو كإعلان مولّد آليًا بدل منشور شخصي طبيعي.
 
-مهم جدًا: score >= 80 وحدها لا تعني الموافقة. إذا كانت Arabic Naturalness ضعيفة (arabic_quality منخفض — أي النص فصحى أو ترجمة حرفية أو لهجة غير ${meta.name}) فيجب أن تكون approved = false حتى لو كانت score العامة مرتفعة. مثال: arabic_quality = 55 مع score = 85 يجب أن تُرجع approved = false. معيار arabic_quality نفسه بغض النظر عن اللهجة المطلوبة هو نفس معيار الجودة اللغوية العالية المطبّق على العربية المصرية المهنية (المرجع الأساسي لجودة النظام) — وليس معيارًا أخف لمجرد أن اللهجة المطلوبة ليست المصرية.
+مهم جدًا: score >= 90 وحدها لا تعني الموافقة. إذا كانت Arabic Naturalness ضعيفة (arabic_quality منخفض — أي النص فصحى أو ترجمة حرفية أو لهجة غير ${meta.name}) فيجب أن تكون approved = false حتى لو كانت score العامة مرتفعة. مثال: arabic_quality = 55 مع score = 85 يجب أن تُرجع approved = false. معيار arabic_quality نفسه بغض النظر عن اللهجة المطلوبة هو نفس معيار الجودة اللغوية العالية المطبّق على العربية المصرية المهنية (المرجع الأساسي لجودة النظام) — وليس معيارًا أخف لمجرد أن اللهجة المطلوبة ليست المصرية.
 
-الدرجة (score) من 0 إلى 100. approved يجب أن يكون true فقط إذا كانت score >= 80 وكانت Arabic Naturalness (arabic_quality) طبيعية فعلًا وليست ضعيفة.
+الدرجة (score) من 0 إلى 100. approved يجب أن يكون true فقط إذا كانت score >= 90 وكانت Arabic Naturalness (arabic_quality) طبيعية فعلًا وليست ضعيفة، مع اجتياز brand_fit >= 90 وlinkedin_fit >= 90 عند استهداف LinkedIn.
 
 أرجع JSON فقط بهذا الشكل بالضبط (بدون أي نص آخر):
 {"approved": boolean, "score": number, "issues": string[], "suggestions": string[], "arabic_quality": number, "linkedin_fit": number, "brand_fit": number, "hook_score": number, "clarity_score": number, "relevance_score": number, "brand_score": number, "platform_score": number, "language_score": number, "cta_score": number, "originality_score": number, "factual_score": number, "readability_score": number, "critical_issues": string[]}`,

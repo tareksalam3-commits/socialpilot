@@ -13,6 +13,8 @@ export type Post = {
   published_at: string | null;
   error_message: string | null;
   metadata: Record<string, unknown>;
+  content_hash: string | null;
+  quality_proof: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 };

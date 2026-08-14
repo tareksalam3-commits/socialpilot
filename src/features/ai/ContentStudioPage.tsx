@@ -36,7 +36,7 @@ import { useLanguage } from '@/providers/LanguageProvider';
 import { persistGeneratedContent } from '@/services/contentPersistence';
 import { resolveWorkspaceDialect } from '@/constants/dialects';
 import { buildArabicWritingRules } from '@/engines/contentEngine/arabicWritingRules';
-import { runCreatorAgent, reviewGeneratedContent } from '@/engines/aiOrchestrator';
+import { runCreatorAgent, runRewriteAgent, runQualityControlLoop } from '@/engines/aiOrchestrator';
 import { Button, Card, MarkdownRenderer, Badge, EmptyState } from '@/ui';
 import type { ContentSourceType } from '@/types/contentSources';
 import type { CampaignPlan } from '@/types/assistant';
@@ -147,6 +147,7 @@ export function ContentStudioPage() {
   const [savedContentId, setSavedContentId] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [activeGenerator, setActiveGenerator] = useState<GeneratorType | null>(null);
+  const [qualityStage, setQualityStage] = useState<'idle' | 'generating' | 'qc' | 'improving' | 'rechecking' | 'approved' | 'needs_review'>('idle');
 
   // The three automatic inputs every generator draws from — no manual entry
   // anywhere in this page.
@@ -212,183 +213,95 @@ export function ContentStudioPage() {
     return `MANDATORY OUTPUT LANGUAGE: ${workspace?.language || 'en'}. Write the entire output only in this workspace content language; do not mix languages unless the brand material itself requires a proper noun.`;
   };
 
+  const runStudioQualityLoop = async (initialContent: string, originalRequest: string, initialModel?: string | null) => {
+    const dialect = resolveWorkspaceDialect(workspace!);
+    setQualityStage('qc');
+    const result = await runQualityControlLoop(
+      workspace!.id,
+      [platform],
+      originalRequest,
+      { model: settings?.qc_model ?? undefined, maxTokens: settings?.max_tokens },
+      async (attempt, previous) => {
+        if (attempt === 0) return { content: initialContent, model: initialModel ?? null };
+        setQualityStage('improving');
+        const rewritten = await runRewriteAgent(
+          workspace!.id,
+          previous?.content || initialContent,
+          previous?.quality ?? null,
+          previous?.reasons ?? [],
+          [platform],
+          { model: settings?.default_model, maxTokens: settings?.max_tokens },
+          null,
+          dialect,
+        );
+        setQualityStage('rechecking');
+        return { content: rewritten.content, model: rewritten.model };
+      },
+      dialect,
+    );
+    setQualityStage(result.approved ? 'approved' : 'needs_review');
+    return result;
+  };
+
   const generateReadyPosts = async () => {
     if (!workspace || !user) return;
-
     const dialect = resolveWorkspaceDialect(workspace);
     const languageInstruction = buildContentLanguageInstruction();
     const plan: CampaignPlan = {
       objective: 'Create five distinct, ready-to-publish social media posts that are useful, specific, and aligned with the workspace context.',
       audience: audience === 'recruitment' ? 'job recruitment candidates' : audience === 'customers' ? 'current and potential customers' : brandVoice?.audience || 'the workspace audience',
-      platforms: [platform],
-      post_count: 5,
-      cadence: 'once',
-      start: 'now',
-      time_of_day: '12:00',
+      platforms: [platform], post_count: 5, cadence: 'once', start: 'now', time_of_day: '12:00',
       notes: `${audiencePrompts[audience]}\n\n${buildContextBlock()}`,
       use_content_sources: latestSourceItems.length > 0,
     };
     const originalRequest = `${languageInstruction}\n\nGenerate five different ready-to-publish posts. Each post must use a different angle, hook, and value proposition. Respect the selected platform and the workspace's brand, insights, and content sources.`;
-
-    setOutput('');
-    setSavedContentId(null);
-    setStreaming(true);
-    setActiveGenerator('ready_posts');
-
-    const generatedPosts: string[] = [];
-    let lastSavedId: string | null = null;
-    let failures = 0;
-
+    setOutput(''); setSavedContentId(null); setStreaming(true); setActiveGenerator('ready_posts'); setQualityStage('generating');
+    const generatedPosts: string[] = []; let lastSavedId: string | null = null; let failures = 0;
     try {
       for (let index = 0; index < 5; index += 1) {
-        const created = await runCreatorAgent(
-          workspace.id,
-          plan,
-          index,
-          { model: settings?.default_model, temperature: settings?.temperature, maxTokens: settings?.max_tokens, freeOnly: settings?.free_only_mode },
-          null,
-          originalRequest,
-          dialect,
-        );
-        if (created.error || !created.content.trim()) {
-          failures += 1;
-          continue;
-        }
-
-        const review = workspace.language === 'ar'
-          ? await reviewGeneratedContent(
-              workspace.id,
-              created.content,
-              [platform],
-              originalRequest,
-              // Quality Control Model Separation: prefer the dedicated
-              // qc_model, and always exclude the exact model that just
-              // authored `created.content` — QC never grades itself.
-              { model: settings?.qc_model ?? undefined, maxTokens: settings?.max_tokens, freeOnly: settings?.free_only_mode },
-              dialect,
-              created.model,
-            )
-          : { result: null, error: null };
-        const quality = review.result;
-        const needsReview = workspace.language === 'ar' && (!quality || !quality.approved);
-        const stage = quality?.approved ? 'approved' : needsReview ? 'in_review' : 'generated';
-
+        const created = await runCreatorAgent(workspace.id, plan, index, { model: settings?.default_model, temperature: settings?.temperature, maxTokens: settings?.max_tokens, freeOnly: settings?.free_only_mode }, null, originalRequest, dialect);
+        if (created.error || !created.content.trim()) { failures += 1; continue; }
+        const reviewed = await runStudioQualityLoop(created.content, originalRequest, created.model);
         try {
           const saved = await persistGeneratedContent({
             workspaceId: workspace.id,
-            title: created.content.split('\n').find((line) => line.trim())?.trim().slice(0, 80),
-            content: created.content,
-            platforms: [platform],
-            source: 'content_studio_ready_posts',
-            sourceLabel: 'Content Studio · 5 Ready Posts',
-            stage,
-            quality,
-            needsReview,
-            platformVariants: { [platform]: created.content },
-            metadata: {
-              content_studio: {
-                generator: 'ready_posts',
-                platform,
-                audience,
-                sequence: index + 1,
-                total: 5,
-                language: workspace.language,
-                dialect,
-              },
-            },
+            title: reviewed.content.split('\n').find((line) => line.trim())?.trim().slice(0, 80),
+            content: reviewed.content, platforms: [platform], source: 'content_studio_ready_posts',
+            sourceLabel: 'Content Studio · 5 Ready Posts', stage: reviewed.approved ? 'approved' : 'in_review',
+            quality: reviewed.quality, needsReview: reviewed.needsReview || reviewed.quality_error,
+            platformVariants: { [platform]: reviewed.content },
+            metadata: { content_studio: { generator: 'ready_posts', platform, audience, sequence: index + 1, total: 5, language: workspace.language, dialect } },
           });
-          lastSavedId = saved.id;
-          generatedPosts.push(created.content);
-        } catch {
-          failures += 1;
-        }
+          lastSavedId = saved.id; generatedPosts.push(reviewed.content);
+        } catch { failures += 1; }
       }
-
       setOutput(generatedPosts.map((content, index) => `## ${t('ai.studio.readyPosts.postLabel', { count: index + 1 })}\n\n${content}`).join('\n\n---\n\n'));
       setSavedContentId(lastSavedId);
-      if (generatedPosts.length > 0) {
-        push({ title: t('ai.studio.readyPosts.saved', { count: generatedPosts.length }), variant: 'success' });
-      }
-      if (failures > 0) {
-        push({ title: t('ai.studio.readyPosts.partialFailure', { count: failures }), variant: 'info' });
-      }
+      if (generatedPosts.length > 0) push({ title: t('ai.studio.readyPosts.saved', { count: generatedPosts.length }), variant: 'success' });
+      if (failures > 0) push({ title: t('ai.studio.readyPosts.partialFailure', { count: failures }), variant: 'info' });
     } catch (error) {
-      push({
-        title: t('common.generationFailed'),
-        description: error instanceof Error ? error.message : undefined,
-        variant: 'error',
-      });
-    } finally {
-      setStreaming(false);
-      setActiveGenerator(null);
-    }
+      push({ title: t('common.generationFailed'), description: error instanceof Error ? error.message : undefined, variant: 'error' });
+    } finally { setStreaming(false); setActiveGenerator(null); }
   };
 
   const runGenerator = async (gen: GeneratorType) => {
-    if (gen === 'ready_posts') {
-      await generateReadyPosts();
-      return;
-    }
+    if (gen === 'ready_posts') { await generateReadyPosts(); return; }
     if (!workspace || !user) return;
-    setOutput('');
-    setSavedContentId(null);
-    setStreaming(true);
-    setActiveGenerator(gen);
+    setOutput(''); setSavedContentId(null); setStreaming(true); setActiveGenerator(gen); setQualityStage('generating');
     const languageInstruction = buildContentLanguageInstruction();
     const dialect = resolveWorkspaceDialect(workspace);
     const prompt = `${generatorPrompts[gen]}\n\n${platformPrompts[platform] ?? ''}\n\n${audiencePrompts[audience]}\n\n${buildContextBlock()}`;
-    const res = await generate({
-      workspaceId: workspace.id,
-      userId: user.id,
-      messages: [
-        { role: 'system', content: languageInstruction },
-        { role: 'user', content: prompt },
-      ],
-      model: settings?.default_model,
-      temperature: settings?.temperature,
-      maxTokens: settings?.max_tokens,
-      type: `generator_${gen}`,
-      onChunk: (chunk) => setOutput((prev) => prev + chunk),
-    });
-    setStreaming(false);
-    setActiveGenerator(null);
-    if (res.error) {
-      push({ title: t('common.generationFailed'), description: res.error, variant: 'error' });
-    } else {
-      setOutput(res.result);
-      if (res.result?.trim()) {
-        try {
-          const saved = await persistGeneratedContent({
-            workspaceId: workspace.id,
-            content: res.result,
-            platforms: [platform],
-            source: 'content_studio',
-            sourceLabel: 'Content Studio',
-            stage: 'generated',
-            platformVariants: { [platform]: res.result },
-            metadata: {
-              content_studio: {
-                generator: gen,
-                platform,
-                audience,
-                prompt,
-                language: workspace.language,
-                dialect,
-                model: res.model ?? settings?.default_model ?? null,
-              },
-            },
-          });
-          setSavedContentId(saved.id);
-          push({ title: t('workflow.savedToWorkspace'), variant: 'success' });
-        } catch (persistError) {
-          push({
-            title: t('workflow.saveFailed'),
-            description: persistError instanceof Error ? persistError.message : undefined,
-            variant: 'error',
-          });
-        }
-      }
-    }
+    try {
+      const res = await generate({ workspaceId: workspace.id, userId: user.id, messages: [{ role: 'system', content: languageInstruction }, { role: 'user', content: prompt }], model: settings?.default_model, temperature: settings?.temperature, maxTokens: settings?.max_tokens, type: `generator_${gen}`, onChunk: (chunk) => setOutput((prev) => prev + chunk) });
+      if (res.error || !res.result?.trim()) { push({ title: t('common.generationFailed'), description: res.error ?? undefined, variant: 'error' }); return; }
+      const reviewed = await runStudioQualityLoop(res.result, prompt, res.model);
+      setOutput(reviewed.content);
+      const saved = await persistGeneratedContent({ workspaceId: workspace.id, content: reviewed.content, platforms: [platform], source: 'content_studio', sourceLabel: 'Content Studio', stage: reviewed.approved ? 'approved' : 'in_review', quality: reviewed.quality, needsReview: reviewed.needsReview || reviewed.quality_error, platformVariants: { [platform]: reviewed.content }, metadata: { content_studio: { generator: gen, platform, audience, prompt, language: workspace.language, dialect, model: res.model ?? settings?.default_model ?? null } } });
+      setSavedContentId(saved.id);
+      push({ title: reviewed.approved ? t('workflow.savedToWorkspace') : t('contentSources.drafts.badge.needsReview'), variant: reviewed.approved ? 'success' : 'info' });
+    } catch (error) {
+      push({ title: t('common.generationFailed'), description: error instanceof Error ? error.message : undefined, variant: 'error' });
+    } finally { setStreaming(false); setActiveGenerator(null); }
   };
 
   const handleCopy = () => {
@@ -570,6 +483,16 @@ export function ContentStudioPage() {
           }
         >
           <div className="min-h-[200px]">
+            {qualityStage !== 'idle' && (
+              <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                {qualityStage === 'generating' && 'Generating'}
+                {qualityStage === 'qc' && 'QC'}
+                {qualityStage === 'improving' && 'Improving'}
+                {qualityStage === 'rechecking' && 'Re-checking'}
+                {qualityStage === 'approved' && 'Approved'}
+                {qualityStage === 'needs_review' && 'Needs Manual Review'}
+              </div>
+            )}
             {output ? (
               <div>
                 <MarkdownRenderer content={output} />

@@ -68,10 +68,10 @@ function arabicNaturalnessGuard(text) {
   return { pass: reasons.length === 0, reasons };
 }
 
-const QC_MIN_SCORE = 80;
-const QC_MIN_ARABIC_QUALITY = 80;
-const QC_MIN_LINKEDIN_FIT = 75;
-const QC_MIN_BRAND_FIT = 75;
+const QC_MIN_SCORE = 90;
+const QC_MIN_ARABIC_QUALITY = 90;
+const QC_MIN_LINKEDIN_FIT = 90;
+const QC_MIN_BRAND_FIT = 90;
 
 function evaluateContentApproval(content, quality, linkedInTarget) {
   const guard = arabicNaturalnessGuard(content);
@@ -81,10 +81,15 @@ function evaluateContentApproval(content, quality, linkedInTarget) {
     return { approved: false, reasons };
   }
   if (!quality.approved) reasons.push('qc_not_approved');
-  if (quality.score < QC_MIN_SCORE) reasons.push('score_below_minimum');
-  if (typeof quality.arabic_quality === 'number' && quality.arabic_quality < QC_MIN_ARABIC_QUALITY) reasons.push('arabic_quality_below_minimum');
-  if (linkedInTarget && typeof quality.linkedin_fit === 'number' && quality.linkedin_fit < QC_MIN_LINKEDIN_FIT) reasons.push('linkedin_fit_below_minimum');
-  if (typeof quality.brand_fit === 'number' && quality.brand_fit < QC_MIN_BRAND_FIT) reasons.push('brand_fit_below_minimum');
+  if (typeof quality.score !== 'number' || quality.score < QC_MIN_SCORE) reasons.push('score_below_minimum');
+  if (typeof quality.arabic_quality !== 'number') reasons.push('arabic_quality_missing');
+  else if (quality.arabic_quality < QC_MIN_ARABIC_QUALITY) reasons.push('arabic_quality_below_minimum');
+  if (linkedInTarget) {
+    if (typeof quality.linkedin_fit !== 'number') reasons.push('linkedin_fit_missing');
+    else if (quality.linkedin_fit < QC_MIN_LINKEDIN_FIT) reasons.push('linkedin_fit_below_minimum');
+  }
+  if (typeof quality.brand_fit !== 'number') reasons.push('brand_fit_missing');
+  else if (quality.brand_fit < QC_MIN_BRAND_FIT) reasons.push('brand_fit_below_minimum');
   return { approved: guard.pass && reasons.length === 0, reasons };
 }
 

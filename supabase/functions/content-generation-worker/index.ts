@@ -24,12 +24,51 @@ type GenerationJob = {
   schedule_times: string[] | null;
 };
 
-type GenerationResult = {
-  content: string;
-  title?: string;
-  quality_score?: number;
-  approved: boolean;
-};
+type GenerationResult = { content: string; title?: string };
+type QualityResult = { approved: boolean; score: number; issues: string[]; suggestions: string[]; arabic_quality?: number; linkedin_fit?: number; brand_fit?: number; critical_issues?: string[] };
+const QC_MIN = 90;
+const LINKEDIN_MIN = 90;
+
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function parseQuality(raw: string): QualityResult | null {
+  try {
+    const value = JSON.parse(raw.replace(/^```json\\s*/i, '').replace(/\\s*```$/, '')) as Record<string, unknown>;
+    const n = (key: string) => typeof value[key] === 'number' ? Number(value[key]) : undefined;
+    const score = n('score'); const arabic_quality = n('arabic_quality'); const brand_fit = n('brand_fit'); const linkedin_fit = n('linkedin_fit');
+    if (score === undefined || arabic_quality === undefined || brand_fit === undefined) return null;
+    const critical_issues = Array.isArray(value.critical_issues) ? value.critical_issues.filter((x): x is string => typeof x === 'string') : [];
+    const issues = Array.isArray(value.issues) ? value.issues.filter((x): x is string => typeof x === 'string') : [];
+    const suggestions = Array.isArray(value.suggestions) ? value.suggestions.filter((x): x is string => typeof x === 'string') : [];
+    const approved = value.approved === true && score >= QC_MIN && arabic_quality >= QC_MIN && brand_fit >= QC_MIN && (!linkedin_fit || linkedin_fit >= LINKEDIN_MIN) && critical_issues.length === 0;
+    return { approved, score, arabic_quality, linkedin_fit, brand_fit, critical_issues, issues, suggestions };
+  } catch { return null; }
+}
+
+async function callGateway(url: string, key: string, job: GenerationJob, messages: unknown[], maxTokens = 1200): Promise<string> {
+  const response = await fetchWithTimeout(`${url}/functions/v1/ai-gateway`, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Content-Generation-Job': job.id }, body: JSON.stringify({ workspace_id: job.workspace_id, background_job_id: job.id, messages, temperature: 0.25, max_tokens: maxTokens, stream: false }) }, 60_000);
+  if (!response.ok) throw new Error((await response.text()).slice(0, 500));
+  const payload = await response.json() as { content?: string; choices?: Array<{ message?: { content?: string } }> };
+  return String(payload.content ?? payload.choices?.[0]?.message?.content ?? '');
+}
+
+async function dedicatedQC(url: string, key: string, job: GenerationJob, content: string, platforms: string[]): Promise<QualityResult | null> {
+  const raw = await callGateway(url, key, job, [
+    { role: 'system', content: 'You are an independent Dedicated Content QC. Return JSON only with approved, score, arabic_quality, linkedin_fit, brand_fit, issues, suggestions, critical_issues. Missing dimensions are failures. Approval requires every relevant dimension >=90 and no critical issues.' },
+    { role: 'user', content: `Platforms: ${platforms.join(', ')}\\nContent to review:\\n${content}` },
+  ], 900);
+  return parseQuality(raw);
+}
+
+async function improveContent(url: string, key: string, job: GenerationJob, content: string, quality: QualityResult): Promise<string> {
+  return (await callGateway(url, key, job, [
+    { role: 'system', content: 'Improve only the weaknesses identified by QC. Return the final post text only, without commentary.' },
+    { role: 'user', content: `Current post:\\n${content}\\n\\nQC issues:\\n${quality.issues.join('\\n')}\\nSuggestions:\\n${quality.suggestions.join('\\n')}` },
+  ])).trim();
+}
 
 const IMAGE_TIMEOUT_MS = 45_000;
 
@@ -86,8 +125,6 @@ function parseResult(raw: string): GenerationResult {
     return {
       content,
       title: typeof parsed.title === 'string' ? parsed.title : undefined,
-      quality_score: typeof parsed.quality_score === 'number' ? parsed.quality_score : undefined,
-      approved: parsed.approved === true,
     };
   } catch {
     // Not valid JSON. A genuinely plain-text provider response (no JSON,
@@ -291,7 +328,7 @@ Deno.serve(async (req: Request) => {
     const messages = [
       {
         role: 'system',
-        content: 'You are SocialPilot Content Agent. Return ONLY valid minified JSON with keys: title, content, quality_score, approved. Write original, platform-appropriate content. Do not invent facts beyond the supplied source context. approved is true only when the content is publish-ready.',
+        content: 'You are SocialPilot Content Agent. Return ONLY valid minified JSON with keys title and content. Never self-grade. Write original, platform-appropriate content. Do not invent facts beyond the supplied source context.',
       },
       {
         role: 'user',
@@ -321,13 +358,18 @@ Deno.serve(async (req: Request) => {
     );
     if (!aiResponse.ok) throw new Error((await aiResponse.text()).slice(0, 500));
     const aiPayload = await aiResponse.json() as { content?: string; choices?: Array<{ message?: { content?: string } }> };
-    const result = parseResult(String(aiPayload.content ?? aiPayload.choices?.[0]?.message?.content ?? ''));
+    let result = parseResult(String(aiPayload.content ?? aiPayload.choices?.[0]?.message?.content ?? ''));
+    let quality: QualityResult | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      quality = await dedicatedQC(supabaseUrl, serviceKey, job, result.content, platforms);
+      if (quality?.approved || !quality || attempt === 2) break;
+      result = { ...result, content: await improveContent(supabaseUrl, serviceKey, job, result.content, quality) };
+    }
+    const contentHash = quality?.approved ? await sha256(result.content) : null;
+    const proof = quality?.approved ? { ...quality, content_hash: contentHash, reviewed_content: result.content, reviewed_at: new Date().toISOString(), reviewed_platform: platforms[0] ?? null } : null;
     const imageUrl = await generateCampaignImage(supabase, job, plan, result.content);
     const next = index + 1;
     const completed = next >= Number(job.post_count);
-    const quality = result.quality_score == null
-      ? null
-      : { approved: result.approved, score: result.quality_score, issues: [], suggestions: [] };
     const scheduledFor = Array.isArray(job.schedule_times) ? job.schedule_times[index] ?? null : null;
 
     const { error: insertError } = await supabase.from('posts').insert({
@@ -339,14 +381,18 @@ Deno.serve(async (req: Request) => {
       media_urls: imageUrl ? [imageUrl] : [],
       status: 'draft',
       scheduled_for: scheduledFor,
+      content_hash: contentHash,
+      quality_proof: proof,
       metadata: {
         content_workflow: {
           source: 'ai_assistant_background',
           source_label: 'AI Assistant',
-          stage: result.approved ? 'approved' : 'in_review',
-          quality_status: result.approved ? 'approved' : 'in_review',
+          stage: quality?.approved ? 'approved' : 'in_review',
+          quality_status: quality?.approved ? 'approved' : 'in_review',
           quality,
-          needs_review: !result.approved,
+          quality_proof: proof,
+          content_hash: contentHash,
+          needs_review: !quality?.approved,
           generated_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         },
@@ -354,9 +400,11 @@ Deno.serve(async (req: Request) => {
           source_request: job.request_text,
           plan,
           quality,
-          approved: result.approved,
-          needs_review: !result.approved,
-          quality_error: result.quality_score == null,
+          quality_proof: proof,
+          content_hash: contentHash,
+          approved: quality?.approved === true,
+          needs_review: quality?.approved !== true,
+          quality_error: quality === null,
         },
         content_generation_job_id: job.id,
         content_generation_index: index,

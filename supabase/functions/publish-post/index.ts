@@ -66,8 +66,7 @@ Deno.serve(async (req: Request) => {
     // Confirm the post actually belongs to the workspace the caller is a member of.
     if (post.workspace_id !== workspace_id) return errorResponse('Post not found', 404);
 
-    await supabase.from('posts').update({ status: 'publishing', updated_at: new Date().toISOString() }).eq('id', post_id);
-    await log(supabase, { workspace_id, post_id, event: 'queued', message: 'Manual publish requested' });
+    await log(supabase, { workspace_id, post_id, event: 'queued', message: 'Manual publish requested; awaiting quality gate' });
 
     const finalStatus = await publishPost(supabase, post, callerId);
 

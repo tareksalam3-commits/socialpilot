@@ -35,14 +35,14 @@ check('validateFinalPostContent rejects spec phrase 1', validateFinalPostContent
 check('validateFinalPostContent rejects spec phrase 2', validateFinalPostContent(spec2).valid === false);
 check('validateFinalPostContent rejects spec phrase 3', validateFinalPostContent(spec3).valid === false);
 
-// A resulting QC verdict with score>=80 but a garbled guard must NOT be approved
+// A resulting QC verdict with score>=90 but a garbled guard must NOT be approved
 const qcHighScoreButGarbled = { approved: true, score: 90, issues: [], suggestions: [], arabic_quality: 90 };
 const decisionBad = evaluateContentApproval(bad1, qcHighScoreButGarbled, true);
 check('garbled content is never approved even with score=90', decisionBad.approved === false);
 
 // A natural, clean Arabic LinkedIn post with strong sub-scores should be approvable
 const good = 'التأمين على الحياة ليس مجرد بوليصة — إنه الالتزام الذي تتركه لعائلتك عندما لا تكون موجودًا لتوفير الأمان بنفسك.\n\nكثير من الناس يؤجلون هذا القرار لأنهم لا يريدون التفكير في الاحتمالات الصعبة، لكن التخطيط المالي الحقيقي يبدأ من مواجهة هذه الأسئلة مبكرًا.\n\nما هي الخطوة التي اتخذتها أنت لحماية دخل عائلتك؟\n\n#التأمين #التخطيط_المالي #الأمان_المالي';
-const qcGood = { approved: true, score: 88, issues: [], suggestions: [], arabic_quality: 90, linkedin_fit: 85, brand_fit: 82 };
+const qcGood = { approved: true, score: 92, issues: [], suggestions: [], arabic_quality: 94, linkedin_fit: 91, brand_fit: 93 };
 const decisionGood = evaluateContentApproval(good, qcGood, true);
 check('clean content with strong sub-scores is approved', decisionGood.approved === true);
 
@@ -50,7 +50,17 @@ check('clean content with strong sub-scores is approved', decisionGood.approved 
 const qcLowArabic = { approved: true, score: 85, issues: [], suggestions: [], arabic_quality: 55 };
 const decisionLowArabic = evaluateContentApproval(good, qcLowArabic, true);
 check('score=85 with arabic_quality=55 is rejected (item 6/8)', decisionLowArabic.approved === false);
+
+const qc89 = { approved: true, score: 89, issues: [], suggestions: [], arabic_quality: 95, linkedin_fit: 95, brand_fit: 95 };
+check('score=89 is rejected despite strong dimensions', evaluateContentApproval(good, qc89, true).approved === false);
+const qc90 = { approved: true, score: 90, issues: [], suggestions: [], arabic_quality: 90, linkedin_fit: 90, brand_fit: 90 };
+check('score=90 with all required dimensions passes', evaluateContentApproval(good, qc90, true).approved === true);
 check('rejection reason includes arabic_quality_below_minimum', decisionLowArabic.reasons.includes('arabic_quality_below_minimum'));
+
+const qcMissingBrand = { approved: true, score: 95, arabic_quality: 95, linkedin_fit: 95 };
+const decisionMissingBrand = evaluateContentApproval(good, qcMissingBrand, true);
+check('missing brand_fit is never approved', decisionMissingBrand.approved === false);
+check('missing brand_fit has an explicit reason', decisionMissingBrand.reasons.includes('brand_fit_missing'));
 
 // QC unavailable (null) must never be silently approved (item 5 bug fix)
 const decisionNullQC = evaluateContentApproval(good, null, true);
