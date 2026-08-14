@@ -47,14 +47,55 @@ function resolveConnectedPlatforms(requested: string[], connectedPlatforms: stri
   return matched.length ? matched : connectedPlatforms;
 }
 
-function parsePlan(raw: string, connectedPlatforms: string[]): CampaignPlan {
+/** Deterministic backstop for post_count: an explicit number the user
+ * actually typed (digit or Arabic number word, "4", "٤", "اربع منشورات",
+ * "4 posts"...) must always be respected exactly — never left purely to
+ * the Planner model's own counting, which is unreliable in both
+ * directions (a single-topic ask inflated into a 5-post campaign, or an
+ * explicit "4" undercounted to 3). When the request contains one, it
+ * overrides whatever post_count the model returned. Returns null when no
+ * explicit count is present, so the model's own value (or the post_count=1
+ * default for an unspecified single request) is left alone. */
+function extractExplicitPostCount(request: string): number | null {
+  const normalized = request.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+  // Prefer a number that's actually attached to "post(s)"/"منشور(ات)" context
+  // — e.g. "4 منشورات" or "منشور 4" or "4 posts" — over any bare number
+  // floating elsewhere in the request (a time, a date, an unrelated count),
+  // which the second, looser pattern is a fallback for.
+  const contextMatch = normalized.match(/\b([1-9]|1\d|20)\s*(?:منشور|منشورات|post|posts)\b/i)
+    ?? normalized.match(/(?:منشور|منشورات|post|posts)\s*([1-9]|1\d|20)\b/i);
+  if (contextMatch) return Number(contextMatch[1]);
+  const digitMatch = normalized.match(/\b([1-9]|1\d|20)\b/);
+  if (digitMatch) return Number(digitMatch[1]);
+
+  const ARABIC_NUMBER_WORDS: Record<string, number> = {
+    'واحد': 1, 'واحدة': 1,
+    'اتنين': 2, 'إتنين': 2, 'اثنين': 2, 'اثنان': 2,
+    'تلاتة': 3, 'ثلاثة': 3, 'تلات': 3, 'ثلاث': 3,
+    'اربعة': 4, 'أربعة': 4, 'اربع': 4, 'أربع': 4,
+    'خمسة': 5, 'خمس': 5,
+    'ستة': 6, 'سته': 6, 'ست': 6,
+    'سبعة': 7, 'سبع': 7,
+    'تمانية': 8, 'ثمانية': 8, 'تمان': 8, 'ثماني': 8,
+    'تسعة': 9, 'تسع': 9,
+    'عشرة': 10, 'عشر': 10,
+  };
+  for (const [word, value] of Object.entries(ARABIC_NUMBER_WORDS)) {
+    if (new RegExp(`(?:^|\\s)${word}(?:\\s|$)`).test(normalized)) return value;
+  }
+  return null;
+}
+
+function parsePlan(raw: string, connectedPlatforms: string[], request?: string): CampaignPlan {
   const fallbackPlatforms = connectedPlatforms.length ? connectedPlatforms : DEFAULT_PLATFORMS;
   try {
     const json = JSON.parse(stripFence(raw)) as Record<string, unknown>;
     const platforms = Array.isArray(json.platforms) && json.platforms.length
       ? (json.platforms as unknown[]).filter((p): p is string => typeof p === 'string')
       : fallbackPlatforms;
-    const post_count = Math.min(20, Math.max(1, Math.round(Number(json.post_count)) || DEFAULT_PLAN.post_count));
+    const modelPostCount = Math.round(Number(json.post_count)) || DEFAULT_PLAN.post_count;
+    const explicitCount = request ? extractExplicitPostCount(request) : null;
+    const post_count = Math.min(20, Math.max(1, explicitCount ?? modelPostCount));
     const cadence = CADENCE_VALUES.includes(json.cadence as Cadence) ? (json.cadence as Cadence) : DEFAULT_PLAN.cadence;
     const start = START_VALUES.includes(json.start as CampaignStart) ? (json.start as CampaignStart) : DEFAULT_PLAN.start;
     const time_of_day = typeof json.time_of_day === 'string' && /^\d{2}:\d{2}$/.test(json.time_of_day) ? json.time_of_day : DEFAULT_PLAN.time_of_day;
@@ -100,7 +141,7 @@ export async function runPlannerAgent(
       .create({ workspace_id: workspaceId, type: 'assistant_planner', input: request, output: result.content, model: result.model, status: 'success' })
       .catch(() => {});
 
-    return { plan: parsePlan(result.content, connectedPlatforms), raw: result.content, error: null };
+    return { plan: parsePlan(result.content, connectedPlatforms, request), raw: result.content, error: null };
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Planning failed';
     aiHistoryRepository
