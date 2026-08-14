@@ -48,9 +48,11 @@ import type {
   UsedContentSource,
   ContentQualityResult,
   AudienceInference,
+  AssistantCreationPhase,
 } from '@/types/assistant';
 import type { WorkspaceContext, ContentStrategy, ResearchResult, HookCandidate, AIDecision } from '@/types/context';
 import type { Post } from '@/types/social';
+import { measurePerformance } from '@/utils/performanceTelemetry';
 
 // Arabic Content Quality Control: the maximum number of generate-then-review
 // attempts before showing the best version with a "Needs Review" badge
@@ -127,6 +129,7 @@ export function useAssistantPipeline() {
   const [audienceEditing, setAudienceEditing] = useState(false);
   const [audienceDraft, setAudienceDraft] = useState('');
   const [creatingProgress, setCreatingProgress] = useState({ done: 0, total: 0 });
+  const [creationPhase, setCreationPhase] = useState<AssistantCreationPhase>(null);
   const [drafts, setDrafts] = useState<DraftPost[]>([]);
   const [monitored, setMonitored] = useState<MonitoredPost[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -144,6 +147,7 @@ export function useAssistantPipeline() {
   // from here instead of re-querying repositories itself. Ref rather than
   // state since nothing in the UI renders from it directly yet.
   const workspaceContextRef = useRef<WorkspaceContext | null>(null);
+  const workspaceContextPromiseRef = useRef<Promise<WorkspaceContext | null> | null>(null);
   // Phase 2 — STEP 6 (Strategy Agent): the structured ContentStrategy for
   // the current run, built once the user-approved audience is final (right
   // as Content Generation is about to start). Same fire-and-forget
@@ -237,6 +241,7 @@ export function useAssistantPipeline() {
       let lastReasons: string[] = [];
 
       for (let attempt = 0; attempt < MAX_QC_ATTEMPTS; attempt++) {
+        setCreationPhase(lastRewriteInput ? 'improving' : 'generating');
         // Attempt 0 always uses the full Creator Agent (nothing to rewrite
         // yet). Every retry after a QC failure uses the Rewrite Task
         // instead of a blind re-roll of the Creator — section 22: "لا تولد
@@ -284,6 +289,7 @@ export function useAssistantPipeline() {
           continue;
         }
         const content = sanitized.content;
+        setCreationPhase('qc');
 
         const qc = await reviewGeneratedContent(workspace.id, content, planForPost.platforms, requestText, qcAiParams, dialect, gen.model);
         const quality = qc.result;
@@ -296,8 +302,10 @@ export function useAssistantPipeline() {
         if (decision.approved) {
           approved = true;
           best = { content, quality, score };
+          setCreationPhase('approved');
           break;
         }
+        setCreationPhase('rechecking');
         // else: below the quality bar (or QC unavailable/guard failed) —
         // loop and rewrite (up to MAX_QC_ATTEMPTS total)
       }
@@ -468,6 +476,7 @@ export function useAssistantPipeline() {
     setCampaignJobId(null);
     setRequestText('');
     setCreatingProgress({ done: 0, total: 0 });
+    setCreationPhase(null);
     setUsedSources([]);
     contentTextRef.current = null;
     planRef.current = null;
@@ -498,71 +507,65 @@ export function useAssistantPipeline() {
     async (runId: number, planForRun: CampaignPlan) => {
       if (!workspace) return;
 
-      // 1.75 Strategy Agent (Phase 2, STEP 6) + Research Decision/Agent
-      // (STEP 7) — both now AWAITED (no longer fire-and-forget like in
-      // STEP 5/6/7's own commits) because STEP 8 (Content Agent, right
-      // below) is the first thing that actually reads them: Content
-      // Generation needs the real Strategy/Research result, not whatever
-      // happened to have resolved in the background by the time it runs.
-      // Still fully defensive — either call failing just means Content
-      // Generation proceeds with strategy/research as null, exactly like
-      // every other optional-context failure in this pipeline.
+      // Strategy, Research Decision, Optimization Context and Content Sources
+      // do not depend on one another. Start them together to remove several
+      // avoidable round trips from the critical path. Hook starts after
+      // Strategy because it consumes that result; Research Agent starts after
+      // Research Decision for the same reason. Every optional failure keeps
+      // the previous defensive fallback behavior.
       strategyRef.current = null;
       researchRef.current = null;
       hookRef.current = null;
+      optimizationContextRef.current = null;
       const creationDialect = resolveWorkspaceDialect(workspace);
+      const context = await (workspaceContextPromiseRef.current ?? Promise.resolve(workspaceContextRef.current));
+      workspaceContextRef.current = context;
+      if (runIdRef.current !== runId) return;
+
+      let contentText: string | null = null;
+      const sourcePromise = planForRun.use_content_sources
+        ? (setStage('collecting'), collectContentContext(workspace.id))
+        : Promise.resolve(null);
+      const strategyPromise = runStrategyAgent(workspace.id, planForRun, workspaceContextRef.current, aiParams);
+      const researchDecisionPromise = runResearchDecision(workspace.id, requestText, planForRun, aiParams);
+      const optimizationPromise = buildOptimizationContext(workspace.id, planForRun.platforms);
+
+      let strategyResult: Awaited<typeof strategyPromise> | null = null;
       try {
-        const { strategy } = await runStrategyAgent(workspace.id, planForRun, workspaceContextRef.current, aiParams);
-        if (runIdRef.current !== runId) return;
-        strategyRef.current = strategy;
+        strategyResult = await strategyPromise;
+        strategyRef.current = strategyResult.strategy;
       } catch {
-        // strategyRef.current stays null — Content Agent below treats a
-        // missing strategy the same as a missing Brand Voice: optional
-        // context, never a blocker.
+        strategyRef.current = null;
       }
-      // Hook Agent (Phase 2, STEP 9) — only needs WorkspaceContext +
-      // Strategy (just resolved above), never Research/content text, so it
-      // runs here rather than after the Content Sources step. Same
-      // non-blocking contract: a failure leaves hookRef.current null and
-      // the Creator falls back to writing its own opening line.
-      try {
-        const { result } = await runHookAgent(workspace.id, planForRun, workspaceContextRef.current, strategyRef.current, aiParams, creationDialect);
-        if (runIdRef.current !== runId) return;
-        hookRef.current = result.best;
-      } catch {
-        // hookRef.current stays null — same optional-context contract.
-      }
-      // Phase 3, STEP 9 — Optimization Context. Deterministic, no AI call
-      // (see optimizationContext.ts); scoped to this run's platforms so
-      // learnings from other platforms never leak in (section 20).
-      // Non-blocking like everything else here — an empty context just
-      // means no block gets injected into the Creator's prompt.
-      try {
-        const optimizationContext = await buildOptimizationContext(workspace.id, planForRun.platforms);
-        optimizationContextRef.current = renderOptimizationContextBlock(optimizationContext);
-      } catch {
-        optimizationContextRef.current = null;
-      }
-      try {
-        const { decision } = await runResearchDecision(workspace.id, requestText, planForRun, aiParams);
-        if (runIdRef.current !== runId) return;
+      if (runIdRef.current !== runId) return;
+
+      const hookPromise = runHookAgent(workspace.id, planForRun, workspaceContextRef.current, strategyRef.current, aiParams, creationDialect);
+      const [hookResult, researchDecisionResult, optimizationResult, sourceResult] = await Promise.allSettled([
+        hookPromise,
+        researchDecisionPromise,
+        optimizationPromise,
+        sourcePromise,
+      ]);
+      if (runIdRef.current !== runId) return;
+
+      if (hookResult.status === 'fulfilled') hookRef.current = hookResult.value.result.best;
+      if (optimizationResult.status === 'fulfilled') optimizationContextRef.current = renderOptimizationContextBlock(optimizationResult.value);
+
+      if (researchDecisionResult.status === 'fulfilled') {
+        const { decision } = researchDecisionResult.value;
         if (decision.research_required) {
-          researchRef.current = await runResearchAgent(workspace.id, decision, aiParams);
+          try {
+            researchRef.current = await runResearchAgent(workspace.id, decision, aiParams);
+          } catch {
+            researchRef.current = null;
+          }
         } else {
           researchRef.current = { research_required: false, research_available: false, evidence: [], sources: [], verified_context: null, reason: decision.reason };
         }
-        if (runIdRef.current !== runId) return;
-      } catch {
-        // researchRef.current stays null — same non-blocking contract.
       }
 
-      // 2. Content Sources step — collect, clean and summarize only when the
-      // request implies it. Reuses the Content Sources module end-to-end.
-      let contentText: string | null = null;
-      if (planForRun.use_content_sources) {
-        setStage('collecting');
-        const { contentText: text, used, error: sourcesError } = await collectContentContext(workspace.id);
-        if (runIdRef.current !== runId) return;
+      if (sourceResult.status === 'fulfilled' && sourceResult.value) {
+        const { contentText: text, used, error: sourcesError } = sourceResult.value;
         contentText = text;
         contentTextRef.current = text;
         setUsedSources(used);
@@ -665,7 +668,7 @@ export function useAssistantPipeline() {
         // this avoids a page-local draft that disappears on navigation.
         let persistedPostId: string | undefined;
         try {
-          const persisted = await persistGeneratedContent({
+          const persisted = await measurePerformance('database', 'persist_generated_content', () => persistGeneratedContent({
             workspaceId: workspace.id,
             title: deriveTitle(finalContent),
             content: finalContent,
@@ -689,7 +692,7 @@ export function useAssistantPipeline() {
                 ai_decision: aiDecision,
               },
             },
-          });
+          }));
           persistedPostId = persisted.id;
         } catch (persistError) {
           // A visible warning keeps the current review UI usable while making
@@ -806,15 +809,13 @@ export function useAssistantPipeline() {
     // it just means later agents that read workspaceContextRef fall back
     // to their existing behavior, same as before this step existed.
     workspaceContextRef.current = null;
-    buildWorkspaceContext(workspace.id)
+    workspaceContextPromiseRef.current = buildWorkspaceContext(workspace.id)
       .then((ctx) => {
-        if (runIdRef.current !== runId) return;
+        if (runIdRef.current !== runId) return null;
         workspaceContextRef.current = ctx;
+        return ctx;
       })
-      .catch(() => {
-        // Leave workspaceContextRef.current as null — nothing downstream
-        // depends on it yet, so this is silent by design.
-      });
+      .catch(() => null);
 
     // 1. Planner Agent
     setStage('planning');
@@ -1187,6 +1188,7 @@ export function useAssistantPipeline() {
     audienceDraft,
     setAudienceDraft,
     creatingProgress,
+    creationPhase,
     drafts,
     monitored,
     campaignJobId,

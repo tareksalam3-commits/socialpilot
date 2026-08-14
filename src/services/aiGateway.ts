@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatCompletionResult, ModelInfo, ProviderInfo } from '@/types/ai';
 import { supabase } from '@/services/supabase';
+import { AI_CALL_TIMEOUT_MS, measurePerformance } from '@/utils/performanceTelemetry';
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-gateway`;
 
@@ -120,98 +121,94 @@ class ReasoningStreamFilter {
 
 export const aiGateway = {
   async generate(opts: GenerateOptions): Promise<ChatCompletionResult> {
-    const res = await fetch(`${FUNCTION_URL}?action=chat`, {
-      method: 'POST',
-      headers: await getAuthHeaders(),
-      body: JSON.stringify({
-        workspace_id: opts.workspaceId,
-        messages: opts.messages,
-        model: opts.model,
-        temperature: opts.temperature,
-        max_tokens: opts.maxTokens,
-        stream: opts.stream,
-        free_only: opts.freeOnly,
-        brand_voice: opts.brandVoice,
-        content_text: opts.contentText,
-        task: opts.task,
-        exclude_model: opts.excludeModel,
-      }),
-    });
+    return measurePerformance('ai_call', opts.task === 'qc' ? 'quality_control' : opts.task === 'creator' ? 'authoring' : 'ai_generation', async () => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), AI_CALL_TIMEOUT_MS);
+      try {
+        const res = await fetch(`${FUNCTION_URL}?action=chat`, {
+          method: 'POST',
+          headers: await getAuthHeaders(),
+          signal: controller.signal,
+          body: JSON.stringify({
+            workspace_id: opts.workspaceId,
+            messages: opts.messages,
+            model: opts.model,
+            temperature: opts.temperature,
+            max_tokens: opts.maxTokens,
+            stream: opts.stream,
+            free_only: opts.freeOnly,
+            brand_voice: opts.brandVoice,
+            content_text: opts.contentText,
+            task: opts.task,
+            exclude_model: opts.excludeModel,
+          }),
+        });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(err.error ?? `Request failed (${res.status})`);
-    }
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Request failed' }));
+          throw new Error(err.error ?? `Request failed (${res.status})`);
+        }
 
-    const contentType = res.headers.get('Content-Type') ?? '';
-
-    if (contentType.includes('text/event-stream') && opts.onChunk) {
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let fullContent = '';
-      let buffer = '';
-      const reasoningFilter = new ReasoningStreamFilter();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? ''; // last line may be split across chunks — keep it for next read
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-
-          const payload = trimmed.slice(5).trim();
-          if (payload === '[DONE]' || payload === '') continue;
-
-          try {
-            const json = JSON.parse(payload);
-            const delta = json.choices?.[0]?.delta;
-            // reasoning tokens (model "thinking") are intentionally skipped —
-            // only the actual generated text goes to the caller. Some models
-            // put that same "thinking" as plain <think> text inside
-            // delta.content itself instead of a separate field, so it's
-            // still run through the filter below before ever reaching onChunk.
-            if (delta?.content) {
-              const visible = reasoningFilter.push(delta.content);
-              if (visible) {
-                fullContent += visible;
-                opts.onChunk(visible);
+        const contentType = res.headers.get('Content-Type') ?? '';
+        if (contentType.includes('text/event-stream') && opts.onChunk) {
+          const reader = res.body!.getReader();
+          const decoder = new TextDecoder();
+          let fullContent = '';
+          let buffer = '';
+          const reasoningFilter = new ReasoningStreamFilter();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\\n');
+            buffer = lines.pop() ?? '';
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith('data:')) continue;
+              const payload = trimmed.slice(5).trim();
+              if (payload === '[DONE]' || payload === '') continue;
+              try {
+                const json = JSON.parse(payload);
+                const delta = json.choices?.[0]?.delta;
+                if (delta?.content) {
+                  const visible = reasoningFilter.push(delta.content);
+                  if (visible) {
+                    fullContent += visible;
+                    opts.onChunk(visible);
+                  }
+                }
+              } catch {
+                // JSON split across a chunk boundary; continue buffering.
               }
             }
-          } catch {
-            // JSON split across a chunk boundary — will complete on a later read
           }
+          const tail = reasoningFilter.flush();
+          if (tail) {
+            fullContent += tail;
+            opts.onChunk(tail);
+          }
+          return {
+            content: fullContent,
+            model: res.headers.get('X-Model') ?? '',
+            tokens_in: 0,
+            tokens_out: 0,
+            response_time_ms: parseInt(res.headers.get('X-Response-Time') ?? '0', 10),
+          };
         }
+
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        return {
+          content: data.content,
+          model: data.model,
+          tokens_in: data.tokens_in,
+          tokens_out: data.tokens_out,
+          response_time_ms: data.response_time_ms,
+        };
+      } finally {
+        window.clearTimeout(timeout);
       }
-
-      const tail = reasoningFilter.flush();
-      if (tail) {
-        fullContent += tail;
-        opts.onChunk(tail);
-      }
-
-      return {
-        content: fullContent,
-        model: res.headers.get('X-Model') ?? '',
-        tokens_in: 0,
-        tokens_out: 0,
-        response_time_ms: parseInt(res.headers.get('X-Response-Time') ?? '0', 10),
-      };
-    }
-
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    return {
-      content: data.content,
-      model: data.model,
-      tokens_in: data.tokens_in,
-      tokens_out: data.tokens_out,
-      response_time_ms: data.response_time_ms,
-    };
+    });
   },
 
   // Generates one image and returns its public URL — the edge function

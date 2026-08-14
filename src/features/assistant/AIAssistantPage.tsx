@@ -79,6 +79,7 @@ export function AIAssistantPage() {
     audienceDraft,
     setAudienceDraft,
     creatingProgress,
+    creationPhase,
     drafts,
     monitored,
     usedSources,
@@ -192,10 +193,17 @@ export function AIAssistantPage() {
               <Loader2 className="h-3 w-3 animate-spin" /> {t('assistant.stage.collectingHint')}
             </p>
           )}
-          {stage === 'creating' && creatingProgress.total > 0 && (
-            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-              {t('assistant.stage.creatingProgress', { done: creatingProgress.done, total: creatingProgress.total })}
-            </p>
+          {stage === 'creating' && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              {creatingProgress.total > 0 && (
+                <span>{t('assistant.stage.creatingProgress', { done: creatingProgress.done, total: creatingProgress.total })}</span>
+              )}
+              {creationPhase && (
+                <Badge variant={creationPhase === 'approved' ? 'success' : creationPhase === 'rechecking' ? 'warning' : 'info'} dot>
+                  {t(`assistant.stage.creationPhase.${creationPhase}`)}
+                </Badge>
+              )}
+            </div>
           )}
           {stage === 'quality' && (
             <p className="mt-3 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">

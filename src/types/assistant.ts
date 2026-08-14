@@ -23,6 +23,8 @@ import type { AIDecision } from '@/types/context';
  * 'monitoring', where each row tracks Publishing → Published → Verified via
  * the same posts / post_platform_targets rows the Posts, Calendar, Queue
  * and Automation pages already read from. */
+export type AssistantCreationPhase = 'generating' | 'qc' | 'improving' | 'rechecking' | 'approved' | null;
+
 export type AssistantStage =
   | 'idle'
   | 'planning'
