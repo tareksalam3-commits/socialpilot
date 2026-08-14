@@ -7,6 +7,7 @@ import type { WorkspaceContext } from '@/types/context';
 import { DEFAULT_DIALECT, type DialectCode } from '@/constants/dialects';
 import { isLinkedInPlatform, buildArabicWritingRules, LINKEDIN_WRITING_RULES, OUTPUT_CONTRACT } from './arabicWritingRules';
 import { getPlatformProfile } from './platformAgent';
+import { QUALITY_DIMENSION_KEYS, QUALITY_DIMENSION_THRESHOLDS, qualityDimensionLabel } from '../qualityEngine/qualityRubric';
 
 // ============================================================================
 // Smart Rewrite — Phase 2, STEP 12 (section 22)
@@ -43,7 +44,7 @@ const EXTRA_DIMENSION_LABELS: Record<string, string> = {
   readability_score: 'سهولة القراءة',
 };
 
-const EXTRA_DIMENSION_MIN = 70;
+const EXTRA_DIMENSION_MIN = 70; // retained for legacy score fields not in the strict rubric
 
 /** Turns a failed Quality Report into the concrete, actionable brief the
  * Rewrite Task needs — never just "try again". Combines: section 20's
@@ -64,9 +65,21 @@ function buildFailedDimensionsBrief(quality: ContentQualityResult | null, reason
     lines.push(...quality.issues.map((i) => `- ${i}`));
   }
   if (quality) {
+    const evidenceByDimension = new Map((quality.dimension_evidence ?? []).map((item) => [item.dimension, item]));
+    for (const key of QUALITY_DIMENSION_KEYS) {
+      const score = (quality as unknown as Record<string, number | undefined>)[key];
+      const minimum = QUALITY_DIMENSION_THRESHOLDS[key];
+      const evidence = evidenceByDimension.get(key);
+      if (typeof score !== 'number') {
+        lines.push(`- ${qualityDimensionLabel(key)}: الدرجة مفقودة — أعد تقييم هذا البُعد صراحةً داخل النص.`);
+      } else if (score < minimum) {
+        const detail = evidence ? ` السبب: ${evidence.reason}${evidence.evidence?.length ? ` الدليل: ${evidence.evidence.join(' | ')}` : ''} الإصلاح المطلوب: ${evidence.suggested_fix}` : '';
+        lines.push(`- ${qualityDimensionLabel(key)} ضعيف (${score}/100، الحد ${minimum}) — يحتاج تحسينًا مباشرًا.${detail}`);
+      }
+    }
     for (const [key, label] of Object.entries(EXTRA_DIMENSION_LABELS)) {
       const score = (quality as unknown as Record<string, number | undefined>)[key];
-      if (typeof score === 'number' && score < EXTRA_DIMENSION_MIN) {
+      if (typeof score === 'number' && score < EXTRA_DIMENSION_MIN && !QUALITY_DIMENSION_KEYS.includes(key as typeof QUALITY_DIMENSION_KEYS[number])) {
         lines.push(`- ${label} ضعيف (${score}/100) — يحتاج تحسينًا مباشرًا.`);
       }
     }

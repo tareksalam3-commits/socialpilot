@@ -1,4 +1,5 @@
 import type { ContentQualityResult, QualityDecision } from '@/types/assistant';
+import { evaluateQualityRubric } from '../qualityEngine/qualityRubric';
 
 // ============================================================================
 // Deterministic Content Guards
@@ -172,27 +173,12 @@ export function evaluateContentApproval(
   linkedInTarget: boolean,
 ): { approved: boolean; reasons: string[] } {
   const guard = arabicNaturalnessGuard(content);
-  const reasons: string[] = guard.pass ? [] : guard.reasons.map((r) => `guard:${r}`);
-
-  if (!quality) {
-    reasons.push('qc_unavailable');
-    return { approved: false, reasons };
-  }
-  if (quality.critical_issues?.length) {
-    reasons.push(...quality.critical_issues.map((i) => `critical:${i}`));
-  }
-  if (!quality.approved) reasons.push('qc_not_approved');
-  if (typeof quality.score !== 'number' || quality.score < QC_MIN_SCORE) reasons.push('score_below_minimum');
-  if (typeof quality.arabic_quality !== 'number') reasons.push('arabic_quality_missing');
-  else if (quality.arabic_quality < QC_MIN_ARABIC_QUALITY) reasons.push('arabic_quality_below_minimum');
-  if (linkedInTarget) {
-    if (typeof quality.linkedin_fit !== 'number') reasons.push('linkedin_fit_missing');
-    else if (quality.linkedin_fit < QC_MIN_LINKEDIN_FIT) reasons.push('linkedin_fit_below_minimum');
-  }
-  if (typeof quality.brand_fit !== 'number') reasons.push('brand_fit_missing');
-  else if (quality.brand_fit < QC_MIN_BRAND_FIT) reasons.push('brand_fit_below_minimum');
-
-  return { approved: guard.pass && reasons.length === 0, reasons };
+  const guardReasons = guard.pass ? [] : guard.reasons.map((reason) => `guard:${reason}`);
+  const rubric = evaluateQualityRubric(quality, linkedInTarget);
+  return {
+    approved: guard.pass && rubric.approved,
+    reasons: [...guardReasons, ...rubric.reasons],
+  };
 }
 
 const CRITICAL_ISSUE_LABELS: Record<string, string> = {

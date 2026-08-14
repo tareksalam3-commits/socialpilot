@@ -106,6 +106,32 @@ export type QualityDecision = {
  * dimensions below are additional, separately-scored signals surfaced for
  * inspection/the Quality Decision Layer — none of them individually gates
  * approval on their own. */
+export type QualityDimensionKey =
+  | 'objective_score'
+  | 'audience_score'
+  | 'brand_score'
+  | 'platform_score'
+  | 'language_score'
+  | 'clarity_score'
+  | 'readability_score'
+  | 'hook_score'
+  | 'value_score'
+  | 'cta_score'
+  | 'originality_score'
+  | 'factual_score'
+  | 'safety_score';
+
+/** A model-supplied, human-readable justification for one scored dimension.
+ * The deterministic rubric requires reason + suggested_fix before a score can
+ * support approval, so an unexplained score never becomes publishing proof. */
+export type QualityDimensionEvidence = {
+  dimension: QualityDimensionKey;
+  score: number;
+  reason: string;
+  evidence?: string[];
+  suggested_fix: string;
+};
+
 export type ContentQualityResult = {
   approved: boolean;
   score: number;
@@ -126,6 +152,13 @@ export type ContentQualityResult = {
   originality_score?: number;
   factual_score?: number;
   readability_score?: number;
+  /** Recalibrated critical dimensions. Every one must have evidence before
+   * deterministic code can approve the content for publishing. */
+  objective_score?: number;
+  audience_score?: number;
+  value_score?: number;
+  safety_score?: number;
+  dimension_evidence?: QualityDimensionEvidence[];
   /** Section 20 — Critical Issues. A restricted set (never free-form
    * labels the model invents): factual_error, brand_violation,
    * forbidden_term, platform_violation, unsafe_content. Any entry here

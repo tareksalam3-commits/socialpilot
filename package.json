@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "test": "node tests/contentGuards.test.mjs"
+    "test": "node tests/contentGuards.test.mjs && node tests/run-quality-calibration.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

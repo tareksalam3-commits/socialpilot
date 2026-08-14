@@ -1,6 +1,6 @@
 import { postRepository } from '@/repositories/postRepository';
 import type { Post, PostStatus } from '@/types/social';
-import { buildQualityProof } from '@/utils/contentIntegrity';
+import { buildQualityProof, isQualityProofValidForContent } from '@/utils/contentIntegrity';
 
 export type ContentWorkflowStage = 'generated' | 'editing' | 'in_review' | 'approved';
 
@@ -52,10 +52,9 @@ function workflowMetadata(input: PersistGeneratedContentInput | UpdateGeneratedC
 }
 
 async function integrityFor(content: string, quality: unknown, platforms: string[], suppliedProof?: Record<string, unknown> | null) {
-  if (suppliedProof && suppliedProof.content_hash) return suppliedProof;
+  if (suppliedProof && await isQualityProofValidForContent(content, suppliedProof)) return suppliedProof;
   if (!quality || typeof quality !== 'object') return null;
-  const proof = await buildQualityProof(content, quality as Parameters<typeof buildQualityProof>[1], platforms[0]);
-  return proof;
+  return buildQualityProof(content, quality as Parameters<typeof buildQualityProof>[1], platforms[0]);
 }
 
 export async function persistGeneratedContent(input: PersistGeneratedContentInput): Promise<Post> {

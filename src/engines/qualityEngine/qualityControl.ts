@@ -6,6 +6,8 @@ import type { ContentQualityResult } from '@/types/assistant';
 import { DIALECTS, DEFAULT_DIALECT, type DialectCode } from '@/constants/dialects';
 import { stripFence, sanitizeGeneratedContent, evaluateContentApproval, computeQualityDecision } from '../contentEngine/contentGuards';
 import { isLinkedInPlatform } from '../contentEngine/arabicWritingRules';
+import { QUALITY_DIMENSION_KEYS } from './qualityRubric';
+import type { QualityDimensionEvidence, QualityDimensionKey } from '@/types/assistant';
 
 /** Max regeneration attempts any Quality-Control loop gets before the
  * best-scoring candidate is kept and surfaced as "Needs Manual Review".
@@ -20,6 +22,22 @@ function clampScore(n: unknown): number {
 }
 
 const CRITICAL_ISSUE_KEYS = ['factual_error', 'brand_violation', 'forbidden_term', 'platform_violation', 'unsafe_content'] as const;
+
+function parseDimensionEvidence(value: unknown): QualityDimensionEvidence[] {
+  if (!Array.isArray(value)) return [];
+  const valid = new Set<string>(QUALITY_DIMENSION_KEYS);
+  return value.flatMap((item): QualityDimensionEvidence[] => {
+    if (!item || typeof item !== 'object') return [];
+    const raw = item as Record<string, unknown>;
+    const dimension = typeof raw.dimension === 'string' && valid.has(raw.dimension) ? raw.dimension as QualityDimensionKey : null;
+    const score = clampScore(raw.score);
+    const reason = typeof raw.reason === 'string' ? raw.reason.trim() : '';
+    const suggested_fix = typeof raw.suggested_fix === 'string' ? raw.suggested_fix.trim() : '';
+    const evidence = Array.isArray(raw.evidence) ? raw.evidence.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0).slice(0, 3) : undefined;
+    if (!dimension || !reason || !suggested_fix) return [];
+    return [{ dimension, score, reason, ...(evidence?.length ? { evidence } : {}), suggested_fix }];
+  });
+}
 
 /** Parses the strict-JSON response the QC model is instructed to return.
  * Returns null (never throws) on anything that isn't valid — the caller
@@ -52,12 +70,20 @@ function parseQCResult(raw: string): ContentQualityResult | null {
     if (json.originality_score !== undefined) result.originality_score = clampScore(json.originality_score);
     if (json.factual_score !== undefined) result.factual_score = clampScore(json.factual_score);
     if (json.readability_score !== undefined) result.readability_score = clampScore(json.readability_score);
+    if (json.objective_score !== undefined) result.objective_score = clampScore(json.objective_score);
+    if (json.audience_score !== undefined) result.audience_score = clampScore(json.audience_score);
+    if (json.value_score !== undefined) result.value_score = clampScore(json.value_score);
+    if (json.safety_score !== undefined) result.safety_score = clampScore(json.safety_score);
+    const evidence = parseDimensionEvidence(json.dimension_evidence);
+    if (evidence.length) result.dimension_evidence = evidence;
     if (Array.isArray(json.critical_issues)) {
       const critical = (json.critical_issues as unknown[]).filter(
         (i): i is string => typeof i === 'string' && (CRITICAL_ISSUE_KEYS as readonly string[]).includes(i),
       );
       if (critical.length) result.critical_issues = critical;
     }
+    // The model's `approved` boolean is only a claim. The caller applies the
+    // final deterministic rubric again with platform context before accepting.
     return result;
   } catch {
     return null;
@@ -113,6 +139,14 @@ function buildQCMessages(
 - originality_score: مدى تفرّد المحتوى وعدم كونه نمطيًا/مكررًا.
 - factual_score: موثوقية أي معلومات أو أرقام واردة في النص (100 لو لا توجد ادعاءات واقعية تحتاج تحققًا أصلًا).
 - readability_score: سهولة قراءة النص وتنظيمه.
+- objective_score: هل يحقق المحتوى الهدف المحدد في طلب المستخدم بوضوح؟
+- audience_score: هل يتحدث بلغة واحتياج الجمهور المستهدف بدل العموميات؟
+- value_score: هل يقدم فائدة قابلة للاستخدام أو فكرة محددة، لا حشوًا؟
+- safety_score: هل النص آمن ومهني ولا يحتوي تضليلًا أو ادعاءً غير مسؤول؟
+
+سلالم الدرجات الإلزامية: 0–49 مكسور/غير آمن، 50–69 ضعيف جوهريًا، 70–84 مسودة قابلة للتحسين، 85–89 قوي لكنه غير جاهز للنشر، 90–94 جاهز للنشر، 95–100 استثنائي. لا تمنح 90+ لمجرد سلامة اللغة أو الأسلوب. أي بُعد لا تستطيع إثباته بالنص يجب أن يأخذ أقل من الحد أو تُسجّل سببًا واضحًا.
+
+أعد dimension_evidence بمصفوفة تضم عنصرًا لكل بُعد من هذه الأبعاد الثلاثة عشر: objective_score, audience_score, brand_score, platform_score, language_score, clarity_score, readability_score, hook_score, value_score, cta_score, originality_score, factual_score, safety_score. كل عنصر يجب أن يحتوي dimension وscore وreason يشرح عيبًا/نقطة قوة محددة من النص وevidence كمقتطف قصير واحد إلى ثلاثة وsuggested_fix قابل للتنفيذ. لا تترك أي بُعد بلا دليل أو إصلاح مقترح، حتى إن كانت درجته عالية.
 
 Critical Issues (قائمة critical_issues) — أضف أي من هذه القيم الخمس فقط (بنفس الأسماء بالإنجليزية بالضبط) لو انطبقت، وإلا اترك المصفوفة فارغة. لا تخترع تصنيفات أخرى:
 - "factual_error": معلومة أو رقم خاطئ بشكل واضح.
@@ -143,7 +177,7 @@ ${linkedInTarget ? 'المنصة المستهدفة تتضمن LinkedIn — طب
 الدرجة (score) من 0 إلى 100. approved يجب أن يكون true فقط إذا كانت score >= 90 وكانت Arabic Naturalness (arabic_quality) طبيعية فعلًا وليست ضعيفة، مع اجتياز brand_fit >= 90 وlinkedin_fit >= 90 عند استهداف LinkedIn.
 
 أرجع JSON فقط بهذا الشكل بالضبط (بدون أي نص آخر):
-{"approved": boolean, "score": number, "issues": string[], "suggestions": string[], "arabic_quality": number, "linkedin_fit": number, "brand_fit": number, "hook_score": number, "clarity_score": number, "relevance_score": number, "brand_score": number, "platform_score": number, "language_score": number, "cta_score": number, "originality_score": number, "factual_score": number, "readability_score": number, "critical_issues": string[]}`,
+{"approved": boolean, "score": number, "issues": string[], "suggestions": string[], "arabic_quality": number, "linkedin_fit": number, "brand_fit": number, "hook_score": number, "clarity_score": number, "relevance_score": number, "brand_score": number, "platform_score": number, "language_score": number, "cta_score": number, "originality_score": number, "factual_score": number, "readability_score": number, "objective_score": number, "audience_score": number, "value_score": number, "safety_score": number, "dimension_evidence": [{"dimension": string, "score": number, "reason": string, "evidence": string[], "suggested_fix": string}], "critical_issues": string[]}`,
     },
     {
       role: 'user',
