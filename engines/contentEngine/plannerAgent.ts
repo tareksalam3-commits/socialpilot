@@ -81,7 +81,7 @@ export async function runPlannerAgent(
   workspaceId: string,
   request: string,
   connectedPlatforms: string[],
-  aiSettings?: { model?: string; temperature?: number; maxTokens?: number },
+  aiSettings?: { model?: string; temperature?: number; maxTokens?: number; freeOnly?: boolean },
 ): Promise<{ plan: CampaignPlan; raw: string; error: string | null }> {
   try {
     const result = await aiGateway.generate({
@@ -91,7 +91,7 @@ export async function runPlannerAgent(
       temperature: 0.4,
       maxTokens: aiSettings?.maxTokens,
       stream: true,
-      freeOnly: true,
+      freeOnly: aiSettings?.freeOnly ?? true,
       brandVoice: null,
       onChunk: () => {},
     });

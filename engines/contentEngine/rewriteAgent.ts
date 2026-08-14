@@ -193,7 +193,7 @@ export async function runRewriteAgent(
   quality: ContentQualityResult | null,
   reasons: string[],
   platforms: string[],
-  aiSettings?: { model?: string; temperature?: number; maxTokens?: number },
+  aiSettings?: { model?: string; temperature?: number; maxTokens?: number; freeOnly?: boolean },
   workspaceContext?: WorkspaceContext | null,
   dialect: DialectCode = DEFAULT_DIALECT,
 ): Promise<{ content: string; error: string | null; model: string | null }> {
@@ -215,7 +215,7 @@ export async function runRewriteAgent(
       temperature: aiSettings?.temperature ?? 0.6,
       maxTokens: aiSettings?.maxTokens,
       stream: true,
-      freeOnly: true,
+      freeOnly: aiSettings?.freeOnly ?? true,
       task: 'creator',
       brandVoice: brandVoice
         ? {

@@ -131,7 +131,7 @@ export async function runStrategyAgent(
   workspaceId: string,
   plan: CampaignPlan,
   workspaceContext: WorkspaceContext | null,
-  aiSettings?: { model?: string; temperature?: number; maxTokens?: number },
+  aiSettings?: { model?: string; temperature?: number; maxTokens?: number; freeOnly?: boolean },
 ): Promise<{ strategy: ContentStrategy; raw: string; error: string | null }> {
   const messages = buildStrategyMessages(plan, workspaceContext);
   try {
@@ -142,7 +142,7 @@ export async function runStrategyAgent(
       temperature: 0.4,
       maxTokens: aiSettings?.maxTokens,
       stream: true,
-      freeOnly: true,
+      freeOnly: aiSettings?.freeOnly ?? true,
       brandVoice: null,
       onChunk: () => {},
     });

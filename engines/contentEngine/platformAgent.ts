@@ -228,7 +228,7 @@ export async function runPlatformAdaptationAgent(
   masterContent: string,
   platforms: string[],
   workspaceContext: WorkspaceContext | null,
-  aiSettings?: { model?: string; temperature?: number; maxTokens?: number },
+  aiSettings?: { model?: string; temperature?: number; maxTokens?: number; freeOnly?: boolean },
   dialect: DialectCode = DEFAULT_DIALECT,
 ): Promise<{ result: PlatformAdaptationResult; error: string | null }> {
   const targetPlatforms = Array.from(new Set(platforms.filter(Boolean)));
@@ -248,7 +248,7 @@ export async function runPlatformAdaptationAgent(
       temperature: 0.5,
       maxTokens: aiSettings?.maxTokens,
       stream: true,
-      freeOnly: true,
+      freeOnly: aiSettings?.freeOnly ?? true,
       brandVoice: null,
       onChunk: () => {},
     });

@@ -101,7 +101,7 @@ export async function runResearchDecision(
   workspaceId: string,
   request: string,
   plan: CampaignPlan,
-  aiSettings?: { model?: string; maxTokens?: number },
+  aiSettings?: { model?: string; maxTokens?: number; freeOnly?: boolean },
 ): Promise<{ decision: ResearchDecision; raw: string; error: string | null }> {
   try {
     const result = await aiGateway.generate({
@@ -111,7 +111,7 @@ export async function runResearchDecision(
       temperature: 0.1,
       maxTokens: aiSettings?.maxTokens,
       stream: true,
-      freeOnly: true,
+      freeOnly: aiSettings?.freeOnly ?? true,
       brandVoice: null,
       onChunk: () => {},
     });
@@ -169,7 +169,7 @@ function parseEvidence(raw: string): string[] {
 export async function runResearchAgent(
   workspaceId: string,
   decision: ResearchDecision,
-  aiSettings?: { model?: string; maxTokens?: number },
+  aiSettings?: { model?: string; maxTokens?: number; freeOnly?: boolean },
 ): Promise<ResearchResult> {
   if (!decision.research_required) {
     return { research_required: false, research_available: false, evidence: [], sources: [], verified_context: null, reason: 'not_required' };
@@ -196,7 +196,7 @@ export async function runResearchAgent(
       temperature: 0,
       maxTokens: aiSettings?.maxTokens,
       stream: true,
-      freeOnly: true,
+      freeOnly: aiSettings?.freeOnly ?? true,
       brandVoice: null,
       onChunk: () => {},
     });

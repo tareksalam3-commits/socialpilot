@@ -164,7 +164,7 @@ export async function runCreatorAgent(
   workspaceId: string,
   plan: CampaignPlan,
   index: number,
-  aiSettings?: { model?: string; temperature?: number; maxTokens?: number },
+  aiSettings?: { model?: string; temperature?: number; maxTokens?: number; freeOnly?: boolean },
   contentText?: string | null,
   originalRequest?: string | null,
   dialect: DialectCode = DEFAULT_DIALECT,
@@ -191,7 +191,7 @@ export async function runCreatorAgent(
       temperature: aiSettings?.temperature ?? 0.8,
       maxTokens: aiSettings?.maxTokens,
       stream: true,
-      freeOnly: true,
+      freeOnly: aiSettings?.freeOnly ?? true,
       task: 'creator',
       brandVoice: brandVoice
         ? {

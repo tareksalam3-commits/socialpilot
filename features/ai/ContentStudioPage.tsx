@@ -245,7 +245,7 @@ export function ContentStudioPage() {
           workspace.id,
           plan,
           index,
-          { model: settings?.default_model, temperature: settings?.temperature, maxTokens: settings?.max_tokens },
+          { model: settings?.default_model, temperature: settings?.temperature, maxTokens: settings?.max_tokens, freeOnly: settings?.free_only_mode },
           null,
           originalRequest,
           dialect,
@@ -264,7 +264,7 @@ export function ContentStudioPage() {
               // Quality Control Model Separation: prefer the dedicated
               // qc_model, and always exclude the exact model that just
               // authored `created.content` — QC never grades itself.
-              { model: settings?.qc_model ?? undefined, maxTokens: settings?.max_tokens },
+              { model: settings?.qc_model ?? undefined, maxTokens: settings?.max_tokens, freeOnly: settings?.free_only_mode },
               dialect,
               created.model,
             )

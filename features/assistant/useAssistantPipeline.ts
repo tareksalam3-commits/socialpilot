@@ -58,6 +58,15 @@ import type { Post } from '@/types/social';
 // color in the UI lives in the page component, next to qcBadgeVariant.)
 const MAX_QC_ATTEMPTS = 3;
 
+// How many posts within the same campaign the Creator/QC/Image/Platform-
+// Adaptation pipeline runs at once. Previously every post in a campaign was
+// generated one after another (a full author→QC→image→adapt round trip
+// each), so an 8-post campaign could take minutes. A small pool keeps
+// several posts in flight together — enough to meaningfully cut wall-clock
+// time — without hammering the provider chain hard enough to trip
+// per-provider rate limits the way full unlimited parallelism would.
+const CREATION_CONCURRENCY = 3;
+
 function deriveTitle(content: string): string {
   const firstLine = content.split('\n').find((l) => l.trim().length > 0) ?? content;
   return firstLine.trim().slice(0, 80);
@@ -67,6 +76,29 @@ let localIdCounter = 0;
 function nextLocalId(): string {
   localIdCounter += 1;
   return `draft-${Date.now()}-${localIdCounter}`;
+}
+
+/** Runs `task` for each index in [0, count) with at most `concurrency`
+ * running at once, calling `onSettled` as each one finishes (in whatever
+ * order they complete, not necessarily index order) so callers can update
+ * progressive UI state immediately rather than waiting for the whole batch.
+ * A cheap hand-rolled pool instead of a dependency: grab the next index,
+ * await it, repeat, with `concurrency` of these workers running together. */
+async function runWithConcurrency<T>(
+  count: number,
+  concurrency: number,
+  task: (index: number) => Promise<T>,
+  onSettled: (index: number, result: T) => void,
+): Promise<void> {
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < count) {
+      const index = cursor++;
+      const result = await task(index);
+      onSettled(index, result);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, count) }, () => worker()));
 }
 
 /** Owns every piece of state and every pipeline step (Planner → Audience
@@ -145,9 +177,13 @@ export function useAssistantPipeline() {
     [accounts],
   );
 
+  // free_only_mode now actually reaches every agent (previously every
+  // agent hardcoded freeOnly: true regardless of this setting — a Super
+  // Admin who paid for a provider/model was silently still getting only
+  // the free tier). Defaults to true when unset, same as before.
   const aiParams = useMemo(
-    () => ({ model: settings?.default_model, temperature: settings?.temperature, maxTokens: settings?.max_tokens }),
-    [settings?.default_model, settings?.temperature, settings?.max_tokens],
+    () => ({ model: settings?.default_model, temperature: settings?.temperature, maxTokens: settings?.max_tokens, freeOnly: settings?.free_only_mode }),
+    [settings?.default_model, settings?.temperature, settings?.max_tokens, settings?.free_only_mode],
   );
 
   // Quality Control Model Separation: QC always resolves through
@@ -156,8 +192,8 @@ export function useAssistantPipeline() {
   // so this is the "preferred QC model" half of the guarantee, not the only
   // one. See qualityControl.ts / taskRouter.ts for the full contract.
   const qcAiParams = useMemo(
-    () => ({ model: settings?.qc_model ?? undefined, maxTokens: settings?.max_tokens }),
-    [settings?.qc_model, settings?.max_tokens],
+    () => ({ model: settings?.qc_model ?? undefined, maxTokens: settings?.max_tokens, freeOnly: settings?.free_only_mode }),
+    [settings?.qc_model, settings?.max_tokens, settings?.free_only_mode],
   );
 
   // Pipeline: Creator → sanitizeGeneratedContent() (deterministic metadata
@@ -540,13 +576,31 @@ export function useAssistantPipeline() {
       }
 
       // 3. Creator Agent — automatically chained, no user action needed here.
+      // Posts within the campaign now generate in parallel (up to
+      // CREATION_CONCURRENCY at once) instead of one full author→QC→
+      // image→adapt round trip after another. Placeholders (generating:
+      // true, same UI state regenerateDraft already uses for a single
+      // draft) go up front so every slot is visible immediately and fills
+      // in as it completes, in whatever order that happens to be —
+      // `created` stays indexed by post position so the final list the
+      // user sees is still in original order regardless.
       setStage('creating');
       setCreatingProgress({ done: 0, total: planForRun.post_count });
       const scheduleTimes = computeScheduleTimes(planForRun, planForRun.post_count);
-      const created: DraftPost[] = [];
-      for (let i = 0; i < planForRun.post_count; i++) {
+      const created: DraftPost[] = Array.from({ length: planForRun.post_count }, (_, i) => ({
+        local_id: nextLocalId(),
+        content: '',
+        platforms: planForRun.platforms,
+        scheduled_for: scheduleTimes[i].toISOString(),
+        media_urls: [],
+        generating: true,
+      }));
+      setDrafts([...created]);
+      let doneCount = 0;
+
+      const generateOnePost = async (i: number): Promise<DraftPost> => {
         const { content, quality, needsReview, approved, quality_error, genError } = await generateWithQualityControl(planForRun, i, contentText);
-        if (runIdRef.current !== runId) return;
+        if (runIdRef.current !== runId) return created[i];
         const finalContent = content || t('assistant.draft.generationFailedPlaceholder');
         if (genError) push({ title: t('assistant.toast.postGenerationIssue', { index: i + 1 }), description: genError, variant: 'error' });
         if (needsReview) push({ title: t('assistant.toast.needsReview', { index: i + 1 }), variant: 'info' });
@@ -560,7 +614,7 @@ export function useAssistantPipeline() {
             media_urls = [matched];
           } else {
             const { url: generatedUrl, error: imageError } = await generateDraftImage(workspace.id, planForRun, finalContent);
-            if (runIdRef.current !== runId) return;
+            if (runIdRef.current !== runId) return created[i];
             if (generatedUrl) {
               media_urls = [generatedUrl];
             } else if (imageError) {
@@ -586,7 +640,7 @@ export function useAssistantPipeline() {
               aiParams,
               resolveWorkspaceDialect(workspace),
             );
-            if (runIdRef.current !== runId) return;
+            if (runIdRef.current !== runId) return created[i];
             platformVariants = Object.keys(result.variants).length ? result.variants : undefined;
           } catch {
             // platformVariants stays undefined — optional context, never a blocker.
@@ -647,8 +701,8 @@ export function useAssistantPipeline() {
           });
         }
 
-        created.push({
-          local_id: nextLocalId(),
+        return {
+          local_id: created[i].local_id,
           post_id: persistedPostId,
           content: finalContent,
           platforms: planForRun.platforms,
@@ -661,10 +715,17 @@ export function useAssistantPipeline() {
           reviewedContent: content ? finalContent : undefined,
           platformVariants,
           aiDecision,
-        });
-        setCreatingProgress({ done: i + 1, total: planForRun.post_count });
+        };
+      };
+
+      await runWithConcurrency(planForRun.post_count, CREATION_CONCURRENCY, generateOnePost, (i, draft) => {
+        if (runIdRef.current !== runId) return;
+        created[i] = draft;
+        doneCount += 1;
+        setCreatingProgress({ done: doneCount, total: planForRun.post_count });
         setDrafts([...created]);
-      }
+      });
+      if (runIdRef.current !== runId) return;
 
       // 4. Quality Review — a standalone stage, separate from 'creating'.
       // Every draft above already ran through the Content Quality Control

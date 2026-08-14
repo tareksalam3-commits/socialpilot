@@ -138,7 +138,7 @@ export async function runHookAgent(
   plan: CampaignPlan,
   workspaceContext: WorkspaceContext | null,
   strategy: ContentStrategy | null,
-  aiSettings?: { model?: string; temperature?: number; maxTokens?: number },
+  aiSettings?: { model?: string; temperature?: number; maxTokens?: number; freeOnly?: boolean },
   dialect: DialectCode = DEFAULT_DIALECT,
 ): Promise<{ result: HookAgentResult; raw: string; error: string | null }> {
   const messages = buildHookMessages(plan, workspaceContext, strategy, dialect);
@@ -150,7 +150,7 @@ export async function runHookAgent(
       temperature: 0.7,
       maxTokens: aiSettings?.maxTokens,
       stream: true,
-      freeOnly: true,
+      freeOnly: aiSettings?.freeOnly ?? true,
       brandVoice: null,
       onChunk: () => {},
     });

@@ -160,7 +160,7 @@ export function useContentSources() {
       // qualityControl.ts / taskRouter.ts for the full guarantee (each
       // candidate below also names the exact model that authored it, so
       // runQualityControlLoop can exclude it per-attempt too).
-      const aiParams = { model: aiSettings?.qc_model ?? undefined, maxTokens: aiSettings?.max_tokens };
+      const aiParams = { model: aiSettings?.qc_model ?? undefined, maxTokens: aiSettings?.max_tokens, freeOnly: aiSettings?.free_only_mode };
       const dialect = resolveWorkspaceDialect(workspace);
 
       const getCandidate = async (

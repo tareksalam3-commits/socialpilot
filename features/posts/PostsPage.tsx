@@ -168,7 +168,7 @@ export function PostsPage({ embedded = false }: { embedded?: boolean }) {
         post.content,
         post.platforms,
         null,
-        { model: aiSettings?.default_model, maxTokens: aiSettings?.max_tokens },
+        { model: aiSettings?.default_model, maxTokens: aiSettings?.max_tokens, freeOnly: aiSettings?.free_only_mode },
       );
       if (!reviewed.result) {
         push({ title: t('contentWorkspace.reviewFailed'), description: reviewed.error ?? undefined, variant: 'error' });

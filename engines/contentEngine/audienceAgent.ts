@@ -102,7 +102,7 @@ export async function runAudienceInferenceAgent(
   workspaceId: string,
   request: string,
   plan: CampaignPlan,
-  aiSettings?: { model?: string; maxTokens?: number },
+  aiSettings?: { model?: string; maxTokens?: number; freeOnly?: boolean },
 ): Promise<{ inference: AudienceInference; raw: string; error: string | null }> {
   let brandVoice: BrandVoice | null = null;
   try {
@@ -121,7 +121,7 @@ export async function runAudienceInferenceAgent(
       temperature: 0.3,
       maxTokens: aiSettings?.maxTokens,
       stream: true,
-      freeOnly: true,
+      freeOnly: aiSettings?.freeOnly ?? true,
       brandVoice: null,
       onChunk: () => {},
     });

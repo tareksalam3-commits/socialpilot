@@ -165,7 +165,7 @@ export async function reviewGeneratedContent(
   // `model` here should be the dedicated QC model (ai_settings.qc_model),
   // never the model that authored `content` — see `excludeModel` below,
   // which is the runtime guarantee for that even if this is left unset.
-  aiSettings?: { model?: string; maxTokens?: number },
+  aiSettings?: { model?: string; maxTokens?: number; freeOnly?: boolean },
   dialect: DialectCode = DEFAULT_DIALECT,
   // The model that actually authored `content` (from runCreatorAgent's /
   // runRewriteAgent's return value), when known. Forwarded to the Gateway
@@ -189,7 +189,7 @@ export async function reviewGeneratedContent(
       temperature: 0.2,
       maxTokens: aiSettings?.maxTokens,
       stream: true,
-      freeOnly: true,
+      freeOnly: aiSettings?.freeOnly ?? true,
       brandVoice: null,
       task: 'qc',
       excludeModel: excludeModel ?? undefined,
