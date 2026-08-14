@@ -7,7 +7,6 @@ import type { WorkspaceContext } from '@/types/context';
 import { DEFAULT_DIALECT, type DialectCode } from '@/constants/dialects';
 import { isLinkedInPlatform, buildArabicWritingRules, LINKEDIN_WRITING_RULES, OUTPUT_CONTRACT } from './arabicWritingRules';
 import { getPlatformProfile } from './platformAgent';
-import { QUALITY_DIMENSION_KEYS, QUALITY_DIMENSION_THRESHOLDS, qualityDimensionLabel } from '../qualityEngine/qualityRubric';
 
 // ============================================================================
 // Smart Rewrite — Phase 2, STEP 12 (section 22)
@@ -42,19 +41,46 @@ const EXTRA_DIMENSION_LABELS: Record<string, string> = {
   originality_score: 'التفرد وعدم التكرار',
   factual_score: 'موثوقية المعلومات',
   readability_score: 'سهولة القراءة',
+  content_value_score: 'الفكرة والقيمة المقدمة',
+  substance_score: 'وجود مضمون حقيقي (Substance)',
+  structure_score: 'تنظيم وبنية المنشور',
+  naturalness_score: 'الطبيعية (عدم بدو النص آليًا)',
+  audience_fit_score: 'ملاءمة الجمهور المستهدف',
 };
 
-const EXTRA_DIMENSION_MIN = 70; // retained for legacy score fields not in the strict rubric
+const EXTRA_DIMENSION_MIN = 70;
+
+const DIMENSION_LABELS_AR: Record<string, string> = {
+  idea_value: 'الفكرة والقيمة',
+  hook: 'الـHook',
+  substance: 'جودة المحتوى (Substance)',
+  structure: 'البنية',
+  arabic_quality: 'العربية الطبيعية',
+  naturalness: 'الطبيعية',
+  brand_fit: 'توافق البراند',
+  audience_fit: 'ملاءمة الجمهور',
+  platform_fit: 'ملاءمة المنصة',
+  cta: 'الدعوة لإجراء',
+  originality: 'التفرد',
+  factual_logical: 'السلامة الواقعية والمنطقية',
+};
 
 /** Turns a failed Quality Report into the concrete, actionable brief the
- * Rewrite Task needs — never just "try again". Combines: section 20's
- * Critical Issues, the QC agent's own free-form `issues`, any of section
- * 19's extra dimensions that scored below EXTRA_DIMENSION_MIN, and the
- * Deterministic Guard reasons (from evaluateContentApproval's `reasons`,
- * prefixed `guard:`) that actually triggered this retry. Returns null only
- * when there's genuinely nothing to report (e.g. QC was unavailable and no
- * guard reason fired either), so the caller falls back to a generic
- * "improve this" instruction instead of an empty, uninformative block. */
+ * Rewrite Task needs — never just "try again". QC Hardening Pass: when the
+ * QC result carries the full per-dimension `dimensions` record (score/
+ * status/reason/evidence/suggested_fix — see qualityControl.ts), this is
+ * now the PRIMARY source for the brief: every failing dimension's own
+ * `evidence` (what's actually wrong, in the text) and `suggested_fix` (what
+ * to change) are handed to the Rewrite Agent directly, exactly what item 7
+ * of the brief asks for ("بهذا الـImprovement Agent يعرف ماذا يصلح
+ * بالضبط"). Falls back to the legacy flat-field/threshold check below only
+ * for an older cached QC result that predates `dimensions`. Also folds in:
+ * section 20's Critical Issues, the QC agent's own free-form `issues`, and
+ * the Deterministic Guard reasons (from evaluateContentApproval's
+ * `reasons`, prefixed `guard:`) that actually triggered this retry. Returns
+ * null only when there's genuinely nothing to report, so the caller falls
+ * back to a generic "improve this" instruction instead of an empty,
+ * uninformative block. */
 function buildFailedDimensionsBrief(quality: ContentQualityResult | null, reasons: string[]): string | null {
   const lines: string[] = [];
 
@@ -64,22 +90,22 @@ function buildFailedDimensionsBrief(quality: ContentQualityResult | null, reason
   if (quality?.issues?.length) {
     lines.push(...quality.issues.map((i) => `- ${i}`));
   }
-  if (quality) {
-    const evidenceByDimension = new Map((quality.dimension_evidence ?? []).map((item) => [item.dimension, item]));
-    for (const key of QUALITY_DIMENSION_KEYS) {
-      const score = (quality as unknown as Record<string, number | undefined>)[key];
-      const minimum = QUALITY_DIMENSION_THRESHOLDS[key];
-      const evidence = evidenceByDimension.get(key);
-      if (typeof score !== 'number') {
-        lines.push(`- ${qualityDimensionLabel(key)}: الدرجة مفقودة — أعد تقييم هذا البُعد صراحةً داخل النص.`);
-      } else if (score < minimum) {
-        const detail = evidence ? ` السبب: ${evidence.reason}${evidence.evidence?.length ? ` الدليل: ${evidence.evidence.join(' | ')}` : ''} الإصلاح المطلوب: ${evidence.suggested_fix}` : '';
-        lines.push(`- ${qualityDimensionLabel(key)} ضعيف (${score}/100، الحد ${minimum}) — يحتاج تحسينًا مباشرًا.${detail}`);
-      }
+
+  if (quality?.dimensions) {
+    for (const [key, entry] of Object.entries(quality.dimensions)) {
+      if (!entry || entry.status !== 'fail') continue;
+      const label = DIMENSION_LABELS_AR[key] ?? key;
+      const parts = [`- ${label} ضعيف (${entry.score}/100)`];
+      if (entry.evidence) parts.push(`المشكلة تحديدًا: ${entry.evidence}`);
+      else if (entry.reason) parts.push(entry.reason);
+      if (entry.suggested_fix) parts.push(`الإصلاح المطلوب: ${entry.suggested_fix}`);
+      lines.push(parts.join(' — '));
     }
+  } else if (quality) {
+    // Legacy fallback for a QC result without a `dimensions` record.
     for (const [key, label] of Object.entries(EXTRA_DIMENSION_LABELS)) {
       const score = (quality as unknown as Record<string, number | undefined>)[key];
-      if (typeof score === 'number' && score < EXTRA_DIMENSION_MIN && !QUALITY_DIMENSION_KEYS.includes(key as typeof QUALITY_DIMENSION_KEYS[number])) {
+      if (typeof score === 'number' && score < EXTRA_DIMENSION_MIN) {
         lines.push(`- ${label} ضعيف (${score}/100) — يحتاج تحسينًا مباشرًا.`);
       }
     }
@@ -97,6 +123,9 @@ function buildFailedDimensionsBrief(quality: ContentQualityResult | null, reason
   }
   if (guardReasons.includes('guard:too_short')) {
     lines.push('- النص قصير جدًا — وسّعه ليقدّم قيمة حقيقية للقارئ.');
+  }
+  if (guardReasons.includes('guard:cliche_opener')) {
+    lines.push('- المنشور يبدأ بعبارة افتتاحية مستهلكة/عامة (مثل "في عالم اليوم..." أو "لا شك أن...") — ابدأ بموقف أو فكرة محددة بدلًا منها.');
   }
 
   return lines.length ? lines.join('\n') : null;

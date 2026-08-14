@@ -1,4 +1,4 @@
-import type { ContentQualityResult, QualityDimensionEvidence, QualityDimensionKey } from '@/types/assistant';
+import type { ContentQualityResult, LegacyQualityDimensionKey, QualityDimensionEvidence } from '@/types/assistant';
 
 /**
  * Deterministic acceptance policy for AI-authored content. The model may
@@ -19,7 +19,7 @@ export const QUALITY_SCORE_BANDS = [
   { min: 95, max: 100, label: 'exceptional' },
 ] as const;
 
-export const QUALITY_DIMENSION_THRESHOLDS: Record<QualityDimensionKey, number> = {
+export const QUALITY_DIMENSION_THRESHOLDS: Record<LegacyQualityDimensionKey, number> = {
   objective_score: 85,
   audience_score: 85,
   brand_score: 90,
@@ -35,7 +35,7 @@ export const QUALITY_DIMENSION_THRESHOLDS: Record<QualityDimensionKey, number> =
   safety_score: 95,
 };
 
-const DIMENSION_LABELS: Record<QualityDimensionKey, string> = {
+const DIMENSION_LABELS: Record<LegacyQualityDimensionKey, string> = {
   objective_score: 'تحقيق الهدف',
   audience_score: 'ملاءمة الجمهور',
   brand_score: 'التوافق مع هوية البراند',
@@ -51,10 +51,10 @@ const DIMENSION_LABELS: Record<QualityDimensionKey, string> = {
   safety_score: 'سلامة المحتوى',
 };
 
-export const QUALITY_DIMENSION_KEYS = Object.keys(QUALITY_DIMENSION_THRESHOLDS) as QualityDimensionKey[];
+export const QUALITY_DIMENSION_KEYS = Object.keys(QUALITY_DIMENSION_THRESHOLDS) as LegacyQualityDimensionKey[];
 
-function numericScore(quality: ContentQualityResult, key: QualityDimensionKey): number | undefined {
-  const direct = quality[key];
+function numericScore(quality: ContentQualityResult, key: LegacyQualityDimensionKey): number | undefined {
+  const direct = quality[key as keyof ContentQualityResult];
   if (typeof direct === 'number') return direct;
 
   // Backward-compatible aliases are accepted as a score signal, but they do
@@ -66,13 +66,13 @@ function numericScore(quality: ContentQualityResult, key: QualityDimensionKey): 
   return undefined;
 }
 
-function normalizedEvidence(quality: ContentQualityResult): Map<QualityDimensionKey, QualityDimensionEvidence> {
-  const evidence = new Map<QualityDimensionKey, QualityDimensionEvidence>();
+function normalizedEvidence(quality: ContentQualityResult): Map<LegacyQualityDimensionKey, QualityDimensionEvidence> {
+  const evidence = new Map<LegacyQualityDimensionKey, QualityDimensionEvidence>();
   for (const item of quality.dimension_evidence ?? []) {
-    if (!QUALITY_DIMENSION_KEYS.includes(item.dimension)) continue;
+    if (!QUALITY_DIMENSION_KEYS.includes(item.dimension as LegacyQualityDimensionKey)) continue;
     if (typeof item.score !== 'number' || !Number.isFinite(item.score)) continue;
     if (!item.reason?.trim() || !item.suggested_fix?.trim()) continue;
-    evidence.set(item.dimension, item);
+    evidence.set(item.dimension as LegacyQualityDimensionKey, item);
   }
   return evidence;
 }
@@ -139,6 +139,6 @@ export function evaluateQualityRubric(quality: ContentQualityResult | null, link
   return { approved: modelClaimsApproval && reasons.length === 0, reasons, failedDimensions };
 }
 
-export function qualityDimensionLabel(key: QualityDimensionKey): string {
+export function qualityDimensionLabel(key: LegacyQualityDimensionKey): string {
   return DIMENSION_LABELS[key];
 }

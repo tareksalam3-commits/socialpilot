@@ -2,12 +2,11 @@ import { aiGateway } from '@/services/aiGateway';
 import { aiHistoryRepository } from '@/repositories/aiHistoryRepository';
 import { brandVoiceRepository } from '@/repositories/brandVoiceRepository';
 import type { ChatMessage, BrandVoice } from '@/types/ai';
-import type { ContentQualityResult } from '@/types/assistant';
+import type { ContentQualityResult, QualityDimensionKey, QualityDimensionResult } from '@/types/assistant';
+import { CRITICAL_QUALITY_DIMENSIONS } from '@/types/assistant';
 import { DIALECTS, DEFAULT_DIALECT, type DialectCode } from '@/constants/dialects';
 import { stripFence, sanitizeGeneratedContent, evaluateContentApproval, computeQualityDecision } from '../contentEngine/contentGuards';
 import { isLinkedInPlatform } from '../contentEngine/arabicWritingRules';
-import { QUALITY_DIMENSION_KEYS } from './qualityRubric';
-import type { QualityDimensionEvidence, QualityDimensionKey } from '@/types/assistant';
 
 /** Max regeneration attempts any Quality-Control loop gets before the
  * best-scoring candidate is kept and surfaced as "Needs Manual Review".
@@ -21,69 +20,143 @@ function clampScore(n: unknown): number {
   return Math.min(100, Math.max(0, Math.round(num)));
 }
 
-const CRITICAL_ISSUE_KEYS = ['factual_error', 'brand_violation', 'forbidden_term', 'platform_violation', 'unsafe_content'] as const;
+/** QC Hardening Pass — the restricted, structured-output-only set of
+ * critical-issue labels the QC model may report. Expanded beyond the
+ * original five (factual_error/brand_violation/forbidden_term/
+ * platform_violation/unsafe_content) to also give the model a way to flag
+ * item 5's remaining Hard Fail Rules that aren't already covered by a
+ * dimension-score gate: content that is technically fine dimension-by-
+ * dimension but is still generic filler, has a fabricated/marketing-speak
+ * CTA, unmistakably reads as raw AI output, is a wildly wrong length for
+ * its stated goal, or repeats the same hook/idea/CTA in an obvious pattern.
+ * Never free-form text a downstream decision would have to
+ * parse — the model can only pick from this list. */
+const CRITICAL_ISSUE_KEYS = [
+  'factual_error',
+  'brand_violation',
+  'forbidden_term',
+  'platform_violation',
+  'unsafe_content',
+  'generic_content',
+  'unnatural_cta',
+  'ai_generated_style',
+  'length_mismatch',
+  'obvious_repetition',
+] as const;
 
-function parseDimensionEvidence(value: unknown): QualityDimensionEvidence[] {
-  if (!Array.isArray(value)) return [];
-  const valid = new Set<string>(QUALITY_DIMENSION_KEYS);
-  return value.flatMap((item): QualityDimensionEvidence[] => {
-    if (!item || typeof item !== 'object') return [];
-    const raw = item as Record<string, unknown>;
-    const dimension = typeof raw.dimension === 'string' && valid.has(raw.dimension) ? raw.dimension as QualityDimensionKey : null;
-    const score = clampScore(raw.score);
-    const reason = typeof raw.reason === 'string' ? raw.reason.trim() : '';
-    const suggested_fix = typeof raw.suggested_fix === 'string' ? raw.suggested_fix.trim() : '';
-    const evidence = Array.isArray(raw.evidence) ? raw.evidence.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0).slice(0, 3) : undefined;
-    if (!dimension || !reason || !suggested_fix) return [];
-    return [{ dimension, score, reason, ...(evidence?.length ? { evidence } : {}), suggested_fix }];
-  });
+/** All twelve dimensions (A-L) the QC model is required to score. Order
+ * matches the brief exactly and is reused for prompt-building, parsing, and
+ * the deterministic mean-score calculation, so nothing here can silently
+ * drift out of sync. */
+const QUALITY_DIMENSION_KEYS: readonly QualityDimensionKey[] = [
+  'idea_value',
+  'hook',
+  'substance',
+  'structure',
+  'arabic_quality',
+  'naturalness',
+  'brand_fit',
+  'audience_fit',
+  'platform_fit',
+  'cta',
+  'originality',
+  'factual_logical',
+];
+
+/** Maps each dimension's parsed result onto the legacy flat fields so
+ * existing UI (AIAssistantPage.tsx etc.) keeps reading real, current values
+ * without needing to change. Never the other direction — `dimensions` is
+ * always the source of truth these are derived FROM, never derived from. */
+function projectDimensionsToFlatFields(dimensions: Partial<Record<QualityDimensionKey, QualityDimensionResult>>): Partial<ContentQualityResult> {
+  const s = (k: QualityDimensionKey): number | undefined => dimensions[k]?.score;
+  return {
+    content_value_score: s('idea_value'),
+    hook_score: s('hook'),
+    substance_score: s('substance'),
+    structure_score: s('structure'),
+    arabic_quality: s('arabic_quality'),
+    naturalness_score: s('naturalness'),
+    brand_fit: s('brand_fit'),
+    brand_score: s('brand_fit'),
+    audience_fit_score: s('audience_fit'),
+    relevance_score: s('audience_fit'),
+    platform_score: s('platform_fit'),
+    linkedin_fit: s('platform_fit'),
+    language_score: s('arabic_quality'),
+    cta_score: s('cta'),
+    originality_score: s('originality'),
+    factual_score: s('factual_logical'),
+    clarity_score: s('structure'),
+    readability_score: s('structure'),
+  };
+}
+
+/** Parses one dimension entry out of the QC model's `dimensions` object.
+ * Never trusts the model's own `status` in isolation — `status` is kept for
+ * the evidence record shown to humans/the Rewrite Agent, but every gating
+ * decision downstream (evaluateContentApproval) recomputes pass/fail from
+ * `score` against that dimension's own threshold in code. Missing/malformed
+ * fields fall back to a failing 0/"missing" entry rather than being dropped
+ * silently — an evaluator that can't score a dimension must never be read
+ * as "this dimension is fine". */
+function parseDimension(raw: unknown): QualityDimensionResult {
+  const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const score = obj.score === undefined ? 0 : clampScore(obj.score);
+  return {
+    score,
+    status: obj.status === 'pass' || obj.status === 'fail' ? obj.status : score >= 90 ? 'pass' : 'fail',
+    reason: typeof obj.reason === 'string' ? obj.reason : '',
+    evidence: typeof obj.evidence === 'string' ? obj.evidence : '',
+    suggested_fix: typeof obj.suggested_fix === 'string' ? obj.suggested_fix : '',
+  };
 }
 
 /** Parses the strict-JSON response the QC model is instructed to return.
  * Returns null (never throws) on anything that isn't valid — the caller
  * treats that as "QC unavailable" rather than blocking the pipeline.
- * Phase 2, STEP 11 — also parses section 19's extra Quality Dimensions and
- * section 20's Critical Issues. `critical_issues` is filtered against
- * CRITICAL_ISSUE_KEYS so the model can never inject an arbitrary label
- * that wasn't one of the five defined categories (structured output, per
- * STEP 26 — never free-form text where a decision is going to read it). */
+ *
+ * QC Hardening Pass: `score` in the returned result is NEVER the model's
+ * self-reported overall number — it is always recomputed here as the mean
+ * of the twelve `dimensions` scores. This is what item 1/3 of the brief
+ * require: a model that reports "95+95+95+60" can no longer have that low
+ * 60 averaged away by its own arithmetic, because its own arithmetic is
+ * never used. Any dimension missing from the response scores 0 in this
+ * mean (see parseDimension) — QC can't silently skip scoring something
+ * inconvenient and have that read as a pass. `approved` from the model is
+ * discarded entirely; only evaluateContentApproval (contentGuards.ts),
+ * reading `dimensions`, ever decides approval. */
 function parseQCResult(raw: string): ContentQualityResult | null {
   try {
     const json = JSON.parse(stripFence(raw)) as Record<string, unknown>;
-    const score = clampScore(json.score);
-    const approved = typeof json.approved === 'boolean' ? json.approved : score >= 90;
+    const rawDimensions = (json.dimensions && typeof json.dimensions === 'object' ? json.dimensions : {}) as Record<string, unknown>;
+    const dimensions: Partial<Record<QualityDimensionKey, QualityDimensionResult>> = {};
+    for (const key of QUALITY_DIMENSION_KEYS) {
+      dimensions[key] = parseDimension(rawDimensions[key]);
+    }
+    const score = clampScore(QUALITY_DIMENSION_KEYS.reduce((sum, k) => sum + (dimensions[k]?.score ?? 0), 0) / QUALITY_DIMENSION_KEYS.length);
+
     const issues = Array.isArray(json.issues) ? (json.issues as unknown[]).filter((i): i is string => typeof i === 'string') : [];
     const suggestions = Array.isArray(json.suggestions)
       ? (json.suggestions as unknown[]).filter((i): i is string => typeof i === 'string')
       : [];
-    const result: ContentQualityResult = { approved, score, issues, suggestions };
-    if (json.arabic_quality !== undefined) result.arabic_quality = clampScore(json.arabic_quality);
-    if (json.linkedin_fit !== undefined) result.linkedin_fit = clampScore(json.linkedin_fit);
-    if (json.brand_fit !== undefined) result.brand_fit = clampScore(json.brand_fit);
-    if (json.hook_score !== undefined) result.hook_score = clampScore(json.hook_score);
-    if (json.clarity_score !== undefined) result.clarity_score = clampScore(json.clarity_score);
-    if (json.relevance_score !== undefined) result.relevance_score = clampScore(json.relevance_score);
-    if (json.brand_score !== undefined) result.brand_score = clampScore(json.brand_score);
-    if (json.platform_score !== undefined) result.platform_score = clampScore(json.platform_score);
-    if (json.language_score !== undefined) result.language_score = clampScore(json.language_score);
-    if (json.cta_score !== undefined) result.cta_score = clampScore(json.cta_score);
-    if (json.originality_score !== undefined) result.originality_score = clampScore(json.originality_score);
-    if (json.factual_score !== undefined) result.factual_score = clampScore(json.factual_score);
-    if (json.readability_score !== undefined) result.readability_score = clampScore(json.readability_score);
-    if (json.objective_score !== undefined) result.objective_score = clampScore(json.objective_score);
-    if (json.audience_score !== undefined) result.audience_score = clampScore(json.audience_score);
-    if (json.value_score !== undefined) result.value_score = clampScore(json.value_score);
-    if (json.safety_score !== undefined) result.safety_score = clampScore(json.safety_score);
-    const evidence = parseDimensionEvidence(json.dimension_evidence);
-    if (evidence.length) result.dimension_evidence = evidence;
+
+    const result: ContentQualityResult = {
+      // Placeholder — evaluateContentApproval (contentGuards.ts) always
+      // recomputes this from `dimensions`; never read from the model.
+      approved: false,
+      score,
+      issues,
+      suggestions,
+      dimensions,
+      ...projectDimensionsToFlatFields(dimensions),
+    };
+
     if (Array.isArray(json.critical_issues)) {
       const critical = (json.critical_issues as unknown[]).filter(
         (i): i is string => typeof i === 'string' && (CRITICAL_ISSUE_KEYS as readonly string[]).includes(i),
       );
       if (critical.length) result.critical_issues = critical;
     }
-    // The model's `approved` boolean is only a claim. The caller applies the
-    // final deterministic rubric again with platform context before accepting.
     return result;
   } catch {
     return null;
@@ -95,7 +168,14 @@ function parseQCResult(raw: string): ContentQualityResult | null {
  * independent layer on top of the Creator prompt (never a substitute for
  * it): the Creator is instructed to write naturally, and QC independently
  * verifies that it actually did, catching machine-translation-like phrasing
- * the Creator prompt alone didn't prevent. */
+ * the Creator prompt alone didn't prevent.
+ *
+ * QC Hardening Pass (item 4/7 of the brief): the model is explicitly framed
+ * as adversarial — told to hunt for the specific defects that make content
+ * mediocre (filler, repetition, AI-sounding phrasing, weak hooks, hollow
+ * CTAs, clichés, illogical transitions, empty "takeaway") rather than asked
+ * a soft "rate this" question — and required to back every dimension with
+ * concrete evidence + a suggested fix, not just a number. */
 function buildQCMessages(
   content: string,
   platforms: string[],
@@ -110,74 +190,66 @@ function buildQCMessages(
     .filter((d) => d.code !== meta.code)
     .map((d) => d.name)
     .join('، ');
+  const criticalNames = CRITICAL_QUALITY_DIMENSIONS.join(', ');
 
   return [
     {
       role: 'system',
-      content: `أنت "Arabic Content Quality Control" — مراقب جودة محتوى عربي متخصص في منشورات LinkedIn وPersonal Branding. راجع النص المرفق بموضوعية صارمة وأرجع JSON فقط، بدون أي شرح أو Markdown أو نص إضافي قبله أو بعده.
+      content: `أنت "Arabic Content Quality Control" — مراقب جودة محتوى عربي متخصص في منشورات LinkedIn وPersonal Branding. دورك عدائي/نقدي (Adversarial) بالكامل — أنت لست هنا لتوافق على المحتوى، أنت هنا لتجد كل سبب يجعله غير جاهز للنشر. لا تسأل نفسك "هل هذا جيد؟" — اسأل نفسك "ما الذي يجعل هذا المنشور أضعف من منشور احترافي حقيقي؟". ابحث تحديدًا عن: كلام عام لا يقول شيئًا فعليًا، حشو، تكرار لنفس الفكرة بصياغات مختلفة، صياغة تشبه الترجمة الآلية أو أسلوب روبوتي، Hook ضعيف أو منفصل عن باقي النص، CTA مصطنع أو تسويقي بلا علاقة حقيقية بالموضوع، نصائح بديهية لا تضيف قيمة، انتقالات غير منطقية بين الأفكار، مبالغة أو وعود غير مبررة، clichés مستهلكة، عدم وجود takeaway حقيقي يقدر القارئ يطبقه، وعدم ملاءمة النص فعليًا للمنصة أو للجمهور المستهدف (وليس فقط نفس النص المعاد استخدامه لكل منصة). إذا وجدت أي عيب حقيقي من هذه يجب أن تخفض درجة البُعد المرتبط به بوضوح — لا تتساهل، ولا "تقرّب" الدرجة لأعلى.
 
-قيّم النص وفق هذه المعايير العشرة:
-1. Arabic Naturalness (اللهجة المطلوبة لهذا المحتوى: ${meta.name}) — هل هو "عربية ${meta.name} مهنية طبيعية" فعلًا (وليس فصحى، ولا عربية رسمية ثقيلة، ولا ترجمة حرفية/آلية، ولا لهجة عربية أخرى مثل ${otherDialectNames})؟ راجع أيضًا أن الصياغة مُعاد بناؤها بالكامل بلهجة ${meta.name} وليست فصحى تم فيها استبدال كلمات بمرادفات ${meta.name.replace(/^ال/, '')} فقط.
-2. Grammar — سلامة القواعد والصياغة.
-3. Clarity — وضوح الفكرة.
-4. Hook — قوة الجملة الافتتاحية.
-5. Value — القيمة الحقيقية المقدمة للقارئ.
-6. Human Tone — نبرة إنسانية طبيعية، وليست آلية.
-7. Brand Voice Alignment — مدى الالتزام بهوية العلامة.
-8. LinkedIn Fit — ملاءمة النص لمعايير LinkedIn (إن كانت المنصة المستهدفة LinkedIn).
-9. CTA Quality — جودة الدعوة لإجراء ونهاية المنشور.
-10. AI-like / Translated phrasing — اكتشاف أي صياغة تبدو كترجمة آلية أو غير طبيعية.
+راجع النص المرفق بموضوعية صارمة وأرجع JSON فقط، بدون أي شرح أو Markdown أو نص إضافي قبله أو بعده.
 
-بالإضافة إلى ذلك، قيّم كل بُعد من الأبعاد التالية بدرجة منفصلة من 0 إلى 100 (Smart Quality Engine):
-- hook_score: قوة الـHook تحديدًا (مستقل عن score العام).
-- clarity_score: وضوح الفكرة الأساسية.
-- relevance_score: ارتباط المحتوى بالجمهور والهدف المُعطى.
-- brand_score: مدى توافق المحتوى مع هوية البراند (نفس معنى brand_fit).
-- platform_score: ملاءمة المحتوى للمنصة المستهدفة تحديدًا.
-- language_score: سلامة اللغة وجودتها بشكل عام (مستقل عن arabic_quality الخاص باللهجة).
-- cta_score: جودة الدعوة لإجراء.
-- originality_score: مدى تفرّد المحتوى وعدم كونه نمطيًا/مكررًا.
-- factual_score: موثوقية أي معلومات أو أرقام واردة في النص (100 لو لا توجد ادعاءات واقعية تحتاج تحققًا أصلًا).
-- readability_score: سهولة قراءة النص وتنظيمه.
-- objective_score: هل يحقق المحتوى الهدف المحدد في طلب المستخدم بوضوح؟
-- audience_score: هل يتحدث بلغة واحتياج الجمهور المستهدف بدل العموميات؟
-- value_score: هل يقدم فائدة قابلة للاستخدام أو فكرة محددة، لا حشوًا؟
-- safety_score: هل النص آمن ومهني ولا يحتوي تضليلًا أو ادعاءً غير مسؤول؟
+قيّم النص على الاثني عشر بُعدًا التالية (كل بُعد بدرجة مستقلة من 0 إلى 100، ولكل بُعد status: "pass" أو "fail"، وreason (سبب مختصر)، وevidence (اقتباس أو وصف دقيق للمشكلة الفعلية في النص نفسه — أو "لا توجد مشكلة" إن كان pass)، وsuggested_fix (ما الذي يجب تغييره تحديدًا؛ فارغ إن كان pass)):
 
-سلالم الدرجات الإلزامية: 0–49 مكسور/غير آمن، 50–69 ضعيف جوهريًا، 70–84 مسودة قابلة للتحسين، 85–89 قوي لكنه غير جاهز للنشر، 90–94 جاهز للنشر، 95–100 استثنائي. لا تمنح 90+ لمجرد سلامة اللغة أو الأسلوب. أي بُعد لا تستطيع إثباته بالنص يجب أن يأخذ أقل من الحد أو تُسجّل سببًا واضحًا.
+A. idea_value — الفكرة والقيمة: هل يقدم المنشور فكرة واضحة ومفيدة فعلًا للقارئ، أم كلام عام يمكن أن يُكتب عن أي موضوع؟
+B. hook — Hook: هل أول 1-2 سطر يخلقان فضولًا أو توترًا حقيقيًا يجعل القارئ يريد الاستمرار، أم بداية عامة/مملة؟
+C. substance — جودة المحتوى (Substance): هل يوجد مضمون حقيقي (مثال، رقم، تجربة، رأي محدد) أم حشو وعبارات عامة مكررة بصياغات مختلفة؟
+D. structure — البنية: هل المنشور منظم، فقراته منطقية، وسهل القراءة على الموبايل، أم كتلة نص غير منظمة؟
+E. arabic_quality — Arabic Naturalness (اللهجة المطلوبة: ${meta.name}) — هل هو "عربية ${meta.name} مهنية طبيعية" فعلًا (وليس فصحى، ولا عربية رسمية ثقيلة، ولا ترجمة حرفية/آلية، ولا لهجة عربية أخرى مثل ${otherDialectNames})؟ راجع أن الصياغة مُعاد بناؤها بالكامل بلهجة ${meta.name} وليست فصحى تم فيها استبدال كلمات بمرادفات ${meta.name.replace(/^ال/, '')} فقط.
+F. naturalness — الطبيعية (مستقلة عن E): هل يبدو النص كأنه مكتوب بواسطة شخص محترف حقيقي بنبرة إنسانية، أم يبدو كنص آلي/AI-generated حتى لو كانت قواعد اللغة سليمة (جمل متكاملة الشكل لكن بلا شخصية أو رأي حقيقي، انتقالات صناعية، توازن مصطنع بين الجمل)؟
+G. brand_fit — Brand Voice Alignment: مدى الالتزام بهوية العلامة ونبرتها المذكورة (وليس مجرد عدم مخالفتها).
+H. audience_fit — ملاءمة الجمهور: هل يخاطب النص الجمهور المحدد فعليًا (مستواه، همومه، اهتماماته) أم نص عام يصلح لأي جمهور؟
+I. platform_fit — ملاءمة المنصة: هل النص مكتوب فعلًا لمنصته المستهدفة (${platforms.join(' + ') || 'غير محدد'}) بأسلوبها وطولها وقواعدها، أم نفس النص المستخدم لمنصة أخرى بدون تكييف حقيقي؟${linkedInTarget ? ' لـLinkedIn تحديدًا: Hook قوي، فقرات قصيرة، لا CTA تقليدي، 4 إلى 6 هاشتاجات كحد أقصى، بدون Emoji إلا إذا سمح Brand Voice.' : ''}
+J. cta — جودة الدعوة لإجراء: هل الـCTA طبيعي ومرتبط فعليًا بموضوع المنشور، أم جملة تسويقية مصطنعة (مثل "شاركنا رأيك في الكومنتات" بدون أي سبب حقيقي مرتبط بالمحتوى)؟
+K. originality — التفرد: هل الـHook أو الفكرة أو الـCTA معاد تدويرها من نمط مكرر شائع، أم لها زاوية أو صياغة مميزة؟
+L. factual_logical — السلامة الواقعية والمنطقية: هل توجد ادعاءات غير منطقية، وعود غير مبررة، معلومات مختلقة، أو أرقام/حقائق لا يمكن التحقق منها بدون سياق؟ (100 لو لا توجد ادعاءات واقعية تحتاج تحققًا أصلًا ومنطق النص سليم).
 
-أعد dimension_evidence بمصفوفة تضم عنصرًا لكل بُعد من هذه الأبعاد الثلاثة عشر: objective_score, audience_score, brand_score, platform_score, language_score, clarity_score, readability_score, hook_score, value_score, cta_score, originality_score, factual_score, safety_score. كل عنصر يجب أن يحتوي dimension وscore وreason يشرح عيبًا/نقطة قوة محددة من النص وevidence كمقتطف قصير واحد إلى ثلاثة وsuggested_fix قابل للتنفيذ. لا تترك أي بُعد بلا دليل أو إصلاح مقترح، حتى إن كانت درجته عالية.
+الأبعاد الحرجة (Critical Dimensions) هي: ${criticalNames}. أي بُعد من هذه يسجل أقل من 90 يعني أن هذا المحتوى يجب أن يفشل (fail) بغض النظر عن باقي الدرجات — لا تسمح لمتوسط الدرجات بإخفاء ضعف بُعد حرج واحد. مثال: منشور بدرجات 95, 95, 95 في ثلاثة أبعاد لكن hook = 60 يجب أن يُسجَّل hook.status = "fail" بوضوح ولا يجوز التساهل معه لأن باقي الأبعاد مرتفعة.
 
-Critical Issues (قائمة critical_issues) — أضف أي من هذه القيم الخمس فقط (بنفس الأسماء بالإنجليزية بالضبط) لو انطبقت، وإلا اترك المصفوفة فارغة. لا تخترع تصنيفات أخرى:
+Critical Issues (قائمة critical_issues) — أضف أي من هذه القيم فقط (بنفس الأسماء بالإنجليزية بالضبط) لو انطبقت، وإلا اترك المصفوفة فارغة. لا تخترع تصنيفات أخرى:
 - "factual_error": معلومة أو رقم خاطئ بشكل واضح.
 - "brand_violation": يخالف قيم أو هوية البراند المذكورة.
 - "forbidden_term": يحتوي على كلمة من الكلمات الممنوعة أدناه.
 - "platform_violation": يخالف قاعدة إلزامية للمنصة المستهدفة (مثل تجاوز حد الهاشتاجات في LinkedIn).
 - "unsafe_content": محتوى غير آمن للنشر (تحريضي، مضلل بشكل خطير، أو غير لائق).
+- "generic_content": كلام عام بدون قيمة حقيقية — حتى لو كانت الدرجات الفردية غير منخفضة جدًا.
+- "unnatural_cta": CTA تسويقي مصطنع لا علاقة حقيقية له بالموضوع.
+- "ai_generated_style": يبدو بوضوح نصًا آليًا/AI-generated وليس منشورًا شخصيًا طبيعيًا.
+- "length_mismatch": طول المنشور غير مناسب إطلاقًا لهدفه أو منصته (قصير جدًا أو طويل بشكل مفرط).
+- "obvious_repetition": تكرار واضح لنفس الفكرة أو الـHook أو الـCTA — سواء داخل هذا المنشور نفسه أو كنمط متكرر يعيد نفس الزاوية بصياغة مختلفة فقط.
 أي عنصر في critical_issues يعني أن هذا المحتوى لا يجوز اعتماده مهما كانت باقي الدرجات مرتفعة.
 
-${linkedInTarget ? 'المنصة المستهدفة تتضمن LinkedIn — طبّق معايير LinkedIn بصرامة (Hook قوي، فقرات قصيرة، لا CTA تقليدي، 4 إلى 6 هاشتاجات كحد أقصى، بدون Emoji إلا إذا سمح Brand Voice).' : ''}
 كلمات ممنوعة من Brand Voice (negative_keywords) يجب ألا تظهر في النص إطلاقًا: ${negativeKeywords}
 
-قواعد رفض إلزامية (Hard Fail Rules) — اجعل approved = false إذا كان النص:
+قواعد رفض إلزامية (Hard Fail Rules) — سجّل الأبعاد المرتبطة كـ"fail" وأضف critical_issue مناسبًا إذا كان النص:
 - غير مفهوم لقارئ عربي طبيعي، أو يحتاج إعادة قراءة لفهم المقصود.
 - يحتوي على ما يبدو ترجمة آلية واضحة (تركيب جمل غير عربي، أو اختيار كلمات غريبة عن السياق).
-- يحتوي على أي كلمة أو حرف واحد من لغة غير العربية أو الإنجليزية (فرنساوي، إسباني، برتغالي، صيني، أو أي خط/script آخر) — حتى لو كانت كلمة واحدة فقط وسط جملة عربية سليمة تمامًا. اجعل arabic_quality منخفضًا جدًا (أقل من 50) في هذه الحالة تحديدًا، بغض النظر عن باقي جودة النص. المصطلحات الإنجليزية التقنية الشائعة (SaaS، CRM، ROI...) مقبولة فقط لو مكتوبة بحروف إنجليزية عادية بدون علامات تشكيل من لغات أخرى.
+- يحتوي على أي كلمة أو حرف واحد من لغة غير العربية أو الإنجليزية (فرنساوي، إسباني، برتغالي، صيني، أو أي خط/script آخر) — حتى لو كانت كلمة واحدة فقط وسط جملة عربية سليمة تمامًا. اجعل arabic_quality.score منخفضًا جدًا (أقل من 50) في هذه الحالة تحديدًا، بغض النظر عن باقي جودة النص. المصطلحات الإنجليزية التقنية الشائعة (SaaS، CRM، ROI...) مقبولة فقط لو مكتوبة بحروف إنجليزية عادية بدون علامات تشكيل من لغات أخرى.
 - مكتوب بالفصحى أو بعربية رسمية ثقيلة بدل لهجة ${meta.name} المهنية المطلوبة.
 - مكتوب بلهجة عربية غير ${meta.name} (${otherDialectNames}) أو خليط لهجات.
 - فصحى تم فيها استبدال بعض الكلمات بمرادفات ${meta.name.replace(/^ال/, '')} فقط دون إعادة صياغة الجملة كاملة بأسلوب طبيعي بلهجة ${meta.name}.
-- يبدأ بـ Hook غير منطقي أو لا علاقة له بموضوع المنشور.
+- يبدأ بـHook غير منطقي أو لا علاقة له بموضوع المنشور، أو Hook عام لا يخلق أي فضول.
 - يستخدم كلمات عربية صحيحة لغويًا لكنها خارج سياقها الطبيعي في هذا الموضوع.
 - يبدو كتركيب عشوائي من كلمات عربية متفرقة بلا رابط منطقي بينها.
 - يحتوي على أي معلومات UI أو تشغيلية (مثل Preview، Platform، Account، Scheduled، Status، Awaiting Confirmation، Content Score، Quality Score).
 - يبدو كإعلان مولّد آليًا بدل منشور شخصي طبيعي.
+- محتوى عام يمكن أن يُنشر عن أي موضوع أو أي براند بدون تغيير — بدون substance حقيقي.
+- CTA لا علاقة حقيقية له بموضوع المنشور، أو صيغة مكررة بلا سبب واضح.
 
-مهم جدًا: score >= 90 وحدها لا تعني الموافقة. إذا كانت Arabic Naturalness ضعيفة (arabic_quality منخفض — أي النص فصحى أو ترجمة حرفية أو لهجة غير ${meta.name}) فيجب أن تكون approved = false حتى لو كانت score العامة مرتفعة. مثال: arabic_quality = 55 مع score = 85 يجب أن تُرجع approved = false. معيار arabic_quality نفسه بغض النظر عن اللهجة المطلوبة هو نفس معيار الجودة اللغوية العالية المطبّق على العربية المصرية المهنية (المرجع الأساسي لجودة النظام) — وليس معيارًا أخف لمجرد أن اللهجة المطلوبة ليست المصرية.
+مهم جدًا — لا تثق في متوسط الدرجات: الدرجة الإجمالية (score) تُحسب في الكود من متوسط الأبعاد الاثني عشر، وليس من رقم تختاره أنت — لذلك لا تحاول "تعويض" بُعد ضعيف برفع بُعد آخر، فقط قيّم كل بُعد بأمانة ومستقلًا عن الباقي. وبالمثل، حقل approved الذي ترجعه لا يُستخدم في أي قرار — القرار النهائي يُحسب بالكامل من درجات الأبعاد وcritical_issues في الكود، فلا داعي "لمجاملة" النص برفع approved. اكتب score وapproved بأفضل تقدير لك للاتساق فقط.
 
-الدرجة (score) من 0 إلى 100. approved يجب أن يكون true فقط إذا كانت score >= 90 وكانت Arabic Naturalness (arabic_quality) طبيعية فعلًا وليست ضعيفة، مع اجتياز brand_fit >= 90 وlinkedin_fit >= 90 عند استهداف LinkedIn.
-
-أرجع JSON فقط بهذا الشكل بالضبط (بدون أي نص آخر):
-{"approved": boolean, "score": number, "issues": string[], "suggestions": string[], "arabic_quality": number, "linkedin_fit": number, "brand_fit": number, "hook_score": number, "clarity_score": number, "relevance_score": number, "brand_score": number, "platform_score": number, "language_score": number, "cta_score": number, "originality_score": number, "factual_score": number, "readability_score": number, "objective_score": number, "audience_score": number, "value_score": number, "safety_score": number, "dimension_evidence": [{"dimension": string, "score": number, "reason": string, "evidence": string[], "suggested_fix": string}], "critical_issues": string[]}`,
+أرجع JSON فقط بهذا الشكل بالضبط (بدون أي نص آخر)، مع كائن dimensions يحتوي بالضبط على المفاتيح الاثني عشر التالية:
+{"score": number, "approved": boolean, "issues": string[], "suggestions": string[], "critical_issues": string[], "dimensions": {"idea_value": {"score": number, "status": "pass"|"fail", "reason": string, "evidence": string, "suggested_fix": string}, "hook": {...}, "substance": {...}, "structure": {...}, "arabic_quality": {...}, "naturalness": {...}, "brand_fit": {...}, "audience_fit": {...}, "platform_fit": {...}, "cta": {...}, "originality": {...}, "factual_logical": {...}}}`,
     },
     {
       role: 'user',
@@ -238,7 +310,12 @@ export async function reviewGeneratedContent(
     // Phase 2, STEP 11 — attach the Quality Decision Layer's verdict
     // (section 21) right alongside the parsed scores, computed
     // deterministically in code so it's never the model grading itself.
-    const withDecision = parsed ? { ...parsed, decision: computeQualityDecision(content, parsed, isLinkedInPlatform(platforms)) } : parsed;
+    // QC Hardening Pass: `approved` is likewise always recomputed here from
+    // evaluateContentApproval's Critical Dimension Gate — parseQCResult
+    // never sets it from the model's own claim.
+    const withDecision = parsed
+      ? { ...parsed, approved: evaluateContentApproval(content, parsed, isLinkedInPlatform(platforms)).approved, decision: computeQualityDecision(content, parsed, isLinkedInPlatform(platforms)) }
+      : parsed;
     return { result: withDecision, error: withDecision ? null : 'qc_parse_failed' };
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Quality control failed';

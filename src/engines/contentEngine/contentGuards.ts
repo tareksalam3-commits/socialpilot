@@ -1,5 +1,5 @@
-import type { ContentQualityResult, QualityDecision } from '@/types/assistant';
-import { evaluateQualityRubric } from '../qualityEngine/qualityRubric';
+import type { ContentQualityResult, QualityDecision, QualityDimensionKey } from '@/types/assistant';
+import { CRITICAL_QUALITY_DIMENSIONS } from '@/types/assistant';
 
 // ============================================================================
 // Deterministic Content Guards
@@ -31,6 +31,19 @@ export const QC_MIN_SCORE = 90;
 export const QC_MIN_ARABIC_QUALITY = 90;
 export const QC_MIN_LINKEDIN_FIT = 90;
 export const QC_MIN_BRAND_FIT = 90;
+
+/** QC Hardening Pass — the Critical Dimension Gate (brief item 3). Every
+ * dimension in CRITICAL_QUALITY_DIMENSIONS (types/assistant.ts) must clear
+ * this same 90 floor on its own, independently of the overall `score`
+ * average — this is what stops "95+95+95+60" style masking, where a single
+ * weak-but-critical dimension used to get diluted into a passing overall
+ * number. Non-critical dimensions (substance, structure, audience_fit, cta,
+ * originality, factual_logical) still count toward the overall average via
+ * `score`, but don't individually block approval the way a critical one
+ * does — a mediocre-but-not-disqualifying CTA shouldn't sink an otherwise
+ * excellent post, whereas a weak idea, hook, brand fit, or broken Arabic
+ * should. */
+export const QC_MIN_CRITICAL_DIMENSION = 90;
 
 /** Preview/publishing/QC metadata markers that must never appear inside
  * `posts.content` — these belong only in Preview UI, never in the post
@@ -103,6 +116,22 @@ const KNOWN_BAD_ARABIC_PATTERNS = [
   'تتدحرج الأداء إلى معضلة',
 ];
 
+/** QC Hardening Pass (brief item 4/5) — the most common generic/cliché
+ * openers that Arabic content-generation tends to default to when it has
+ * nothing specific to say. A single deterministic backstop signal, never
+ * the sole detector of "generic content" (the QC model's `idea_value` and
+ * `substance` dimensions cover the general case) — this only catches the
+ * handful of stock openers common enough to hardcode, so a post can't slip
+ * through purely because the QC model happened to score it generously. */
+const CLICHE_OPENER_PATTERNS = [
+  /^\s*في عالم(نا)?\s+(اليوم|الحالي)/,
+  /^\s*في ظل\s+(التطورات|التحديات|الظروف)\s+المتسارعة/,
+  /^\s*لا شك أن/,
+  /^\s*بدون أدنى شك/,
+  /^\s*من المهم جدًا أن ندرك/,
+  /^\s*في عصر\s+(التكنولوجيا|السرعة|المعلومات)/,
+];
+
 /** Any script that is neither Arabic nor Latin (CJK, Hiragana/Katakana,
  * Hangul, Cyrillic, Devanagari, Thai, Hebrew, ...). A ratio-based check like
  * excessive_latin_mixing below is useless against a single stray non-Latin
@@ -144,6 +173,7 @@ export function arabicNaturalnessGuard(text: string): { pass: boolean; reasons: 
   if (/(\S+)(\s+\1){2,}/.test(trimmed)) reasons.push('abnormal_repetition');
 
   if (KNOWN_BAD_ARABIC_PATTERNS.some((p) => trimmed.includes(p))) reasons.push('known_bad_pattern');
+  if (CLICHE_OPENER_PATTERNS.some((p) => p.test(trimmed))) reasons.push('cliche_opener');
 
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length >= 6) {
@@ -157,28 +187,82 @@ export function arabicNaturalnessGuard(text: string): { pass: boolean; reasons: 
 }
 
 /** The single source of truth for "is this post actually approved". Never
- * trusts the QC `score` alone: requires the Deterministic Guard to pass AND
- * QC to have parsed successfully AND every relevant sub-score to clear its
- * own minimum, regardless of the overall score or the AI's own `approved`
- * flag. This is what item 6/8 of the QC hardening pass call for — e.g.
- * arabic_quality = 55 with score = 85 must NOT be approved. Phase 2, STEP
- * 11 (section 20 — Critical Issues) adds one more absolute gate: a
- * `critical_issues` entry (factual_error/brand_violation/forbidden_term/
- * platform_violation/unsafe_content) blocks approval no matter how high
- * every score is — "لا يسمح للـcontent بالمرور حتى لو كان الـoverall score
- * مرتفعًا". */
+ * trusts the QC model's own `approved`/`score` self-report: every decision
+ * here is recomputed purely from the Deterministic Guard + the per-
+ * dimension scores in `quality.dimensions` (or, for any older/legacy result
+ * missing `dimensions`, the flat scores it does have) + `critical_issues`.
+ *
+ * QC Hardening Pass — the Critical Dimension Gate (brief item 3): every
+ * dimension in CRITICAL_QUALITY_DIMENSIONS must independently clear
+ * QC_MIN_CRITICAL_DIMENSION, on top of the overall `score` (the mean of all
+ * twelve dimensions, computed in qualityControl.ts) clearing QC_MIN_SCORE.
+ * This is exactly what stops "95+95+95+60" from averaging into a pass: a
+ * single weak critical dimension fails approval outright, regardless of how
+ * high the mean or any other dimension is. Item 6/8 example — arabic_quality
+ * = 55 with score = 85 must NOT be approved — falls directly out of this:
+ * arabic_quality is critical, 55 < 90, so it fails on its own, and 85 < 90
+ * fails the overall floor too. `critical_issues` (section 20) is one more
+ * absolute gate on top: any entry blocks approval no matter how high every
+ * score is. */
 export function evaluateContentApproval(
   content: string,
   quality: ContentQualityResult | null,
   linkedInTarget: boolean,
 ): { approved: boolean; reasons: string[] } {
   const guard = arabicNaturalnessGuard(content);
-  const guardReasons = guard.pass ? [] : guard.reasons.map((reason) => `guard:${reason}`);
-  const rubric = evaluateQualityRubric(quality, linkedInTarget);
-  return {
-    approved: guard.pass && rubric.approved,
-    reasons: [...guardReasons, ...rubric.reasons],
-  };
+  const reasons: string[] = guard.pass ? [] : guard.reasons.map((r) => `guard:${r}`);
+
+  if (!quality) {
+    reasons.push('qc_unavailable');
+    return { approved: false, reasons };
+  }
+  if (quality.critical_issues?.length) {
+    reasons.push(...quality.critical_issues.map((i) => `critical:${i}`));
+  }
+  if (typeof quality.score !== 'number' || quality.score < QC_MIN_SCORE) reasons.push('score_below_minimum');
+
+  // Critical Dimension Gate — each of the six critical dimensions is
+  // checked independently, preferring the structured `dimensions` record
+  // when present and falling back to the legacy flat field for any older
+  // cached QC result that predates the QC Hardening Pass.
+  for (const dim of CRITICAL_QUALITY_DIMENSIONS) {
+    const value = criticalDimensionScore(quality, dim, linkedInTarget);
+    if (dim === 'platform_fit' && !linkedInTarget) {
+      // platform_fit still counts toward the overall mean for non-LinkedIn
+      // targets, but only gates individually when we actually have a
+      // platform-specific bar to hold it to (LinkedIn today).
+      continue;
+    }
+    if (value === undefined) reasons.push(`${dim}_missing`);
+    else if (value < QC_MIN_CRITICAL_DIMENSION) reasons.push(`${dim}_below_minimum`);
+  }
+
+  return { approved: guard.pass && reasons.length === 0, reasons };
+}
+
+/** Reads one critical dimension's score, preferring the structured
+ * `dimensions` record and falling back to the pre-Hardening-Pass flat
+ * fields so old cached QC results (or a QC call that for some reason
+ * omitted `dimensions`) still gate correctly instead of silently passing. */
+function criticalDimensionScore(quality: ContentQualityResult, dim: QualityDimensionKey, linkedInTarget: boolean): number | undefined {
+  const fromDimensions = quality.dimensions?.[dim]?.score;
+  if (typeof fromDimensions === 'number') return fromDimensions;
+  switch (dim) {
+    case 'idea_value':
+      return quality.content_value_score;
+    case 'hook':
+      return quality.hook_score;
+    case 'arabic_quality':
+      return quality.arabic_quality;
+    case 'naturalness':
+      return quality.naturalness_score;
+    case 'brand_fit':
+      return quality.brand_fit ?? quality.brand_score;
+    case 'platform_fit':
+      return linkedInTarget ? quality.linkedin_fit ?? quality.platform_score : quality.platform_score;
+    default:
+      return undefined;
+  }
 }
 
 const CRITICAL_ISSUE_LABELS: Record<string, string> = {
@@ -187,6 +271,11 @@ const CRITICAL_ISSUE_LABELS: Record<string, string> = {
   forbidden_term: 'يحتوي على كلمة أو مصطلح ممنوع من Brand Voice',
   platform_violation: 'يخالف قواعد المنصة المستهدفة',
   unsafe_content: 'يحتوي على محتوى غير آمن للنشر',
+  generic_content: 'محتوى عام بدون قيمة حقيقية',
+  unnatural_cta: 'CTA تسويقي مصطنع لا علاقة حقيقية له بالموضوع',
+  ai_generated_style: 'يبدو نصًا آليًا/AI-generated وليس منشورًا شخصيًا طبيعيًا',
+  length_mismatch: 'طول المنشور غير مناسب لهدفه أو منصته',
+  obvious_repetition: 'تكرار واضح لنفس الفكرة أو الـHook أو الـCTA',
 };
 
 /** Phase 2, STEP 11 (section 21) — the Quality Decision Layer. Turns a

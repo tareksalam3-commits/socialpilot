@@ -25,13 +25,9 @@ type GenerationJob = {
 };
 
 type GenerationResult = { content: string; title?: string };
-type QualityDimension = 'objective_score' | 'audience_score' | 'brand_score' | 'platform_score' | 'language_score' | 'clarity_score' | 'readability_score' | 'hook_score' | 'value_score' | 'cta_score' | 'originality_score' | 'factual_score' | 'safety_score';
-type QualityEvidence = { dimension: QualityDimension; score: number; reason: string; evidence?: string[]; suggested_fix: string };
-type QualityResult = { approved: boolean; score: number; issues: string[]; suggestions: string[]; arabic_quality?: number; linkedin_fit?: number; brand_fit?: number; critical_issues?: string[]; dimension_evidence?: QualityEvidence[] } & Partial<Record<QualityDimension, number>>;
+type QualityResult = { approved: boolean; score: number; issues: string[]; suggestions: string[]; arabic_quality?: number; linkedin_fit?: number; brand_fit?: number; critical_issues?: string[] };
 const QC_MIN = 90;
 const LINKEDIN_MIN = 90;
-const DIMENSION_MINIMUMS: Record<QualityDimension, number> = { objective_score: 85, audience_score: 85, brand_score: 90, platform_score: 90, language_score: 90, clarity_score: 85, readability_score: 85, hook_score: 80, value_score: 85, cta_score: 75, originality_score: 80, factual_score: 90, safety_score: 95 };
-const QUALITY_DIMENSIONS = Object.keys(DIMENSION_MINIMUMS) as QualityDimension[];
 
 async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -41,49 +37,29 @@ async function sha256(text: string): Promise<string> {
 function parseQuality(raw: string): QualityResult | null {
   try {
     const value = JSON.parse(raw.replace(/^```json\\s*/i, '').replace(/\\s*```$/, '')) as Record<string, unknown>;
-    const n = (key: string) => typeof value[key] === 'number' && Number.isFinite(value[key]) ? Math.max(0, Math.min(100, Math.round(Number(value[key])))) : undefined;
+    const n = (key: string) => typeof value[key] === 'number' ? Number(value[key]) : undefined;
     const score = n('score'); const arabic_quality = n('arabic_quality'); const brand_fit = n('brand_fit'); const linkedin_fit = n('linkedin_fit');
     if (score === undefined || arabic_quality === undefined || brand_fit === undefined) return null;
     const critical_issues = Array.isArray(value.critical_issues) ? value.critical_issues.filter((x): x is string => typeof x === 'string') : [];
     const issues = Array.isArray(value.issues) ? value.issues.filter((x): x is string => typeof x === 'string') : [];
     const suggestions = Array.isArray(value.suggestions) ? value.suggestions.filter((x): x is string => typeof x === 'string') : [];
-    const parsed = { approved: value.approved === true, score, arabic_quality, linkedin_fit, brand_fit, critical_issues, issues, suggestions } as QualityResult;
-    for (const dimension of QUALITY_DIMENSIONS) { const valueForDimension = n(dimension); if (valueForDimension !== undefined) parsed[dimension] = valueForDimension; }
-    const evidence = Array.isArray(value.dimension_evidence) ? value.dimension_evidence.flatMap((item): QualityEvidence[] => {
-      if (!item || typeof item !== 'object') return [];
-      const entry = item as Record<string, unknown>; const dimension = typeof entry.dimension === 'string' && QUALITY_DIMENSIONS.includes(entry.dimension as QualityDimension) ? entry.dimension as QualityDimension : null;
-      const reason = typeof entry.reason === 'string' ? entry.reason.trim() : ''; const suggested_fix = typeof entry.suggested_fix === 'string' ? entry.suggested_fix.trim() : '';
-      const itemScore = typeof entry.score === 'number' && Number.isFinite(entry.score) ? Math.max(0, Math.min(100, Math.round(entry.score))) : undefined;
-      const excerpts = Array.isArray(entry.evidence) ? entry.evidence.filter((x): x is string => typeof x === 'string' && x.trim()).slice(0, 3) : undefined;
-      return dimension && itemScore !== undefined && reason && suggested_fix ? [{ dimension, score: itemScore, reason, ...(excerpts?.length ? { evidence: excerpts } : {}), suggested_fix }] : [];
-    }) : [];
-    if (evidence.length) parsed.dimension_evidence = evidence;
-    const evidenceKeys = new Set(evidence.map((item) => item.dimension));
-    const strictDimensionsPass = QUALITY_DIMENSIONS.every((dimension) => typeof parsed[dimension] === 'number' && (parsed[dimension] as number) >= DIMENSION_MINIMUMS[dimension] && evidenceKeys.has(dimension));
-    parsed.approved = parsed.approved === true && score >= QC_MIN && arabic_quality >= QC_MIN && brand_fit >= QC_MIN && (!linkedin_fit || linkedin_fit >= LINKEDIN_MIN) && critical_issues.length === 0 && strictDimensionsPass;
-    return parsed;
+    const approved = value.approved === true && score >= QC_MIN && arabic_quality >= QC_MIN && brand_fit >= QC_MIN && (!linkedin_fit || linkedin_fit >= LINKEDIN_MIN) && critical_issues.length === 0;
+    return { approved, score, arabic_quality, linkedin_fit, brand_fit, critical_issues, issues, suggestions };
   } catch { return null; }
 }
 
-async function callGateway(
-  url: string,
-  key: string,
-  job: GenerationJob,
-  messages: unknown[],
-  maxTokens = 1200,
-  options: { task?: 'creator' | 'qc'; excludeModel?: string } = {},
-): Promise<string> {
-  const response = await fetchWithTimeout(`${url}/functions/v1/ai-gateway`, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Content-Generation-Job': job.id }, body: JSON.stringify({ workspace_id: job.workspace_id, background_job_id: job.id, messages, temperature: 0.25, max_tokens: maxTokens, stream: false, task: options.task ?? 'creator', exclude_model: options.excludeModel }) }, 60_000);
+async function callGateway(url: string, key: string, job: GenerationJob, messages: unknown[], maxTokens = 1200): Promise<string> {
+  const response = await fetchWithTimeout(`${url}/functions/v1/ai-gateway`, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Content-Generation-Job': job.id }, body: JSON.stringify({ workspace_id: job.workspace_id, background_job_id: job.id, messages, temperature: 0.25, max_tokens: maxTokens, stream: false }) }, 60_000);
   if (!response.ok) throw new Error((await response.text()).slice(0, 500));
   const payload = await response.json() as { content?: string; choices?: Array<{ message?: { content?: string } }> };
   return String(payload.content ?? payload.choices?.[0]?.message?.content ?? '');
 }
 
-async function dedicatedQC(url: string, key: string, job: GenerationJob, content: string, platforms: string[], authorModel?: string): Promise<QualityResult | null> {
+async function dedicatedQC(url: string, key: string, job: GenerationJob, content: string, platforms: string[]): Promise<QualityResult | null> {
   const raw = await callGateway(url, key, job, [
-    { role: 'system', content: 'You are an independent Dedicated Content QC, never the author. Return JSON only. Score bands: 0-49 broken/unsafe, 50-69 materially weak, 70-84 usable draft, 85-89 strong but not publish-ready, 90-94 publish-ready, 95-100 exceptional. Return approved, score, arabic_quality, linkedin_fit, brand_fit, issues, suggestions, critical_issues, every one of objective_score, audience_score, brand_score, platform_score, language_score, clarity_score, readability_score, hook_score, value_score, cta_score, originality_score, factual_score, safety_score, plus dimension_evidence. Each evidence item requires dimension, score, reason, evidence array, suggested_fix. Missing scores or evidence are failures. Approval requires all thresholded dimensions to pass and no critical issues.' },
+    { role: 'system', content: 'You are an independent Dedicated Content QC. Return JSON only with approved, score, arabic_quality, linkedin_fit, brand_fit, issues, suggestions, critical_issues. Missing dimensions are failures. Approval requires every relevant dimension >=90 and no critical issues.' },
     { role: 'user', content: `Platforms: ${platforms.join(', ')}\\nContent to review:\\n${content}` },
-  ], 1800, { task: 'qc', excludeModel: authorModel });
+  ], 900);
   return parseQuality(raw);
 }
 
@@ -381,25 +357,16 @@ Deno.serve(async (req: Request) => {
       60_000,
     );
     if (!aiResponse.ok) throw new Error((await aiResponse.text()).slice(0, 500));
-    const aiPayload = await aiResponse.json() as { content?: string; model?: string; choices?: Array<{ message?: { content?: string } }> };
-    const authorModel = typeof aiPayload.model === 'string' ? aiPayload.model : undefined;
+    const aiPayload = await aiResponse.json() as { content?: string; choices?: Array<{ message?: { content?: string } }> };
     let result = parseResult(String(aiPayload.content ?? aiPayload.choices?.[0]?.message?.content ?? ''));
     let quality: QualityResult | null = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      quality = await dedicatedQC(supabaseUrl, serviceKey, job, result.content, platforms, authorModel);
+      quality = await dedicatedQC(supabaseUrl, serviceKey, job, result.content, platforms);
       if (quality?.approved || !quality || attempt === 2) break;
       result = { ...result, content: await improveContent(supabaseUrl, serviceKey, job, result.content, quality) };
     }
     const contentHash = quality?.approved ? await sha256(result.content) : null;
-    const proof = quality?.approved ? {
-      ...quality,
-      quality_dimensions: Object.fromEntries(QUALITY_DIMENSIONS.map((dimension) => [dimension, quality[dimension] ?? 0])),
-      dimension_evidence: quality.dimension_evidence ?? [],
-      content_hash: contentHash,
-      reviewed_content: result.content,
-      reviewed_at: new Date().toISOString(),
-      reviewed_platform: platforms[0] ?? null,
-    } : null;
+    const proof = quality?.approved ? { ...quality, content_hash: contentHash, reviewed_content: result.content, reviewed_at: new Date().toISOString(), reviewed_platform: platforms[0] ?? null } : null;
     const imageUrl = await generateCampaignImage(supabase, job, plan, result.content);
     const next = index + 1;
     const completed = next >= Number(job.post_count);

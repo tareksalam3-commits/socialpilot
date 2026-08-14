@@ -96,17 +96,69 @@ export type QualityDecision = {
   recommendations: string[];
 };
 
-/** Result of the Arabic Content Quality Control pass (reviewGeneratedContent
- * in assistantOrchestrator). `score` is 0-100 (section 19's overall_score);
- * `approved` is true only when the content clears the quality bar (score
- * >= 80) AND has no `critical_issues` (section 20 — a critical issue blocks
- * approval no matter how high `score` is). The original three sub-scores
- * (arabic_quality/linkedin_fit/brand_fit) remain the ones the pass/fail gate
- * (evaluateContentApproval) actually reads; the rest of section 19's
- * dimensions below are additional, separately-scored signals surfaced for
- * inspection/the Quality Decision Layer — none of them individually gates
- * approval on their own. */
+/** QC Hardening Pass (Aug 2026) — the twelve real quality dimensions (A-L)
+ * every piece of content is judged on, replacing "trust the model's overall
+ * number" with per-dimension evidence the Rewrite Agent can act on. Mapped
+ * 1:1 to the brief: idea_value=A, hook=B, substance=C, structure=D,
+ * arabic_quality=E, naturalness=F, brand_fit=G, audience_fit=H,
+ * platform_fit=I, cta=J, originality=K, factual_logical=L. */
 export type QualityDimensionKey =
+  | 'idea_value'
+  | 'hook'
+  | 'substance'
+  | 'structure'
+  | 'arabic_quality'
+  | 'naturalness'
+  | 'brand_fit'
+  | 'audience_fit'
+  | 'platform_fit'
+  | 'cta'
+  | 'originality'
+  | 'factual_logical';
+
+/** The six dimensions that alone can fail a piece of content no matter how
+ * high every other score (or the overall average) is — the "Critical
+ * Dimension Gate". A weak idea, a weak hook, broken Arabic, a robotic/
+ * AI-sounding voice, an off-brand piece, or content that doesn't actually
+ * fit the target platform is disqualifying on its own; it is never
+ * something a few high scores elsewhere should be able to average away. */
+export const CRITICAL_QUALITY_DIMENSIONS: readonly QualityDimensionKey[] = [
+  'idea_value',
+  'hook',
+  'arabic_quality',
+  'naturalness',
+  'brand_fit',
+  'platform_fit',
+];
+
+/** Per-dimension verdict — score is one signal among four; `evidence` +
+ * `suggested_fix` are what actually let the Rewrite Agent (or a human)
+ * target the real defect instead of re-rolling blind. `status` is written
+ * by the QC model but never trusted on its own — evaluateContentApproval
+ * always recomputes pass/fail from `score` against the dimension's own
+ * threshold in code. */
+export type QualityDimensionResult = {
+  score: number;
+  status: 'pass' | 'fail';
+  reason: string;
+  evidence: string;
+  suggested_fix: string;
+};
+
+/** Result of the Arabic Content Quality Control pass (reviewGeneratedContent
+ * in qualityControl.ts). `score` is always RECOMPUTED in code as the mean of
+ * the twelve `dimensions` scores (see qualityControl.ts) — the model's own
+ * self-reported overall number is logged for visibility only and never
+ * trusted, precisely so "95+95+95+60" can no longer average out to a
+ * passing score. `approved` is likewise never read from the model's own
+ * `approved` flag: it is always recomputed by evaluateContentApproval from
+ * the dimension scores + critical_issues, since the Authoring/QC model is
+ * never allowed to grade its own work as acceptable (see excludeModel in
+ * reviewGeneratedContent). The flat `*_score`/`arabic_quality`/
+ * `linkedin_fit`/`brand_fit` fields below are kept for backward
+ * compatibility with existing UI and are always derived from `dimensions`. */
+/** Legacy rubric keys retained for the repository's deterministic calibration suite. */
+export type LegacyQualityDimensionKey =
   | 'objective_score'
   | 'audience_score'
   | 'brand_score'
@@ -121,27 +173,29 @@ export type QualityDimensionKey =
   | 'factual_score'
   | 'safety_score';
 
-/** A model-supplied, human-readable justification for one scored dimension.
- * The deterministic rubric requires reason + suggested_fix before a score can
- * support approval, so an unexplained score never becomes publishing proof. */
+/** Legacy per-dimension evidence record used by the deterministic rubric calibration. */
 export type QualityDimensionEvidence = {
-  dimension: QualityDimensionKey;
+  dimension: QualityDimensionKey | LegacyQualityDimensionKey;
   score: number;
   reason: string;
-  evidence?: string[];
   suggested_fix: string;
 };
 
 export type ContentQualityResult = {
   approved: boolean;
   score: number;
+  /** Legacy rubric score fields retained for compatibility with existing calibration checks. */
+  objective_score?: number;
+  audience_score?: number;
+  value_score?: number;
+  safety_score?: number;
   issues: string[];
   suggestions: string[];
   arabic_quality?: number;
   linkedin_fit?: number;
   brand_fit?: number;
-  /** Phase 2, STEP 11 (Smart Quality Engine) — section 19's remaining
-   * Quality Dimensions, each scored 0-100 independently of `score`. */
+  /** Phase 2, STEP 11 (Smart Quality Engine) — kept for backward
+   * compatibility with existing UI reads; always mirrors `dimensions`. */
   hook_score?: number;
   clarity_score?: number;
   relevance_score?: number;
@@ -152,17 +206,30 @@ export type ContentQualityResult = {
   originality_score?: number;
   factual_score?: number;
   readability_score?: number;
-  /** Recalibrated critical dimensions. Every one must have evidence before
-   * deterministic code can approve the content for publishing. */
-  objective_score?: number;
-  audience_score?: number;
-  value_score?: number;
-  safety_score?: number;
+  /** New dimensions added by the QC Hardening Pass that had no flat-field
+   * equivalent before: A (idea/value), C (substance vs. filler), D
+   * (structure/readability of organization), F (naturalness — distinct
+   * from E's dialect-correctness: does it *read* human, not just is it
+   * grammatically the right dialect), H (audience fit). */
+  content_value_score?: number;
+  substance_score?: number;
+  structure_score?: number;
+  naturalness_score?: number;
+  audience_fit_score?: number;
+  /** The full per-dimension evidence record (A-L) — score/status/reason/
+   * evidence/suggested_fix for every QualityDimensionKey the QC model
+   * evaluated. Source of truth for `score`/`approved` and for the Rewrite
+   * Agent's brief; the flat fields above are a projection of this. */
+  dimensions?: Partial<Record<QualityDimensionKey, QualityDimensionResult>>;
+  /** Legacy evidence array retained while older rubric consumers migrate to dimensions. */
   dimension_evidence?: QualityDimensionEvidence[];
   /** Section 20 — Critical Issues. A restricted set (never free-form
-   * labels the model invents): factual_error, brand_violation,
-   * forbidden_term, platform_violation, unsafe_content. Any entry here
-   * blocks approval regardless of `score`. */
+   * labels the model invents). Any entry here blocks approval regardless
+   * of `score`. Expanded by the QC Hardening Pass beyond the original five
+   * (factual_error, brand_violation, forbidden_term, platform_violation,
+   * unsafe_content) to also cover the Hard Fail Rules from item 5 of the
+   * brief that aren't already a dimension-score gate on their own:
+   * generic_content, unnatural_cta, ai_generated_style, length_mismatch. */
   critical_issues?: string[];
   /** Section 21 — the Quality Decision Layer's verdict for this pass,
    * computed in code (see QualityDecision above). */
