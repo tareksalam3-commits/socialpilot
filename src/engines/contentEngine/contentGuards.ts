@@ -163,6 +163,19 @@ export function arabicNaturalnessGuard(text: string): { pass: boolean; reasons: 
 
   if (trimmed.length < 20) reasons.push('too_short');
 
+  // A single generated post must never be a bare topic/idea line (e.g. "5
+  // طرق لتحفيز الفريق") or a numbered list of multiple post ideas (e.g.
+  // "منشور 1: ... منشور 2: ..." / "Post 1: ..."). Either pattern means the
+  // model answered "give me post ideas" instead of writing one ready-to-
+  // publish post, and must be caught here rather than silently approved —
+  // this is exactly the failure mode a weak/free-tier model tends toward.
+  if (/(?:^|\n)\s*(?:منشور|post)\s*\d+\s*[:：]/i.test(trimmed)) reasons.push('idea_list_not_post');
+  const sentenceEnders = (trimmed.match(/[.!؟?]/g) ?? []).length;
+  const lineCount = trimmed.split('\n').filter((l) => l.trim().length > 0).length;
+  if (trimmed.length < 150 && lineCount <= 1 && sentenceEnders <= 1 && !/#\S/.test(trimmed)) {
+    reasons.push('likely_title_only');
+  }
+
   const arabicChars = (trimmed.match(/[\u0600-\u06FF]/g) ?? []).length;
   const latinChars = (trimmed.match(/[a-zA-Z]/g) ?? []).length;
   if (arabicChars > 0 && latinChars > arabicChars * 0.6) reasons.push('excessive_latin_mixing');

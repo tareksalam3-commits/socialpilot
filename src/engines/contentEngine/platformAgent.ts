@@ -133,6 +133,28 @@ export function getPlatformProfile(platform: string): PlatformProfile {
   return DEFAULT_PLATFORM_PROFILES[key] ?? { platform, ...GENERIC_PROFILE };
 }
 
+/** Renders one platform's profile as a prompt block the Creator Agent can
+ * follow at first-generation time — not just later, in the Platform
+ * Adaptation Engine. Previously the Master Content was written generically
+ * (only LinkedIn got real structural rules baked into the Creator prompt)
+ * and every platform's real length/tone/structure/hashtag targets were
+ * applied only afterward, as a best-effort adaptation step that a plain
+ * edit or a skipped adaptation call could leave unapplied. Giving the
+ * Creator the primary platform's actual profile up front means the first
+ * draft is already the right shape, and the Adaptation Engine's later pass
+ * is refining a already-good post instead of rescuing a generic one. */
+export function renderPlatformProfileBlock(platform: string): string {
+  const p = getPlatformProfile(platform);
+  return `ملف المنصة المستهدفة (${p.platform}) — التزم به في بناء المنشور:
+- الطول المستهدف: ${p.content_length}
+- النبرة: ${p.tone}
+- البنية: ${p.structure}
+- أسلوب الـHook: ${p.hook_style}
+- أسلوب الـCTA: ${p.cta_style}
+- قواعد الهاشتاجات: ${p.hashtag_rules}
+- قواعد التنسيق: ${p.format_rules}`;
+}
+
 /** Builds the Platform Adaptation Engine's prompt. Must respond with strict
  * JSON only — same contract as every other pipeline agent. Every requested
  * platform gets its own numbered profile block so the model can't blur

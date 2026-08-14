@@ -6,6 +6,7 @@ import type { CampaignPlan } from '@/types/assistant';
 import type { WorkspaceContext, ContentStrategy, ResearchResult, HookCandidate } from '@/types/context';
 import { DEFAULT_DIALECT, type DialectCode } from '@/constants/dialects';
 import { isLinkedInPlatform, buildArabicWritingRules, LINKEDIN_WRITING_RULES, OUTPUT_CONTRACT } from './arabicWritingRules';
+import { renderPlatformProfileBlock } from './platformAgent';
 
 /** Phase 2, STEP 8 — assembles everything section 14 asks the Content
  * Agent to have beyond the raw request: the extended Brand DNA fields
@@ -130,13 +131,18 @@ function buildCreatorMessages(
   intelligenceContext?: string | null,
 ): ChatMessage[] {
   const ruleBlocks = [buildArabicWritingRules(dialect)];
+  // First-generation platform tuning (see renderPlatformProfileBlock docstring)
+  // — the Master Content is written for its primary platform's real
+  // length/tone/structure/hashtag targets from the start, not generically
+  // and then patched later by the Platform Adaptation Engine.
+  if (plan.platforms[0]) ruleBlocks.push(renderPlatformProfileBlock(plan.platforms[0]));
   if (isLinkedInPlatform(plan.platforms)) ruleBlocks.push(LINKEDIN_WRITING_RULES);
   ruleBlocks.push(OUTPUT_CONTRACT);
 
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: `You are the Creator agent inside a social media automation assistant. Write ONE complete, ready-to-publish social media post. Output ONLY the final post text — no explanations, no markdown fences, no numbering or labels. Include a strong hook, a concise body, relevant hashtags placed naturally (where appropriate for the platform), and a clear call-to-action.\n\n${ruleBlocks.join('\n\n')}`,
+      content: `You are the Creator agent inside a social media automation assistant. Write ONE complete, ready-to-publish social media post. Output ONLY the final post text — no explanations, no markdown fences, no numbering or labels. Include a strong hook, a concise body, relevant hashtags placed naturally (where appropriate for the platform), and a clear call-to-action. Never respond with a topic title, a headline, or a list of post ideas (e.g. do NOT write something like "5 طرق لتحفيز الفريق" as if it were a listicle heading, and never number multiple posts/ideas in one response) — that is a different task and is always wrong here. The output is the full, multi-sentence post body itself, with the hook woven into the first sentence, not a label describing what the post is about.\n\nWhat separates a professional post from a generic AI one: it must contain at least one concrete, specific element — a real number/stat, a short example, a mini scenario, or a stated opinion/observation — never only abstract advice that could apply to any topic or any brand (\"افعل كذا لتحسين كذا\" بدون أي تفصيل ملموس هو فشل). Every sentence must earn its place; drop any sentence that just restates the hook in different words. The closing line should feel like a natural continuation of the idea, not a bolted-on marketing CTA.\n\n${ruleBlocks.join('\n\n')}`,
     },
   ];
 

@@ -116,6 +116,30 @@ export type QualityDimensionKey =
   | 'originality'
   | 'factual_logical';
 
+/** Legacy rubric keys retained for the repository's deterministic calibration suite. */
+export type LegacyQualityDimensionKey =
+  | 'objective_score'
+  | 'audience_score'
+  | 'brand_score'
+  | 'platform_score'
+  | 'language_score'
+  | 'clarity_score'
+  | 'readability_score'
+  | 'hook_score'
+  | 'value_score'
+  | 'cta_score'
+  | 'originality_score'
+  | 'factual_score'
+  | 'safety_score';
+
+/** Legacy per-dimension evidence record used by the deterministic rubric calibration. */
+export type QualityDimensionEvidence = {
+  dimension: QualityDimensionKey | LegacyQualityDimensionKey;
+  score: number;
+  reason: string;
+  suggested_fix: string;
+};
+
 /** The six dimensions that alone can fail a piece of content no matter how
  * high every other score (or the overall average) is — the "Critical
  * Dimension Gate". A weak idea, a weak hook, broken Arabic, a robotic/
@@ -157,30 +181,6 @@ export type QualityDimensionResult = {
  * reviewGeneratedContent). The flat `*_score`/`arabic_quality`/
  * `linkedin_fit`/`brand_fit` fields below are kept for backward
  * compatibility with existing UI and are always derived from `dimensions`. */
-/** Legacy rubric keys retained for the repository's deterministic calibration suite. */
-export type LegacyQualityDimensionKey =
-  | 'objective_score'
-  | 'audience_score'
-  | 'brand_score'
-  | 'platform_score'
-  | 'language_score'
-  | 'clarity_score'
-  | 'readability_score'
-  | 'hook_score'
-  | 'value_score'
-  | 'cta_score'
-  | 'originality_score'
-  | 'factual_score'
-  | 'safety_score';
-
-/** Legacy per-dimension evidence record used by the deterministic rubric calibration. */
-export type QualityDimensionEvidence = {
-  dimension: QualityDimensionKey | LegacyQualityDimensionKey;
-  score: number;
-  reason: string;
-  suggested_fix: string;
-};
-
 export type ContentQualityResult = {
   approved: boolean;
   score: number;
