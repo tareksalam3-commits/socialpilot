@@ -110,7 +110,7 @@ const KNOWN_BAD_ARABIC_PATTERNS = [
  * by neither the Arabic nor the Latin regex, so previously they were
  * invisible to this guard entirely. Zero tolerance: legitimate Arabic
  * content never contains these scripts, so a single occurrence fails. */
-const FOREIGN_SCRIPT_RE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|\p{Script=Cyrillic}|\p{Script=Devanagari}|\p{Script=Thai}|\p{Script=Hebrew}/u;
+const FOREIGN_SCRIPT_RE = /(?:[\u4E00-\u9FFF]|[\u3040-\u30FF]|[\u31F0-\u31FF]|[\uAC00-\uD7AF]|[\u0400-\u04FF]|[\u0900-\u097F]|[\u0E00-\u0E7F]|[\u0590-\u05FF])/;
 
 /** A Latin-script word carrying a non-ASCII diacritic (é, ñ, ü, ã, ç, ...).
  * Same blind spot as FOREIGN_SCRIPT_RE: a single leaked French/Spanish/
