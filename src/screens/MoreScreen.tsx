@@ -3,10 +3,16 @@ import { Settings, Brain, Link2, LogOut, Shield, TrendingUp, ChevronLeft } from 
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import { checkIsSuperAdmin } from '@/lib/superAdmin';
-import { Card, Button, Badge } from '@/components/ui';
+import { startSocialOAuth } from '@/lib/api';
+import { Card, Button, Badge, ErrorBanner } from '@/components/ui';
 import { PLATFORMS, PLATFORM_META } from '@/lib/constants';
 import { SuperAdminScreen } from '@/screens/SuperAdminScreen';
 import type { SocialAccount, SocialPlatform, BrandDna } from '@/lib/types';
+
+// Only these platforms have a real OAuth flow wired up so far (both go
+// through the same Meta app). The rest still show in the list but are
+// marked "قريبًا" until their own OAuth integration is built.
+const OAUTH_READY_PLATFORMS = new Set<SocialPlatform>(['facebook', 'instagram']);
 
 export function MoreScreen() {
   const { workspace, signOut } = useAuth();
@@ -15,21 +21,58 @@ export function MoreScreen() {
   const [showAccounts, setShowAccounts] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [showSuperAdmin, setShowSuperAdmin] = useState(false);
+  const [connectingPlatform, setConnectingPlatform] = useState<SocialPlatform | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [connectNotice, setConnectNotice] = useState<string | null>(null);
+
+  async function loadAccounts() {
+    if (!workspace) return;
+    const { data } = await supabase.from('social_accounts').select('*').eq('workspace_id', workspace.id);
+    setAccounts((data as SocialAccount[]) ?? []);
+  }
 
   useEffect(() => {
     if (!workspace) return;
     (async () => {
-      const [accs, dna] = await Promise.all([
-        supabase.from('social_accounts').select('*').eq('workspace_id', workspace.id),
-        supabase.from('brand_dna').select('*').eq('workspace_id', workspace.id).maybeSingle(),
-      ]);
-      setAccounts((accs.data as SocialAccount[]) ?? []);
+      await loadAccounts();
+      const dna = await supabase.from('brand_dna').select('*').eq('workspace_id', workspace.id).maybeSingle();
       setBrandDna(dna.data as BrandDna | null);
     })();
   }, [workspace]);
 
   useEffect(() => {
     checkIsSuperAdmin().then(setIsSuperAdmin);
+  }, []);
+
+  // Handle the redirect back from social-oauth-callback (?social=connected|error).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const social = params.get('social');
+    if (!social) return;
+
+    if (social === 'connected') {
+      const fb = Number(params.get('facebook') ?? 0);
+      const ig = Number(params.get('instagram') ?? 0);
+      setConnectNotice(
+        fb || ig
+          ? `تم الربط بنجاح${fb ? ' — فيسبوك' : ''}${ig ? ' — إنستجرام' : ''}`
+          : 'تم الربط بنجاح'
+      );
+      setShowAccounts(true);
+      loadAccounts();
+    } else if (social === 'error') {
+      setConnectError(params.get('message') ?? 'فشل ربط الحساب');
+      setShowAccounts(true);
+    }
+
+    params.delete('social');
+    params.delete('platform');
+    params.delete('facebook');
+    params.delete('instagram');
+    params.delete('message');
+    const cleanUrl = window.location.pathname + (params.toString() ? `?${params}` : '');
+    window.history.replaceState({}, '', cleanUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (showSuperAdmin) {
@@ -39,21 +82,24 @@ export function MoreScreen() {
   async function togglePlatform(platform: SocialPlatform) {
     if (!workspace) return;
     const existing = accounts.find((a) => a.platform === platform);
+
     if (existing) {
       await supabase.from('social_accounts').delete().eq('id', existing.id);
       setAccounts(accounts.filter((a) => a.id !== existing.id));
-    } else {
-      const { data } = await supabase
-        .from('social_accounts')
-        .insert({
-          workspace_id: workspace.id,
-          platform,
-          status: 'disconnected',
-          display_name: PLATFORM_META[platform].label,
-        })
-        .select()
-        .single();
-      if (data) setAccounts([...accounts, data as SocialAccount]);
+      return;
+    }
+
+    if (!OAUTH_READY_PLATFORMS.has(platform)) return; // "قريبًا" — لسه مفيش OAuth لها
+
+    setConnectError(null);
+    setConnectNotice(null);
+    setConnectingPlatform(platform);
+    try {
+      const url = await startSocialOAuth(workspace.id, 'meta');
+      window.location.href = url;
+    } catch (e) {
+      setConnectError(e instanceof Error ? e.message : 'تعذّر بدء عملية الربط');
+      setConnectingPlatform(null);
     }
   }
 
@@ -113,10 +159,18 @@ export function MoreScreen() {
 
         {showAccounts && (
           <div className="mt-2 flex flex-col gap-2 animate-slide-up">
+            {connectError && <ErrorBanner message={connectError} />}
+            {connectNotice && (
+              <div className="bg-brand-500/10 border border-brand-500/30 text-brand-300 text-sm rounded-xl px-4 py-3">
+                {connectNotice}
+              </div>
+            )}
             {PLATFORMS.map((platform) => {
               const meta = PLATFORM_META[platform];
               const Icon = meta.icon;
               const acc = accounts.find((a) => a.platform === platform);
+              const ready = OAUTH_READY_PLATFORMS.has(platform);
+              const busy = connectingPlatform === platform;
               return (
                 <Card key={platform}>
                   <div className="flex items-center justify-between">
@@ -128,13 +182,15 @@ export function MoreScreen() {
                           {acc.status === 'connected' ? 'مربوط' : 'غير مربوط'}
                         </Badge>
                       )}
+                      {!acc && !ready && <Badge color="neutral">قريبًا</Badge>}
                     </div>
                     <Button
                       variant={acc ? 'danger' : 'secondary'}
                       size="sm"
                       onClick={() => togglePlatform(platform)}
+                      disabled={busy || (!acc && !ready)}
                     >
-                      {acc ? 'إزالة' : 'ربط'}
+                      {acc ? 'إزالة' : busy ? '...جارٍ التحويل' : 'ربط'}
                     </Button>
                   </div>
                 </Card>

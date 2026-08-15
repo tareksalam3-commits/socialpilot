@@ -4,8 +4,8 @@ import {
   CircleDashed, ChevronDown, Sparkles,
 } from 'lucide-react';
 import { Card, Button, Badge, Input, Select, ScreenLoader, ErrorBanner } from '@/components/ui';
-import { aiAdmin } from '@/lib/superAdmin';
-import type { AiProvider, AiProviderKey, AiModel, AiRoutingPolicyValue, AiUsageSummary } from '@/lib/types';
+import { aiAdmin, socialAdmin } from '@/lib/superAdmin';
+import type { AiProvider, AiProviderKey, AiModel, AiRoutingPolicyValue, AiUsageSummary, SocialPlatformApp, SocialPlatformAppKey } from '@/lib/types';
 
 const PROVIDER_KEYS: AiProviderKey[] = [
   'openrouter', 'huggingface', 'groq', 'gemini', 'cerebras', 'deepseek',
@@ -38,6 +38,13 @@ export function SuperAdminScreen({ onBack }: { onBack: () => void }) {
   const [addingKey, setAddingKey] = useState<AiProviderKey | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState('');
 
+  const [socialApps, setSocialApps] = useState<SocialPlatformApp[]>([]);
+  const [socialError, setSocialError] = useState<string | null>(null);
+  const [socialBusyKey, setSocialBusyKey] = useState<SocialPlatformAppKey | null>(null);
+  const [socialEditingKey, setSocialEditingKey] = useState<SocialPlatformAppKey | null>(null);
+  const [socialAppIdInput, setSocialAppIdInput] = useState('');
+  const [socialAppSecretInput, setSocialAppSecretInput] = useState('');
+
   async function loadAll() {
     setLoading(true);
     setError(null);
@@ -57,9 +64,63 @@ export function SuperAdminScreen({ onBack }: { onBack: () => void }) {
     }
   }
 
+  async function loadSocialApps() {
+    setSocialError(null);
+    try {
+      const res = await socialAdmin.listApps();
+      setSocialApps(res.apps);
+    } catch (e) {
+      setSocialError(e instanceof Error ? e.message : 'تعذّر تحميل تكاملات التواصل الاجتماعي');
+    }
+  }
+
   useEffect(() => {
     loadAll();
+    loadSocialApps();
   }, []);
+
+  function openSocialEdit(app: SocialPlatformApp) {
+    setSocialEditingKey(app.platform_key);
+    setSocialAppIdInput(app.app_id ?? '');
+    setSocialAppSecretInput('');
+  }
+
+  async function handleSaveSocialApp(platformKey: SocialPlatformAppKey) {
+    if (!socialAppIdInput.trim()) return;
+    setSocialBusyKey(platformKey);
+    setSocialError(null);
+    try {
+      await socialAdmin.saveApp(platformKey, socialAppIdInput.trim(), socialAppSecretInput.trim() || undefined);
+      setSocialEditingKey(null);
+      setSocialAppIdInput('');
+      setSocialAppSecretInput('');
+      await loadSocialApps();
+    } catch (e) {
+      setSocialError(e instanceof Error ? e.message : 'فشل حفظ إعدادات الربط');
+    } finally {
+      setSocialBusyKey(null);
+    }
+  }
+
+  async function handleToggleSocialEnabled(app: SocialPlatformApp) {
+    setSocialBusyKey(app.platform_key);
+    try {
+      await socialAdmin.setEnabled(app.platform_key, !app.enabled);
+      await loadSocialApps();
+    } finally {
+      setSocialBusyKey(null);
+    }
+  }
+
+  async function handleRemoveSocialApp(platformKey: SocialPlatformAppKey) {
+    setSocialBusyKey(platformKey);
+    try {
+      await socialAdmin.removeApp(platformKey);
+      await loadSocialApps();
+    } finally {
+      setSocialBusyKey(null);
+    }
+  }
 
   async function toggleExpand(key: AiProviderKey) {
     if (expanded === key) {
@@ -212,6 +273,85 @@ export function SuperAdminScreen({ onBack }: { onBack: () => void }) {
           </Card>
         </div>
       )}
+
+      {/* Social Integrations */}
+      <div className="mb-5">
+        <p className="text-ink-500 text-xs mb-2">تكاملات التواصل الاجتماعي</p>
+        {socialError && (
+          <div className="mb-2">
+            <ErrorBanner message={socialError} />
+          </div>
+        )}
+        <div className="flex flex-col gap-2">
+          {socialApps.map((app) => {
+            const isEditing = socialEditingKey === app.platform_key;
+            const busy = socialBusyKey === app.platform_key;
+            return (
+              <Card key={app.platform_key} className="!p-0 overflow-hidden">
+                <button
+                  onClick={() => (app.app_id ? openSocialEdit(app) : (isEditing ? setSocialEditingKey(null) : openSocialEdit(app)))}
+                  className="w-full flex items-center justify-between p-4"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-ink-100 text-sm font-medium">{app.display_name}</span>
+                    {app.status === 'connected' && <Badge color="brand">مُعد</Badge>}
+                    {app.status === 'error' && <Badge color="danger">خطأ</Badge>}
+                    {app.status === 'not_configured' && <Badge color="neutral">غير مُعد</Badge>}
+                    {app.app_id && (
+                      <Badge color={app.enabled ? 'brand' : 'neutral'}>{app.enabled ? 'مفعّل' : 'معطّل'}</Badge>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={`text-ink-500 transition-transform ${isEditing ? 'rotate-180' : ''}`} />
+                </button>
+
+                {isEditing && (
+                  <div className="px-4 pb-4 flex flex-col gap-2 animate-slide-up border-t border-ink-800 pt-3">
+                    <Input value={socialAppIdInput} onChange={setSocialAppIdInput} placeholder="App ID" />
+                    <Input
+                      value={socialAppSecretInput}
+                      onChange={setSocialAppSecretInput}
+                      placeholder={app.has_secret ? 'App Secret (اتركه فاضي لو مش هتغيّره)' : 'App Secret'}
+                      type="password"
+                    />
+                    {app.redirect_uri && (
+                      <div className="bg-ink-900 rounded-lg p-2.5">
+                        <p className="text-ink-500 text-[10px] mb-1">Redirect URI — ضيفه في إعدادات تطبيق Meta Developer</p>
+                        <p className="text-ink-300 text-xs break-all" dir="ltr">{app.redirect_uri}</p>
+                      </div>
+                    )}
+                    {app.last_error && <ErrorBanner message={app.last_error} />}
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => handleSaveSocialApp(app.platform_key)}
+                        disabled={busy || !socialAppIdInput.trim()}
+                      >
+                        {busy ? '...جارٍ الحفظ' : 'حفظ'}
+                      </Button>
+                      {app.app_id && (
+                        <Button size="sm" variant="secondary" onClick={() => handleToggleSocialEnabled(app)} disabled={busy}>
+                          {app.enabled ? 'تعطيل' : 'تفعيل'}
+                        </Button>
+                      )}
+                      {app.app_id && (
+                        <Button size="sm" variant="danger" onClick={() => handleRemoveSocialApp(app.platform_key)} disabled={busy}>
+                          إزالة
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => { setSocialEditingKey(null); setSocialAppIdInput(''); setSocialAppSecretInput(''); }}>
+                        إلغاء
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+        <p className="text-ink-600 text-[11px] mt-2">
+          تطبيق Meta الواحد بيغطي فيسبوك وإنستجرام معًا. تقدر تجيب App ID و App Secret من Meta for Developers.
+        </p>
+      </div>
 
       {/* Providers */}
       <div className="mb-4">

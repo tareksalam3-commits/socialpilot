@@ -295,6 +295,23 @@ export type AiRoutingPolicy = {
   allow_paid_fallback: boolean;
 };
 
+// ---- Social Integrations (Super Admin) ----
+
+export type SocialPlatformAppKey = 'meta' | 'linkedin';
+
+export type SocialPlatformApp = {
+  id: string;
+  platform_key: SocialPlatformAppKey;
+  display_name: string;
+  enabled: boolean;
+  has_secret: boolean;
+  app_id: string | null;
+  redirect_uri: string | null;
+  status: 'not_configured' | 'connected' | 'error';
+  last_test_at: string | null;
+  last_error: string | null;
+};
+
 export type AiUsageSummary = {
   totals: { requests: number; tokens: number; cost: number; fallbacks: number; failures: number };
   recent: Array<{
