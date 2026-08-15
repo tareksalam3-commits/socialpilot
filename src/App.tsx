@@ -4,12 +4,13 @@ import { supabase } from '@/lib/supabase';
 import { AuthScreen } from '@/screens/AuthScreen';
 import { BrandBrainOnboarding } from '@/screens/BrandBrainOnboarding';
 import { AppShell } from '@/components/AppShell';
+import { SuperAdminScreen } from '@/screens/SuperAdminScreen';
 import { ScreenLoader, Button } from '@/components/ui';
 import { AlertCircle } from 'lucide-react';
 import type { BrandDna } from '@/lib/types';
 
 function AppContent() {
-  const { user, workspace, loading, signOut, refreshWorkspace } = useAuth();
+  const { user, workspace, isSuperAdmin, loading, signOut, refreshWorkspace } = useAuth();
   const [brandDna, setBrandDna] = useState<BrandDna | null>(null);
   const [dnaLoading, setDnaLoading] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
@@ -20,6 +21,7 @@ function AppContent() {
       setDnaLoading(false);
       return;
     }
+    setDnaLoading(true);
     supabase
       .from('brand_dna')
       .select('*')
@@ -31,23 +33,24 @@ function AppContent() {
       });
   }, [workspace]);
 
-  // Auto-retry if workspace stays null for too long (signup may have partially failed)
   useEffect(() => {
-    if (loading || !user || workspace) return;
+    if (loading || !user || isSuperAdmin || workspace) return;
     if (retryCount >= 2) return;
     const timer = setTimeout(() => {
       setRetryCount((c) => c + 1);
       refreshWorkspace();
     }, 3000);
     return () => clearTimeout(timer);
-  }, [loading, user, workspace, retryCount, refreshWorkspace]);
+  }, [loading, user, isSuperAdmin, workspace, retryCount, refreshWorkspace]);
 
   if (loading) return <ScreenLoader fullScreen />;
 
   if (!user) return <AuthScreen />;
 
+  // Super Admin is platform-level and intentionally does not need a Workspace.
+  if (isSuperAdmin) return <SuperAdminScreen onBack={signOut} />;
+
   if (!workspace) {
-    // After 2 failed retries, show error state with logout option
     if (retryCount >= 2) {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center px-6 gap-4 text-center">
@@ -97,7 +100,6 @@ function AppContent() {
 
   if (dnaLoading) return <ScreenLoader label="جارٍ التحميل..." />;
 
-  // No brand DNA or still draft → onboarding
   if (!brandDna || brandDna.status === 'draft') {
     return <BrandBrainOnboarding />;
   }

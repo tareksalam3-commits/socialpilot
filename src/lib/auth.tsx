@@ -7,6 +7,7 @@ type AuthState = {
   session: Session | null;
   user: User | null;
   workspace: Workspace | null;
+  isSuperAdmin: boolean;
   loading: boolean;
   signUp: (email: string, password: string) => Promise<{ error: string | null }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
@@ -20,10 +21,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   async function loadWorkspace(userId: string): Promise<Workspace | null> {
-    // Find workspace where user is owner OR a member
     const { data: memberRow } = await supabase
       .from('workspace_members')
       .select('workspace_id')
@@ -41,7 +42,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return (ws as Workspace | null) ?? null;
     }
 
-    // Fallback: check if user owns a workspace directly
     const { data } = await supabase
       .from('workspaces')
       .select('*')
@@ -52,30 +52,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return (data as Workspace | null) ?? null;
   }
 
-  async function refreshWorkspace() {
-    if (user) {
-      const ws = await loadWorkspace(user.id);
-      setWorkspace(ws);
-    }
+  async function ensureWorkspace(userId: string): Promise<Workspace | null> {
+    const existing = await loadWorkspace(userId);
+    if (existing) return existing;
+
+    const { error } = await supabase.rpc('create_workspace_with_owner', {
+      ws_name: 'مساحتي',
+    });
+    if (error) return null;
+
+    return loadWorkspace(userId);
   }
 
+  async function loadUserContext(currentUser: User) {
+    const { data: adminData } = await supabase.rpc('is_super_admin', {
+      check_uid: currentUser.id,
+    });
+    const admin = Boolean(adminData);
+    setIsSuperAdmin(admin);
+
+    // Super Admin is platform-level and intentionally has no Workspace.
+    if (admin) {
+      setWorkspace(null);
+      return;
+    }
+
+    // Existing users without a Workspace are repaired automatically. New users
+    // are normally provisioned by the database trigger in migration 0005.
+    const ws = await ensureWorkspace(currentUser.id);
+    setWorkspace(ws);
+  }
+
+  async function refreshWorkspace() {
+    if (!user || isSuperAdmin) return;
+    setWorkspace(await ensureWorkspace(user.id));
+  }
+
+  // Auth bootstrap intentionally runs once; the callback owns the current session flow.
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!mounted) return;
       setSession(data.session);
       setUser(data.session?.user ?? null);
       if (data.session?.user) {
-        loadWorkspace(data.session.user.id).then((ws) => {
-          if (mounted) {
-            setWorkspace(ws);
-            setLoading(false);
-          }
-        });
+        await loadUserContext(data.session.user);
       } else {
-        setLoading(false);
+        setIsSuperAdmin(false);
+        setWorkspace(null);
       }
+      if (mounted) setLoading(false);
     });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
@@ -83,9 +110,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(newSession);
         setUser(newSession?.user ?? null);
         if (newSession?.user) {
-          const ws = await loadWorkspace(newSession.user.id);
-          setWorkspace(ws);
+          await loadUserContext(newSession.user);
         } else {
+          setIsSuperAdmin(false);
           setWorkspace(null);
         }
         setLoading(false);
@@ -96,17 +123,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mounted = false;
       sub.subscription.unsubscribe();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function signUp(email: string, password: string) {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { error } = await supabase.auth.signUp({ email, password });
     if (error) return { error: error.message };
-    if (data.user) {
-      const { error: rpcError } = await supabase.rpc('create_workspace_with_owner', {
-        ws_name: 'مساحتي',
-      });
-      if (rpcError) return { error: rpcError.message };
-    }
+    // Workspace creation is handled atomically by the database trigger. This
+    // avoids duplicate Workspaces when Supabase returns an active session.
     return { error: null };
   }
 
@@ -119,11 +143,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signOut() {
     await supabase.auth.signOut();
     setWorkspace(null);
+    setIsSuperAdmin(false);
   }
 
   return (
     <AuthContext.Provider
-      value={{ session, user, workspace, loading, signUp, signIn, signOut, refreshWorkspace }}
+      value={{ session, user, workspace, isSuperAdmin, loading, signUp, signIn, signOut, refreshWorkspace }}
     >
       {children}
     </AuthContext.Provider>
