@@ -9,10 +9,19 @@ import { PLATFORMS, PLATFORM_META } from '@/lib/constants';
 import { SuperAdminScreen } from '@/screens/SuperAdminScreen';
 import type { SocialAccount, SocialPlatform, BrandDna } from '@/lib/types';
 
-// Only these platforms have a real OAuth flow wired up so far (both go
-// through the same Meta app). The rest still show in the list but are
-// marked "قريبًا" until their own OAuth integration is built.
-const OAUTH_READY_PLATFORMS = new Set<SocialPlatform>(['facebook', 'instagram']);
+// Only these platforms have a real OAuth flow wired up so far. facebook +
+// instagram share the Meta app; linkedin has its own app. The rest still
+// show in the list but are marked "قريبًا" until their own OAuth integration
+// is built.
+const OAUTH_READY_PLATFORMS = new Set<SocialPlatform>(['facebook', 'instagram', 'linkedin']);
+
+// Maps a connectable platform to the social_platform_apps row that drives
+// its OAuth flow (facebook/instagram share the single "meta" app).
+const PLATFORM_APP_KEY: Partial<Record<SocialPlatform, 'meta' | 'linkedin'>> = {
+  facebook: 'meta',
+  instagram: 'meta',
+  linkedin: 'linkedin',
+};
 
 export function MoreScreen() {
   const { workspace, signOut } = useAuth();
@@ -53,9 +62,10 @@ export function MoreScreen() {
     if (social === 'connected') {
       const fb = Number(params.get('facebook') ?? 0);
       const ig = Number(params.get('instagram') ?? 0);
+      const li = Number(params.get('linkedin') ?? 0);
       setConnectNotice(
-        fb || ig
-          ? `تم الربط بنجاح${fb ? ' — فيسبوك' : ''}${ig ? ' — إنستجرام' : ''}`
+        fb || ig || li
+          ? `تم الربط بنجاح${fb ? ' — فيسبوك' : ''}${ig ? ' — إنستجرام' : ''}${li ? ' — لينكدإن' : ''}`
           : 'تم الربط بنجاح'
       );
       setShowAccounts(true);
@@ -69,6 +79,7 @@ export function MoreScreen() {
     params.delete('platform');
     params.delete('facebook');
     params.delete('instagram');
+    params.delete('linkedin');
     params.delete('message');
     const cleanUrl = window.location.pathname + (params.toString() ? `?${params}` : '');
     window.history.replaceState({}, '', cleanUrl);
@@ -90,12 +101,13 @@ export function MoreScreen() {
     }
 
     if (!OAUTH_READY_PLATFORMS.has(platform)) return; // "قريبًا" — لسه مفيش OAuth لها
+    const appKey = PLATFORM_APP_KEY[platform] ?? 'meta';
 
     setConnectError(null);
     setConnectNotice(null);
     setConnectingPlatform(platform);
     try {
-      const url = await startSocialOAuth(workspace.id, 'meta');
+      const url = await startSocialOAuth(workspace.id, appKey);
       window.location.href = url;
     } catch (e) {
       setConnectError(e instanceof Error ? e.message : 'تعذّر بدء عملية الربط');

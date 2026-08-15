@@ -25,6 +25,11 @@ function jsonRes(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 
+const PLATFORM_LABELS: Record<string, string> = {
+  meta: 'فيسبوك/إنستجرام',
+  linkedin: 'لينكدإن',
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
   if (req.method !== 'POST') return jsonRes(405, { error: 'Method not allowed' });
@@ -61,11 +66,13 @@ Deno.serve(async (req: Request) => {
     .eq('platform_key', platformKey)
     .maybeSingle();
 
+  const platformLabel = PLATFORM_LABELS[platformKey] ?? platformKey;
+
   if (!app || !app.app_id || !app.has_secret) {
-    return jsonRes(409, { error: 'لسه الأدمن ما ضبطش إعدادات ربط فيسبوك/إنستجرام. راجع Super Admin > تكاملات التواصل الاجتماعي.' });
+    return jsonRes(409, { error: `لسه الأدمن ما ضبطش إعدادات ربط ${platformLabel}. راجع Super Admin > تكاملات التواصل الاجتماعي.` });
   }
   if (!app.enabled) {
-    return jsonRes(409, { error: 'ربط فيسبوك/إنستجرام معطّل حاليًا من الأدمن.' });
+    return jsonRes(409, { error: `ربط ${platformLabel} معطّل حاليًا من الأدمن.` });
   }
 
   const state = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
@@ -78,14 +85,31 @@ Deno.serve(async (req: Request) => {
   if (stateError) return jsonRes(500, { error: 'تعذّر بدء عملية الربط' });
 
   const redirectUri = app.redirect_uri || `${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/social-oauth-callback`;
-  const scope = app.scopes || 'pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_metadata,instagram_basic,instagram_content_publish,business_management';
 
-  const authUrl = new URL('https://www.facebook.com/v20.0/dialog/oauth');
-  authUrl.searchParams.set('client_id', app.app_id);
-  authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('state', state);
-  authUrl.searchParams.set('scope', scope);
-  authUrl.searchParams.set('response_type', 'code');
+  let authUrl: URL;
+  switch (platformKey) {
+    case 'linkedin': {
+      const scope = app.scopes || 'openid profile email w_member_social';
+      authUrl = new URL('https://www.linkedin.com/oauth/v2/authorization');
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('client_id', app.app_id);
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      authUrl.searchParams.set('state', state);
+      authUrl.searchParams.set('scope', scope);
+      break;
+    }
+    case 'meta':
+    default: {
+      const scope = app.scopes || 'pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_metadata,instagram_basic,instagram_content_publish,business_management';
+      authUrl = new URL('https://www.facebook.com/v20.0/dialog/oauth');
+      authUrl.searchParams.set('client_id', app.app_id);
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      authUrl.searchParams.set('state', state);
+      authUrl.searchParams.set('scope', scope);
+      authUrl.searchParams.set('response_type', 'code');
+      break;
+    }
+  }
 
   return jsonRes(200, { url: authUrl.toString() });
 });

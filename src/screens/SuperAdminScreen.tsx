@@ -315,7 +315,9 @@ export function SuperAdminScreen({ onBack }: { onBack: () => void }) {
                     />
                     {app.redirect_uri && (
                       <div className="bg-ink-900 rounded-lg p-2.5">
-                        <p className="text-ink-500 text-[10px] mb-1">Redirect URI — ضيفه في إعدادات تطبيق Meta Developer</p>
+                        <p className="text-ink-500 text-[10px] mb-1">
+                          Redirect URI — ضيفه في إعدادات تطبيق {app.platform_key === 'linkedin' ? 'LinkedIn Developer' : 'Meta Developer'}
+                        </p>
                         <p className="text-ink-300 text-xs break-all" dir="ltr">{app.redirect_uri}</p>
                       </div>
                     )}
@@ -349,7 +351,7 @@ export function SuperAdminScreen({ onBack }: { onBack: () => void }) {
           })}
         </div>
         <p className="text-ink-600 text-[11px] mt-2">
-          تطبيق Meta الواحد بيغطي فيسبوك وإنستجرام معًا. تقدر تجيب App ID و App Secret من Meta for Developers.
+          تطبيق Meta الواحد بيغطي فيسبوك وإنستجرام معًا (Meta for Developers). تطبيق لينكدإن منفصل وبيغطي النشر على الحساب الشخصي فقط حاليًا (LinkedIn Developer Portal). ملحوظة: توكن لينكدإن بينتهي كل ٦٠ يوم ولازم إعادة ربط.
         </p>
       </div>
 

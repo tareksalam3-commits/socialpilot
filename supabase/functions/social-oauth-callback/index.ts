@@ -67,10 +67,15 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (!app?.app_id || !secretRow?.app_secret) {
-    return redirectToApp({ social: 'error', message: 'إعدادات ربط فيسبوك/إنستجرام غير مكتملة' });
+    const label = stateRow.platform_key === 'linkedin' ? 'لينكدإن' : 'فيسبوك/إنستجرام';
+    return redirectToApp({ social: 'error', message: `إعدادات ربط ${label} غير مكتملة` });
   }
 
   const redirectUri = app.redirect_uri || `${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/social-oauth-callback`;
+
+  if (stateRow.platform_key === 'linkedin') {
+    return handleLinkedInCallback({ code, app, secretRow, redirectUri, stateRow });
+  }
 
   try {
     // 1. Exchange the code for a short-lived user access token.
@@ -194,3 +199,86 @@ Deno.serve(async (req: Request) => {
     return redirectToApp({ social: 'error', message });
   }
 });
+
+// ---------------------------------------------------------------------------
+// LinkedIn — standard OAuth2 3-legged flow (no long-lived exchange step,
+// no refresh_token for non-MDP apps: tokens are valid ~60 days and the
+// user must re-run this flow to reconnect once they expire). We store the
+// member's own profile as a single 'linkedin' social_accounts row scoped
+// to w_member_social (personal posting) via OpenID Connect userinfo.
+// ---------------------------------------------------------------------------
+async function handleLinkedInCallback(params: {
+  code: string;
+  app: Record<string, unknown>;
+  secretRow: { app_secret: string };
+  redirectUri: string;
+  stateRow: Record<string, unknown>;
+}): Promise<Response> {
+  const { code, app, secretRow, redirectUri, stateRow } = params;
+
+  try {
+    // 1. Exchange the authorization code for an access token.
+    const tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+        client_id: String(app.app_id),
+        client_secret: secretRow.app_secret,
+      }),
+    });
+    const tokenJson = await tokenRes.json();
+    if (!tokenRes.ok || !tokenJson.access_token) {
+      throw new Error(tokenJson?.error_description ?? tokenJson?.error ?? 'فشل تبادل رمز الدخول مع لينكدإن');
+    }
+    const accessToken = tokenJson.access_token as string;
+    const expiresInSec = typeof tokenJson.expires_in === 'number' ? tokenJson.expires_in : null;
+    const tokenExpiresAt = expiresInSec ? new Date(Date.now() + expiresInSec * 1000).toISOString() : null;
+
+    // 2. Fetch the member's identity via OpenID Connect userinfo.
+    const profileRes = await fetch('https://api.linkedin.com/v2/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const profileJson = await profileRes.json();
+    if (!profileRes.ok || !profileJson.sub) {
+      throw new Error(profileJson?.message ?? 'تعذّر جلب بيانات حساب لينكدإن');
+    }
+
+    const memberUrn = `urn:li:person:${profileJson.sub}`;
+    const displayName = String(profileJson.name ?? 'حساب لينكدإن');
+
+    const { data: account, error: upsertError } = await supabase
+      .from('social_accounts')
+      .upsert({
+        workspace_id: stateRow.workspace_id,
+        platform: 'linkedin',
+        handle: displayName,
+        display_name: displayName,
+        status: 'connected',
+        needs_reconnect: false,
+        external_id: profileJson.sub,
+        metadata: { urn: memberUrn, picture: profileJson.picture ?? null },
+        last_sync_at: new Date().toISOString(),
+      }, { onConflict: 'workspace_id,platform' })
+      .select()
+      .single();
+
+    if (upsertError || !account) throw new Error('تعذّر حفظ حساب لينكدإن');
+
+    await supabase.from('social_account_tokens').upsert({
+      account_id: account.id,
+      access_token: accessToken,
+      token_type: 'member',
+      expires_at: tokenExpiresAt,
+      updated_at: new Date().toISOString(),
+    });
+
+    return redirectToApp({ social: 'connected', platform: 'linkedin', linkedin: '1' });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'فشل ربط حساب لينكدإن';
+    await supabase.from('social_platform_apps').update({ last_error: message, status: 'error' }).eq('platform_key', 'linkedin');
+    return redirectToApp({ social: 'error', message });
+  }
+}
