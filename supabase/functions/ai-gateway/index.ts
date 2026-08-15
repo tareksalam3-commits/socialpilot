@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
+import { routeAndRun, NoModelAvailableError, NonFailoverError, type CapabilityRequest } from './router.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -28,7 +29,8 @@ type RequestBody = {
 };
 
 // ---------------------------------------------------------------------------
-// Supabase admin client (service role bypasses RLS)
+// Supabase admin client (service role bypasses RLS — this is the only place
+// in the system allowed to read ai_provider_secrets)
 // ---------------------------------------------------------------------------
 
 const supabase = createClient(
@@ -56,7 +58,6 @@ async function authorize(req: Request, workspaceId: string): Promise<{ ok: true;
     return { ok: false, response: jsonError(401, 'Missing authentication token') };
   }
 
-  // Verify the JWT and get the user
   const { data: userData, error: userError } = await supabase.auth.getUser(token);
   if (userError || !userData.user) {
     return { ok: false, response: jsonError(401, 'Invalid or expired token') };
@@ -64,7 +65,6 @@ async function authorize(req: Request, workspaceId: string): Promise<{ ok: true;
 
   const userId = userData.user.id;
 
-  // Verify the user is a member of the requested workspace
   const { data: membership, error: memberError } = await supabase
     .from('workspace_members')
     .select('role')
@@ -80,70 +80,55 @@ async function authorize(req: Request, workspaceId: string): Promise<{ ok: true;
 }
 
 // ---------------------------------------------------------------------------
-// Model Router — picks model based on task complexity
+// AI Task definitions — each intent declares required capabilities only.
+// No model ID, no provider name, anywhere in this file.
 // ---------------------------------------------------------------------------
 
-const MODEL_ROUTING: Record<Intent, { model: string; tier: 'fast' | 'default' | 'strong' }> = {
-  generate_brand_dna: { model: 'gpt-4o', tier: 'strong' },
-  create_content: { model: 'gpt-4o', tier: 'default' },
-  create_content_plan: { model: 'gpt-4o', tier: 'strong' },
-  analyze_performance: { model: 'gpt-4o-mini', tier: 'fast' },
-  suggest_ideas: { model: 'gpt-4o-mini', tier: 'fast' },
-  general_advice: { model: 'gpt-4o-mini', tier: 'fast' },
+const TASK_CAPABILITIES: Record<Intent, CapabilityRequest['requiredCapabilities']> = {
+  generate_brand_dna: ['reasoning', 'structured_output'],
+  create_content: ['text_generation', 'structured_output'],
+  create_content_plan: ['reasoning', 'structured_output'],
+  analyze_performance: ['reasoning', 'structured_output'],
+  suggest_ideas: ['text_generation', 'structured_output'],
+  general_advice: ['text_generation', 'structured_output'],
 };
 
-const DEFAULT_MODEL = 'gpt-4o-mini';
-
-function pickModel(intent: Intent): { model: string; provider: string } {
-  const route = MODEL_ROUTING[intent] ?? { model: DEFAULT_MODEL, tier: 'fast' as const };
-  return { model: route.model, provider: 'openai' };
+function looksLikeJson(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      JSON.parse(trimmed);
+      return true;
+    } catch {
+      /* fall through to brace-extraction check below */
+    }
+  }
+  return /\{[\s\S]*\}/.test(trimmed);
 }
 
-// ---------------------------------------------------------------------------
-// AI call — proxies to OpenAI-compatible endpoint via server-side key
-// ---------------------------------------------------------------------------
-
 async function callLLM(
+  intent: Intent,
   systemPrompt: string,
   userPrompt: string,
-  model: string,
   jsonMode = false
-): Promise<{ content: string; tokensIn: number; tokensOut: number }> {
-  const apiKey = Deno.env.get('OPENAI_API_KEY');
-  if (!apiKey) {
-    throw new Error('AI service is not configured. An admin must set the OPENAI_API_KEY secret.');
-  }
-
-  const body: Record<string, unknown> = {
-    model,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    temperature: 0.7,
-    max_tokens: 2000,
-  };
-  if (jsonMode) body.response_format = { type: 'json_object' };
-
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
+): Promise<{ content: string; tokensIn: number; tokensOut: number; provider: string; model: string; fallbackCount: number; fallbackLog: Array<{ provider: string; model: string; error: string }> }> {
+  const result = await routeAndRun(supabase, {
+    requiredCapabilities: TASK_CAPABILITIES[intent],
+    systemPrompt,
+    userPrompt,
+    jsonMode,
+    validate: jsonMode ? looksLikeJson : undefined,
   });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`AI provider error (${res.status}): ${errText.slice(0, 200)}`);
-  }
-
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content ?? '';
-  const tokensIn = data.usage?.prompt_tokens ?? 0;
-  const tokensOut = data.usage?.completion_tokens ?? 0;
-  return { content, tokensIn, tokensOut };
+  return {
+    content: result.content,
+    tokensIn: result.tokensIn,
+    tokensOut: result.tokensOut,
+    provider: result.providerUsed,
+    model: result.modelUsed,
+    fallbackCount: result.fallbackCount,
+    fallbackLog: result.fallbackLog,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +198,8 @@ function memoryContextString(memory: { key: string; value: string; type: string 
 }
 
 // ---------------------------------------------------------------------------
-// Agents — each agent has a focused system prompt + responsibility
+// Agents — each agent has a focused system prompt + responsibility.
+// Agents talk only to callLLM(intent, ...) — never to a provider or model.
 // ---------------------------------------------------------------------------
 
 const AGENTS = {
@@ -272,17 +258,39 @@ function planAgents(intent: Intent): string[] {
   }
 }
 
+function parseJsonLoose<T>(content: string, fallback: (raw: string) => T): T {
+  try {
+    return JSON.parse(content) as T;
+  } catch {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]) as T;
+      } catch {
+        /* fall through */
+      }
+    }
+    return fallback(content);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Intent execution
 // ---------------------------------------------------------------------------
+
+type ExecutionMeta = {
+  provider: string;
+  model: string;
+  fallbackCount: number;
+  fallbackLog: Array<{ provider: string; model: string; error: string }>;
+};
 
 async function executeIntent(
   intent: Intent,
   message: string,
   ctx: { brand: Record<string, unknown> | null; memory: { key: string; value: string; type: string }[] },
-  platforms: string[],
-  model: string
-): Promise<{ result: Record<string, unknown>; tokensIn: number; tokensOut: number }> {
+  platforms: string[]
+): Promise<{ result: Record<string, unknown>; tokensIn: number; tokensOut: number; meta: ExecutionMeta }> {
   const brandStr = brandContextString(ctx.brand);
   const memStr = memoryContextString(ctx.memory);
 
@@ -293,15 +301,9 @@ async function executeIntent(
 identity, tone, audience, content, visual, platforms, summary.
 المعلومات الأساسية: ${message}
 أرجع JSON فقط بدون نص إضافي.`;
-      const { content, tokensIn, tokensOut } = await callLLM(sys, prompt, model, true);
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(content);
-      } catch {
-        const match = content.match(/\{[\s\S]*\}/);
-        parsed = match ? JSON.parse(match[0]) : { summary: content };
-      }
-      return { result: parsed, tokensIn, tokensOut };
+      const r = await callLLM(intent, sys, prompt, true);
+      const parsed = parseJsonLoose<Record<string, unknown>>(r.content, (raw) => ({ summary: raw }));
+      return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };
     }
 
     case 'create_content': {
@@ -322,15 +324,9 @@ identity, tone, audience, content, visual, platforms, summary.
   ]
 }
 أرجع JSON فقط. كل نسخة منصة يجب أن تكون مخصصة وغير مكررة.`;
-      const { content, tokensIn, tokensOut } = await callLLM(sys, prompt, model, true);
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(content);
-      } catch {
-        const match = content.match(/\{[\s\S]*\}/);
-        parsed = match ? JSON.parse(match[0]) : { master_text: content, variants: [] };
-      }
-      return { result: parsed, tokensIn, tokensOut };
+      const r = await callLLM(intent, sys, prompt, true);
+      const parsed = parseJsonLoose<Record<string, unknown>>(r.content, (raw) => ({ master_text: raw, variants: [] }));
+      return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };
     }
 
     case 'create_content_plan': {
@@ -344,43 +340,27 @@ identity, tone, audience, content, visual, platforms, summary.
   ]
 }
 اقترح 5-7 فترات. أرجع JSON فقط.`;
-      const { content, tokensIn, tokensOut } = await callLLM(sys, prompt, model, true);
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(content);
-      } catch {
-        const match = content.match(/\{[\s\S]*\}/);
-        parsed = match ? JSON.parse(match[0]) : { theme: message, slots: [] };
-      }
-      return { result: parsed, tokensIn, tokensOut };
+      const r = await callLLM(intent, sys, prompt, true);
+      const parsed = parseJsonLoose<Record<string, unknown>>(r.content, () => ({ theme: message, slots: [] }));
+      return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };
     }
 
     case 'analyze_performance': {
       const sys = AGENTS.analytics_advisor(brandStr);
       const prompt = `الطلب: "${message}"
 حلل الأداء واقترح قرارات عملية بصيغة JSON: { "advice": "..." }`;
-      const { content, tokensIn, tokensOut } = await callLLM(sys, prompt, model, true);
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(content);
-      } catch {
-        parsed = { advice: content };
-      }
-      return { result: parsed, tokensIn, tokensOut };
+      const r = await callLLM(intent, sys, prompt, true);
+      const parsed = parseJsonLoose<Record<string, unknown>>(r.content, (raw) => ({ advice: raw }));
+      return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };
     }
 
     case 'suggest_ideas': {
       const sys = AGENTS.idea_generator(brandStr);
       const prompt = `الطلب: "${message}"
 اقترح أفكار محتوى بصيغة JSON: { "advice": "..." }`;
-      const { content, tokensIn, tokensOut } = await callLLM(sys, prompt, model, true);
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(content);
-      } catch {
-        parsed = { advice: content };
-      }
-      return { result: parsed, tokensIn, tokensOut };
+      const r = await callLLM(intent, sys, prompt, true);
+      const parsed = parseJsonLoose<Record<string, unknown>>(r.content, (raw) => ({ advice: raw }));
+      return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };
     }
 
     case 'general_advice':
@@ -388,29 +368,15 @@ identity, tone, audience, content, visual, platforms, summary.
       const sys = AGENTS.analytics_advisor(brandStr);
       const prompt = `سؤال المستخدم: "${message}"
 أجب بنصيحة عملية ومختصرة بصيغة JSON: { "advice": "..." }`;
-      const { content, tokensIn, tokensOut } = await callLLM(sys, prompt, model, true);
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(content);
-      } catch {
-        parsed = { advice: content };
-      }
-      return { result: parsed, tokensIn, tokensOut };
+      const r = await callLLM(intent, sys, prompt, true);
+      const parsed = parseJsonLoose<Record<string, unknown>>(r.content, (raw) => ({ advice: raw }));
+      return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };
     }
   }
 }
 
-// ---------------------------------------------------------------------------
-// Cost estimation (rough)
-// ---------------------------------------------------------------------------
-
-const COST_PER_1K: Record<string, { in: number; out: number }> = {
-  'gpt-4o': { in: 0.005, out: 0.015 },
-  'gpt-4o-mini': { in: 0.00015, out: 0.0006 },
-};
-
-function estimateCost(model: string, tokensIn: number, tokensOut: number): number {
-  const rate = COST_PER_1K[model] ?? COST_PER_1K['gpt-4o-mini'];
+function estimateCost(tokensIn: number, tokensOut: number, rate: { in: number; out: number } | null): number {
+  if (!rate) return 0;
   return (tokensIn / 1000) * rate.in + (tokensOut / 1000) * rate.out;
 }
 
@@ -437,10 +403,10 @@ Deno.serve(async (req: Request) => {
     const userId = auth.userId;
 
     const started = Date.now();
-    const { model, provider } = pickModel(intent);
     const agents = planAgents(intent);
 
-    // Create AI run record
+    // Create AI run record — provider/model are filled in after routing,
+    // since the router (not this handler) decides them.
     const { data: run } = await supabase
       .from('ai_runs')
       .insert({
@@ -449,8 +415,7 @@ Deno.serve(async (req: Request) => {
         task: intent,
         intent: message.slice(0, 200),
         agents,
-        model,
-        provider,
+        required_capabilities: TASK_CAPABILITIES[intent],
         status: 'running',
       })
       .select()
@@ -461,15 +426,17 @@ Deno.serve(async (req: Request) => {
     try {
       const ctx = await assembleContext(workspaceId, intent);
       const plats = platforms ?? [];
-      const { result, tokensIn, tokensOut } = await executeIntent(
-        intent,
-        message,
-        ctx,
-        plats,
-        model
-      );
+      const { result, tokensIn, tokensOut, meta } = await executeIntent(intent, message, ctx, plats);
       const latencyMs = Date.now() - started;
-      const cost = estimateCost(model, tokensIn, tokensOut);
+
+      const { data: modelRow } = await supabase
+        .from('ai_models')
+        .select('input_cost_per_1k, output_cost_per_1k')
+        .eq('provider_key', meta.provider)
+        .eq('model_id', meta.model)
+        .maybeSingle();
+      const rate = modelRow ? { in: modelRow.input_cost_per_1k ?? 0, out: modelRow.output_cost_per_1k ?? 0 } : null;
+      const cost = estimateCost(tokensIn, tokensOut, rate);
 
       await supabase.from('ai_runs').update({
         status: 'succeeded',
@@ -477,6 +444,10 @@ Deno.serve(async (req: Request) => {
         output_tokens: tokensOut,
         cost_usd: cost,
         latency_ms: latencyMs,
+        model: meta.model,
+        provider: meta.provider,
+        fallback_count: meta.fallbackCount,
+        fallback_log: meta.fallbackLog,
         result,
       }).eq('id', runId);
 
@@ -484,8 +455,9 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({
           runId,
           agents,
-          model,
-          provider,
+          model: meta.model,
+          provider: meta.provider,
+          fallbackCount: meta.fallbackCount,
           latencyMs,
           result,
         }),
@@ -500,9 +472,10 @@ Deno.serve(async (req: Request) => {
         latency_ms: latencyMs,
       }).eq('id', runId);
 
+      const status = err instanceof NoModelAvailableError ? 503 : err instanceof NonFailoverError ? 400 : 500;
       return new Response(
         JSON.stringify({ error: errMsg }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
   } catch (err) {

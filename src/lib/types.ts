@@ -237,6 +237,74 @@ export type AiGatewayResponse = {
   agents: string[];
   model: string;
   provider: string;
+  fallbackCount?: number;
   latencyMs: number;
   result: GeneratedBrandDna | GeneratedContent | ContentPlan | { advice: string };
+};
+
+// ---- AI Control Center (Super Admin) ----
+
+export type AiProviderKey =
+  | 'openai' | 'openrouter' | 'huggingface' | 'gemini' | 'anthropic'
+  | 'xai' | 'mistral' | 'groq' | 'deepseek' | 'cerebras' | 'together'
+  | 'fireworks' | 'cohere';
+
+export type AiProvider = {
+  id: string;
+  provider_key: AiProviderKey;
+  display_name: string;
+  enabled: boolean;
+  has_api_key: boolean;
+  base_url: string | null;
+  priority: number;
+  failover_enabled: boolean;
+  allow_paid: boolean;
+  status: 'not_configured' | 'connected' | 'error';
+  last_test_at: string | null;
+  last_test_ok: boolean | null;
+  last_error: string | null;
+  models_count: number;
+  healthy_models_count: number;
+};
+
+export type AiModel = {
+  id: string;
+  provider_key: AiProviderKey;
+  model_id: string;
+  display_name: string | null;
+  context_window: number | null;
+  vision: boolean;
+  reasoning: boolean;
+  tool_calling: boolean;
+  structured_output: boolean;
+  is_free: boolean;
+  input_cost_per_1k: number | null;
+  output_cost_per_1k: number | null;
+  quality_score: number;
+  status: 'healthy' | 'degraded' | 'disabled';
+  circuit_state: 'closed' | 'open' | 'half_open';
+  success_count: number;
+  failure_count: number;
+  avg_latency_ms: number | null;
+};
+
+export type AiRoutingPolicyValue = 'smart_balanced' | 'free_first' | 'lowest_cost' | 'best_quality' | 'fastest';
+
+export type AiRoutingPolicy = {
+  policy: AiRoutingPolicyValue;
+  allow_paid_fallback: boolean;
+};
+
+export type AiUsageSummary = {
+  totals: { requests: number; tokens: number; cost: number; fallbacks: number; failures: number };
+  recent: Array<{
+    provider: string | null;
+    model: string | null;
+    status: string;
+    cost_usd: number;
+    input_tokens: number;
+    output_tokens: number;
+    fallback_count: number;
+    created_at: string;
+  }>;
 };

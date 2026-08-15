@@ -119,6 +119,57 @@ export function EmptyState({
   );
 }
 
+export function Input({
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+  className = '',
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  type?: 'text' | 'password';
+  className?: string;
+}) {
+  return (
+    <input
+      type={type}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      dir="ltr"
+      className={`w-full rounded-xl bg-ink-900 border border-ink-700 px-3.5 py-2.5 text-sm text-ink-100 placeholder:text-ink-600 focus:outline-none focus:border-brand-500 ${className}`}
+    />
+  );
+}
+
+export function Select({
+  value,
+  onChange,
+  options,
+  className = '',
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  className?: string;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`w-full rounded-xl bg-ink-900 border border-ink-700 px-3.5 py-2.5 text-sm text-ink-100 focus:outline-none focus:border-brand-500 ${className}`}
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export function ErrorBanner({ message }: { message: string }) {
   return (
     <div className="rounded-xl bg-danger-500/10 border border-danger-500/30 px-4 py-3 text-sm text-danger-400">

@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { Settings, Brain, Link2, LogOut, Shield, TrendingUp, ChevronLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
+import { checkIsSuperAdmin } from '@/lib/superAdmin';
 import { Card, Button, Badge } from '@/components/ui';
 import { PLATFORMS, PLATFORM_META } from '@/lib/constants';
+import { SuperAdminScreen } from '@/screens/SuperAdminScreen';
 import type { SocialAccount, SocialPlatform, BrandDna } from '@/lib/types';
 
 export function MoreScreen() {
@@ -11,6 +13,8 @@ export function MoreScreen() {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [brandDna, setBrandDna] = useState<BrandDna | null>(null);
   const [showAccounts, setShowAccounts] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [showSuperAdmin, setShowSuperAdmin] = useState(false);
 
   useEffect(() => {
     if (!workspace) return;
@@ -23,6 +27,14 @@ export function MoreScreen() {
       setBrandDna(dna.data as BrandDna | null);
     })();
   }, [workspace]);
+
+  useEffect(() => {
+    checkIsSuperAdmin().then(setIsSuperAdmin);
+  }, []);
+
+  if (showSuperAdmin) {
+    return <SuperAdminScreen onBack={() => setShowSuperAdmin(false)} />;
+  }
 
   async function togglePlatform(platform: SocialPlatform) {
     if (!workspace) return;
@@ -148,17 +160,19 @@ export function MoreScreen() {
             </div>
           </Card>
 
-          <Card>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-ink-800 flex items-center justify-center">
-                <Shield size={20} className="text-ink-400" />
+          {isSuperAdmin && (
+            <Card onClick={() => setShowSuperAdmin(true)}>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-ink-800 flex items-center justify-center">
+                  <Shield size={20} className="text-ink-400" />
+                </div>
+                <div>
+                  <p className="text-ink-100 text-sm font-medium">AI Control Center</p>
+                  <p className="text-ink-500 text-xs mt-0.5">Super Admin — Providers والموديلات والتوجيه</p>
+                </div>
               </div>
-              <div>
-                <p className="text-ink-100 text-sm font-medium">Super Admin</p>
-                <p className="text-ink-500 text-xs mt-0.5">إدارة النظام (للمشرفين)</p>
-              </div>
-            </div>
-          </Card>
+            </Card>
+          )}
 
           <Card>
             <div className="flex items-center gap-3">
