@@ -59,6 +59,18 @@
 //                             Context in the workspace's own Content Sources
 //                             (never invents citations — see file header)
 //
+// Trend Signal  (./contentEngine/trendAgent.ts):
+//   runTrendSignal          — optional open-web search (via the trend-search
+//                             Edge Function / Tavily) for what's currently
+//                             relevant to this post's topic/industry.
+//                             Deliberately separate from the Research Agent
+//                             above, which stays strictly grounded in the
+//                             workspace's own Content Sources — this is a
+//                             different, explicitly-hedged "consider, don't
+//                             cite" signal (see renderTrendSignalBlock).
+//                             No trend_search_api_key configured -> no
+//                             effect on generation at all.
+//
 // Hook Agent  (./contentEngine/hookAgent.ts) — Phase 2, STEP 9:
 //   runHookAgent           — generates several scored hook candidates and
 //                             deterministically selects the best one (never
@@ -98,6 +110,8 @@ export { AUDIENCE_MIN_CONFIDENCE, runAudienceInferenceAgent } from './contentEng
 export { runStrategyAgent } from './contentEngine/strategyAgent';
 
 export { runResearchDecision, runResearchAgent } from './contentEngine/researchAgent';
+
+export { runTrendSignal, renderTrendSignalBlock } from './contentEngine/trendAgent';
 
 export { runHookAgent } from './contentEngine/hookAgent';
 

@@ -1,5 +1,6 @@
 import { aiGateway } from '@/services/aiGateway';
 import { aiHistoryRepository } from '@/repositories/aiHistoryRepository';
+import { contentCharacteristicsRepository } from '@/repositories/contentCharacteristicsRepository';
 import type { ChatMessage } from '@/types/ai';
 import type { CampaignPlan } from '@/types/assistant';
 import type { WorkspaceContext, ContentStrategy } from '@/types/context';
@@ -39,6 +40,7 @@ const DEFAULT_STRATEGY: ContentStrategy = {
 function buildStrategyMessages(
   plan: CampaignPlan,
   workspaceContext: WorkspaceContext | null,
+  existingPillars: string[],
 ): ChatMessage[] {
   const brand = workspaceContext?.brand;
   const audience = workspaceContext?.audience;
@@ -63,6 +65,10 @@ function buildStrategyMessages(
 
   const platforms = plan.platforms.length ? plan.platforms.join(', ') : 'غير محددة';
 
+  const pillarsInstruction = existingPillars.length
+    ? `\n- محاور المحتوى (Content Pillars) اللي استُخدمت سابقًا في هذا الـ workspace: ${existingPillars.map((p) => `"${p}"`).join('، ')}. لو أي محور منها يناسب هذا الطلب، أعد استخدام نفس الصياغة بالحرف الواحد (لا تعيد صياغتها بكلمات مختلفة) — الاتساق هنا مهم لتتبّع الأداء. اقترح محورًا جديدًا فقط لو محتاج فعلًا موضوع مختلف جوهريًا عن كل المحاور الموجودة.`
+    : '';
+
   return [
     {
       role: 'system',
@@ -72,7 +78,7 @@ function buildStrategyMessages(
 - اربط كل عنصر في الاستراتيجية بالهدف والجمهور والبراند المُعطى فعليًا؛ لا تخترع قيمًا عامة لا علاقة لها بالسياق.
 - "platform_priorities" يجب أن تكون فقط من ضمن المنصات المُعطاة أدناه، مرتبة بالأهم أولًا.
 - اجعل "content_pillars" و"angles" و"formats" و"success_metrics" مصفوفات قصيرة (3-5 عناصر) وليست فقرات.
-- "cta_strategy" و"recommended_frequency" جملة واحدة موجزة لكل منهما.
+- "cta_strategy" و"recommended_frequency" جملة واحدة موجزة لكل منهما.${pillarsInstruction}
 
 أرجع JSON فقط بهذا الشكل بالضبط، بدون أي نص أو Markdown قبله أو بعده:
 {"objective": string, "content_pillars": string[], "angles": string[], "formats": string[], "platform_priorities": string[], "cta_strategy": string, "recommended_frequency": string, "success_metrics": string[]}`,
@@ -133,7 +139,11 @@ export async function runStrategyAgent(
   workspaceContext: WorkspaceContext | null,
   aiSettings?: { model?: string; temperature?: number; maxTokens?: number; freeOnly?: boolean },
 ): Promise<{ strategy: ContentStrategy; raw: string; error: string | null }> {
-  const messages = buildStrategyMessages(plan, workspaceContext);
+  // Best-effort: no pillar history yet (new workspace) or a lookup failure
+  // just means the prompt omits the reuse instruction, same non-blocking
+  // contract as every other optional context input in this pipeline.
+  const existingPillars = await contentCharacteristicsRepository.listRecentPillars(workspaceId).catch(() => []);
+  const messages = buildStrategyMessages(plan, workspaceContext, existingPillars);
   try {
     const result = await aiGateway.generate({
       workspaceId,

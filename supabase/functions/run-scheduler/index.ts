@@ -175,10 +175,17 @@ async function runScheduler(req: Request): Promise<Response> {
   // tick so publishing/scheduling keep one operational entry point.
   const inboundSync = { accounts: 0, analytics: 0, conversations: 0, messages: 0, warnings: 0 };
   try {
+    // Ordered oldest-synced-first (NULLS FIRST puts never-synced accounts
+    // ahead of everything) so a platform-wide account count above the
+    // 100/tick cap round-robins fairly across every tenant instead of the
+    // same first 100 rows (arbitrary DB order) starving every other
+    // workspace's analytics — and therefore its Optimization Context —
+    // forever once the platform grows past that number of connections.
     const { data: accounts } = await supabase
       .from('connected_accounts')
-      .select('id,workspace_id,platform,handle,provider_account_id,access_token_encrypted,metadata')
+      .select('id,workspace_id,platform,handle,provider_account_id,access_token_encrypted,metadata,last_synced_at')
       .eq('status', 'connected')
+      .order('last_synced_at', { ascending: true, nullsFirst: true })
       .limit(100);
     for (const account of accounts ?? []) {
       try {
@@ -188,6 +195,17 @@ async function runScheduler(req: Request): Promise<Response> {
         inboundSync.conversations += result.conversations;
         inboundSync.messages += result.messages;
         inboundSync.warnings += result.warnings.length;
+        // syncInboundAccount itself never touches last_synced_at (only the
+        // manual health-check path in accountHealth.ts does) — without this,
+        // the ORDER BY above would never actually rotate and the same
+        // never-synced-looking rows would keep winning every tick.
+        // Best-effort: a failed stamp just means this account gets picked
+        // again next tick, not a broken sync.
+        await supabase
+          .from('connected_accounts')
+          .update({ last_synced_at: now })
+          .eq('id', account.id)
+          .then(() => {}, () => {});
       } catch (e) {
         inboundSync.warnings++;
         console.error(`run-scheduler: inbound sync failed for account ${account.id}`, e);

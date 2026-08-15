@@ -21,6 +21,14 @@ const ENV_FALLBACK: Record<string, string> = {
   // whatever this is configured to, matching the `meta_app_secret` pattern
   // above (DB value from Settings > Integrations, falling back to env).
   meta_webhook_verify_token: 'META_WEBHOOK_VERIFY_TOKEN',
+  // Trend Signal (optional Research Agent add-on — see trend-search Edge
+  // Function). Tavily is an AI-oriented search API returning short
+  // snippets + source URLs rather than full pages, which keeps this cheap
+  // and keeps the Creator prompt from ballooning with scraped content.
+  // Entirely optional: with no key configured, trend-search returns
+  // trend_available: false and the pipeline behaves exactly as before —
+  // same non-blocking contract as every other optional context input.
+  trend_search_api_key: 'TAVILY_API_KEY',
 };
 
 /** Resolves one credential: DB value (set from the app) takes priority,

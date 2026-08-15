@@ -34,6 +34,8 @@ import {
   runStrategyAgent,
   runResearchDecision,
   runResearchAgent,
+  runTrendSignal,
+  renderTrendSignalBlock,
   runHookAgent,
   runPlatformAdaptationAgent,
   evaluateAIDecision,
@@ -175,6 +177,10 @@ export function useAssistantPipeline() {
   // Phase 3, STEP 9 — Optimization Context. Built once per run (like
   // strategy/hook/research), scoped to this run's platforms.
   const optimizationContextRef = useRef<string | null>(null);
+  // Trend Signal — optional web-search add-on (trendAgent.ts). Same
+  // once-per-run, "renders to null when unavailable" contract as
+  // optimizationContextRef above.
+  const trendSignalRef = useRef<string | null>(null);
 
   const connectedPlatforms = useMemo(
     () => Array.from(new Set(accounts.filter((a) => a.status === 'connected').map((a) => a.platform))),
@@ -274,6 +280,7 @@ export function useAssistantPipeline() {
               researchRef.current,
               hookRef.current,
               optimizationContextRef.current,
+              trendSignalRef.current,
             );
         genError = gen.error;
         if (!gen.content) break; // generation/rewrite itself failed — nothing to sanitize/review
@@ -484,6 +491,7 @@ export function useAssistantPipeline() {
     researchRef.current = null;
     hookRef.current = null;
     optimizationContextRef.current = null;
+    trendSignalRef.current = null;
 
     // مسح الحالة محليًا وحده لا يكفي: طالما بقيت الحملة في قاعدة البيانات
     // بحالة غير "cancelled"، سيعيد الـ useEffect الخاص بـ latestActive (كل
@@ -517,6 +525,7 @@ export function useAssistantPipeline() {
       researchRef.current = null;
       hookRef.current = null;
       optimizationContextRef.current = null;
+      trendSignalRef.current = null;
       const creationDialect = resolveWorkspaceDialect(workspace);
       const context = await (workspaceContextPromiseRef.current ?? Promise.resolve(workspaceContextRef.current));
       workspaceContextRef.current = context;
@@ -529,6 +538,10 @@ export function useAssistantPipeline() {
       const strategyPromise = runStrategyAgent(workspace.id, planForRun, workspaceContextRef.current, aiParams);
       const researchDecisionPromise = runResearchDecision(workspace.id, requestText, planForRun, aiParams);
       const optimizationPromise = buildOptimizationContext(workspace.id, planForRun.platforms);
+      // Trend Signal (trendAgent.ts) — independent of Strategy, so it
+      // starts in the same wave as the other optional context lookups
+      // rather than waiting on strategyPromise below.
+      const trendSignalPromise = runTrendSignal(workspace.id, planForRun, workspaceContextRef.current);
 
       let strategyResult: Awaited<typeof strategyPromise> | null = null;
       try {
@@ -540,16 +553,18 @@ export function useAssistantPipeline() {
       if (runIdRef.current !== runId) return;
 
       const hookPromise = runHookAgent(workspace.id, planForRun, workspaceContextRef.current, strategyRef.current, aiParams, creationDialect);
-      const [hookResult, researchDecisionResult, optimizationResult, sourceResult] = await Promise.allSettled([
+      const [hookResult, researchDecisionResult, optimizationResult, sourceResult, trendSignalResult] = await Promise.allSettled([
         hookPromise,
         researchDecisionPromise,
         optimizationPromise,
         sourcePromise,
+        trendSignalPromise,
       ]);
       if (runIdRef.current !== runId) return;
 
       if (hookResult.status === 'fulfilled') hookRef.current = hookResult.value.result.best;
       if (optimizationResult.status === 'fulfilled') optimizationContextRef.current = renderOptimizationContextBlock(optimizationResult.value);
+      trendSignalRef.current = trendSignalResult.status === 'fulfilled' ? renderTrendSignalBlock(trendSignalResult.value) : null;
 
       if (researchDecisionResult.status === 'fulfilled') {
         const { decision } = researchDecisionResult.value;

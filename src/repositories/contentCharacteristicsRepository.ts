@@ -37,4 +37,32 @@ export const contentCharacteristicsRepository = {
     if (error) throw error;
     return (data ?? []) as ContentCharacteristics[];
   },
+
+  /** The workspace's own most-recently-used content pillars, most recent
+   * first, de-duplicated. Feeds the Strategy Agent so it reuses an
+   * existing pillar name instead of re-coining new phrasing for the same
+   * idea every run — pattern detection (detect_content_patterns) GROUPs BY
+   * this column's exact text, so consistent naming is what lets that
+   * dimension ever accumulate a usable sample size. Best-effort: caller
+   * treats a failure the same as "no history yet" (empty list). */
+  async listRecentPillars(workspaceId: string, limit = 8): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('content_characteristics')
+      .select('content_pillar, created_at')
+      .eq('workspace_id', workspaceId)
+      .not('content_pillar', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    const seen = new Set<string>();
+    const pillars: string[] = [];
+    for (const row of data ?? []) {
+      const pillar = (row as { content_pillar: string | null }).content_pillar;
+      if (!pillar || seen.has(pillar)) continue;
+      seen.add(pillar);
+      pillars.push(pillar);
+      if (pillars.length >= limit) break;
+    }
+    return pillars;
+  },
 };

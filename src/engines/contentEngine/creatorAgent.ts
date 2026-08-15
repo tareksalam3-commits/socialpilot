@@ -27,6 +27,7 @@ function buildIntelligenceContextBlock(
   contentText?: string | null,
   hook?: HookCandidate | null,
   optimizationContextBlock?: string | null,
+  trendSignalBlock?: string | null,
 ): string | null {
   const sections: string[] = [];
 
@@ -110,6 +111,14 @@ function buildIntelligenceContextBlock(
     sections.push(optimizationContextBlock);
   }
 
+  // Trend Signal (trendAgent.ts) — kept last and clearly hedged in its own
+  // rendering (see renderTrendSignalBlock), since unlike everything above
+  // it comes from the open web, not the workspace's own configured
+  // sources or its own past performance.
+  if (trendSignalBlock) {
+    sections.push(trendSignalBlock);
+  }
+
   return sections.length ? sections.join('\n\n') : null;
 }
 
@@ -179,6 +188,7 @@ export async function runCreatorAgent(
   research?: ResearchResult | null,
   hook?: HookCandidate | null,
   optimizationContextBlock?: string | null,
+  trendSignalBlock?: string | null,
 ): Promise<{ content: string; error: string | null; model: string | null }> {
   let brandVoice = null as Awaited<ReturnType<typeof brandVoiceRepository.get>>;
   try {
@@ -187,7 +197,7 @@ export async function runCreatorAgent(
     // brand voice is optional
   }
 
-  const intelligenceContext = buildIntelligenceContextBlock(workspaceContext, strategy, research, contentText, hook, optimizationContextBlock);
+  const intelligenceContext = buildIntelligenceContextBlock(workspaceContext, strategy, research, contentText, hook, optimizationContextBlock, trendSignalBlock);
   const messages = buildCreatorMessages(plan, index, originalRequest, dialect, intelligenceContext);
   try {
     const result = await aiGateway.generate({
