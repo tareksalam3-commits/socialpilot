@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Sparkles, Mail, Lock, ArrowLeft } from 'lucide-react';
+import { Mail, Lock, ArrowLeft } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { Button, ErrorBanner } from '@/components/ui';
 
@@ -25,9 +25,11 @@ export function AuthScreen() {
     <div className="min-h-screen flex flex-col items-center justify-center px-6 safe-top safe-bottom bg-gradient-to-b from-ink-950 via-ink-960 to-ink-950">
       <div className="w-full max-w-sm animate-fade-in">
         <div className="flex flex-col items-center mb-10">
-          <div className="w-16 h-16 rounded-2xl bg-brand-500/15 border border-brand-500/30 flex items-center justify-center mb-4">
-            <Sparkles className="text-brand-400" size={32} />
-          </div>
+          <img
+            src="/socialpilot-icon-transparent.png"
+            alt="SocialPilot"
+            className="w-16 h-16 rounded-2xl object-cover shadow-lg shadow-black/25 mb-4"
+          />
           <h1 className="text-2xl font-bold text-ink-50">SocialPilot AI</h1>
           <p className="text-ink-400 text-sm mt-2 text-center">
             نظام ذكي لإدارة وتسويق المحتوى على السوشيال ميديا

@@ -1,0 +1,25 @@
+{
+  "name": "SocialPilot AI",
+  "short_name": "SocialPilot",
+  "description": "نظام ذكي لإدارة وتسويق المحتوى على السوشيال ميديا",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0b",
+  "theme_color": "#0a0a0b",
+  "dir": "rtl",
+  "lang": "ar",
+  "icons": [
+    {
+      "src": "/socialpilot-icon-transparent.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/socialpilot-icon-transparent.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
