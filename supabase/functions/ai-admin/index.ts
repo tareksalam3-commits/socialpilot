@@ -187,8 +187,47 @@ Deno.serve(async (req: Request) => {
   try {
     switch (body.action) {
       case 'list_providers': {
-        const { data } = await supabase.from('ai_providers').select('*').order('priority', { ascending: true });
-        return jsonRes(200, { providers: data ?? [] });
+        const providerNames: Record<string, string> = {
+          openrouter: 'OpenRouter',
+          huggingface: 'Hugging Face',
+          groq: 'Groq',
+          gemini: 'Google Gemini',
+          cerebras: 'Cerebras',
+          deepseek: 'DeepSeek',
+          together: 'Together AI',
+          fireworks: 'Fireworks AI',
+          mistral: 'Mistral',
+          anthropic: 'Anthropic Claude',
+          xai: 'xAI Grok',
+          cohere: 'Cohere',
+          openai: 'OpenAI',
+        };
+        const { data, error } = await supabase.from('ai_providers').select('*').order('priority', { ascending: true });
+        if (error) console.error('list_providers query failed:', error.message);
+        const rows = (data ?? []) as Array<Record<string, unknown>>;
+        const byKey = new Map(rows.map((row) => [String(row.provider_key), row]));
+        const providers = Object.entries(PROVIDER_CATALOG).map(([key, catalog], index) => {
+          const row = byKey.get(key) ?? {};
+          const status = row.status === 'connected' || row.status === 'error' ? row.status : 'not_configured';
+          return {
+            id: String(row.id ?? `catalog-${key}`),
+            provider_key: key,
+            display_name: String(row.display_name ?? providerNames[key] ?? key),
+            enabled: Boolean(row.enabled ?? false),
+            has_api_key: Boolean(row.has_api_key ?? false),
+            base_url: (row.base_url as string | null | undefined) ?? catalog.defaultBaseUrl,
+            priority: Number(row.priority ?? index + 1),
+            failover_enabled: Boolean(row.failover_enabled ?? true),
+            allow_paid: Boolean(row.allow_paid ?? true),
+            status,
+            last_test_at: (row.last_test_at as string | null | undefined) ?? null,
+            last_test_ok: (row.last_test_ok as boolean | null | undefined) ?? null,
+            last_error: (row.last_error as string | null | undefined) ?? null,
+            models_count: Number(row.models_count ?? 0),
+            healthy_models_count: Number(row.healthy_models_count ?? 0),
+          };
+        });
+        return jsonRes(200, { providers });
       }
 
       case 'list_models': {
