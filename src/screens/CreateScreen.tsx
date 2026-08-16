@@ -182,17 +182,15 @@ export function CreateScreen() {
             .eq('content_id', inserted.id)
             .order('created_at', { ascending: true });
           if (variants?.length) {
-            await supabase.from('calendar_items').upsert(
-              variants.map((variant, index) => ({
-                workspace_id: workspace.id,
-                content_id: inserted.id,
-                variant_id: variant.id,
-                platform: variant.platform,
-                scheduled_for: toScheduledIso(scheduledDates[index] ?? scheduledDates[scheduledDates.length - 1]),
-                status: 'planned',
-              })),
-              { onConflict: 'workspace_id,variant_id' },
-            );
+            for (const [index, variant] of variants.entries()) {
+              const scheduledFor = toScheduledIso(scheduledDates[index] ?? scheduledDates[scheduledDates.length - 1]);
+              const { error: scheduleError } = await supabase.rpc('schedule_content_variant', {
+                p_workspace_id: workspace.id,
+                p_variant_id: variant.id,
+                p_scheduled_for: scheduledFor,
+              });
+              if (scheduleError) throw scheduleError;
+            }
           }
           await supabase.from('content').update({ status: 'scheduled' }).eq('id', inserted.id).eq('workspace_id', workspace.id);
         }
@@ -200,6 +198,7 @@ export function CreateScreen() {
       setSaved(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'فشل حفظ المحتوى');
+      setMode('error');
     } finally {
       setSaving(false);
     }
@@ -266,19 +265,17 @@ export function CreateScreen() {
           });
         }
 
-        const { error: calendarError } = await supabase.from('calendar_items').upsert({
-          workspace_id: workspace.id,
-          content_id: inserted.id,
-          variant_id: variant.id,
-          platform: slot.platform,
-          scheduled_for: scheduledIso,
-          status: 'planned',
-        }, { onConflict: 'workspace_id,variant_id' });
+        const { error: calendarError } = await supabase.rpc('schedule_content_variant', {
+          p_workspace_id: workspace.id,
+          p_variant_id: variant.id,
+          p_scheduled_for: scheduledIso,
+        });
         if (calendarError) throw calendarError;
       }
       setPlanSaved(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'فشل حفظ خطة المحتوى');
+      setMode('error');
     } finally {
       setSavingPlan(false);
     }
