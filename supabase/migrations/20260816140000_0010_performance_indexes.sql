@@ -1,0 +1,16 @@
+CREATE INDEX IF NOT EXISTS idx_ai_runs_user_id ON public.ai_runs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON public.audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_content_id ON public.calendar_items(content_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_variant_id ON public.calendar_items(variant_id);
+CREATE INDEX IF NOT EXISTS idx_content_variants_workspace_id ON public.content_variants(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_post_insights_content_id ON public.post_insights(content_id);
+CREATE INDEX IF NOT EXISTS idx_post_insights_variant_id ON public.post_insights(variant_id);
+CREATE INDEX IF NOT EXISTS idx_post_insights_publishing_job_id ON public.post_insights(publishing_job_id);
+CREATE INDEX IF NOT EXISTS idx_publishing_jobs_calendar_item_id ON public.publishing_jobs(calendar_item_id);
+CREATE INDEX IF NOT EXISTS idx_publishing_jobs_variant_id ON public.publishing_jobs(variant_id);
+CREATE INDEX IF NOT EXISTS idx_quality_reviews_workspace_id ON public.quality_reviews(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_social_oauth_states_user_id ON public.social_oauth_states(user_id);
+CREATE INDEX IF NOT EXISTS idx_social_oauth_states_workspace_id ON public.social_oauth_states(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_members_user_id ON public.workspace_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_workspaces_owner_id ON public.workspaces(owner_id);

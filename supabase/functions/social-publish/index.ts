@@ -13,10 +13,10 @@ import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
 //      calendar_item (if scheduled), content.status, a notification, and
 //      an audit_log row.
 //
-// Only Telegram and X have a real posting implementation right now — same
-// scope as the rest of the app, where facebook/instagram/linkedin only
-// have the OAuth *connect* step built so far. Publishing to those returns
-// a clear "not supported yet" error instead of pretending to succeed.
+// Real posting helpers exist for Telegram, X, Facebook, Instagram, and
+// LinkedIn. Each platform still depends on valid OAuth scopes, account
+// metadata, and platform-side permissions; missing prerequisites return an
+// explicit error and never mark the job as successful.
 // ---------------------------------------------------------------------------
 
 const corsHeaders = {
@@ -46,7 +46,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   whatsapp: 'واتساب',
 };
 
-const SUPPORTED_PLATFORMS = new Set(['telegram', 'x']);
+const SUPPORTED_PLATFORMS = new Set(['telegram', 'x', 'facebook', 'instagram', 'linkedin']);
 
 type Variant = {
   id: string;
@@ -66,6 +66,19 @@ function buildPostText(variant: Variant, maxLen?: number): string {
   let text = parts.filter(Boolean).join('\n\n');
   if (maxLen && text.length > maxLen) text = text.slice(0, maxLen - 1) + '…';
   return text;
+}
+
+async function fetchWithRetry(input: string | URL, init: RequestInit, maxAttempts = 3): Promise<Response> {
+  let response: Response | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    response = await fetch(input, init);
+    const retryable = response.status === 429 || response.status >= 500;
+    if (response.ok || !retryable || attempt === maxAttempts) return response;
+    const retryAfter = Number(response.headers.get('retry-after') ?? 0);
+    const waitMs = Math.min(5_000, retryAfter > 0 ? retryAfter * 1_000 : 250 * (2 ** (attempt - 1)));
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  return response as Response;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +107,7 @@ async function publishToTelegram(variant: Variant, account: Record<string, unkno
     ? { chat_id: String(chatId), photo: imageUrl, caption: text.slice(0, 1024) }
     : { chat_id: String(chatId), text };
 
-  const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+  const res = await fetchWithRetry(`https://api.telegram.org/bot${botToken}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -129,7 +142,7 @@ async function getFreshXToken(accountId: string): Promise<string> {
   const { data: secretRow } = await supabase.from('social_platform_app_secrets').select('app_secret').eq('platform_key', 'x').maybeSingle();
   if (!app?.app_id || !secretRow?.app_secret) throw new Error('إعدادات ربط إكس غير مكتملة');
 
-  const res = await fetch('https://api.twitter.com/2/oauth2/token', {
+  const res = await fetchWithRetry('https://api.twitter.com/2/oauth2/token', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -155,11 +168,56 @@ async function getFreshXToken(accountId: string): Promise<string> {
   return json.access_token as string;
 }
 
+async function getStoredAccessToken(accountId: string): Promise<string> {
+  const { data: token } = await supabase.from('social_account_tokens').select('access_token,expires_at').eq('account_id', accountId).maybeSingle();
+  if (!token?.access_token) throw new Error('الحساب محتاج إعادة ربط');
+  if (token.expires_at && new Date(token.expires_at).getTime() < Date.now() + 60_000) {
+    await supabase.from('social_accounts').update({ status: 'expired', needs_reconnect: true }).eq('id', accountId);
+    throw new Error('انتهت صلاحية التوكن — أعد ربط الحساب');
+  }
+  return String(token.access_token);
+}
+
+async function publishToFacebook(variant: Variant, account: Record<string, unknown>): Promise<{ id: string; url: string | null }> {
+  const accessToken = await getStoredAccessToken(String(account.id));
+  const pageId = String(account.page_id ?? account.external_id ?? account.handle ?? '');
+  if (!pageId) throw new Error('لم يتم العثور على Page ID لفيسبوك');
+  const response = await fetchWithRetry(`https://graph.facebook.com/v20.0/${encodeURIComponent(pageId)}/feed`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: buildPostText(variant), access_token: accessToken }) });
+  const body = await response.json();
+  if (!response.ok || !body.id) throw new Error(body?.error?.message ?? 'فشل النشر على فيسبوك');
+  return { id: String(body.id), url: `https://www.facebook.com/${body.id}` };
+}
+
+async function publishToInstagram(variant: Variant, account: Record<string, unknown>): Promise<{ id: string; url: string | null }> {
+  const accessToken = await getStoredAccessToken(String(account.id));
+  const igId = String(account.ig_user_id ?? account.external_id ?? '');
+  const imageUrl = typeof variant.media_brief?.image_url === 'string' ? variant.media_brief.image_url as string : '';
+  if (!igId || !imageUrl) throw new Error('النشر على إنستجرام يحتاج image_url وInstagram Business Account');
+  const createResponse = await fetchWithRetry(`https://graph.facebook.com/v20.0/${encodeURIComponent(igId)}/media`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_url: imageUrl, caption: buildPostText(variant), access_token: accessToken }) });
+  const createBody = await createResponse.json();
+  if (!createResponse.ok || !createBody.id) throw new Error(createBody?.error?.message ?? 'فشل إنشاء منشور إنستجرام');
+  const publishResponse = await fetchWithRetry(`https://graph.facebook.com/v20.0/${encodeURIComponent(igId)}/media_publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ creation_id: createBody.id, access_token: accessToken }) });
+  const publishBody = await publishResponse.json();
+  if (!publishResponse.ok || !publishBody.id) throw new Error(publishBody?.error?.message ?? 'فشل نشر منشور إنستجرام');
+  return { id: String(publishBody.id), url: null };
+}
+
+async function publishToLinkedIn(variant: Variant, account: Record<string, unknown>): Promise<{ id: string; url: string | null }> {
+  const accessToken = await getStoredAccessToken(String(account.id));
+  const author = String((account.metadata as Record<string, unknown> | undefined)?.urn ?? `urn:li:person:${account.external_id ?? ''}`);
+  if (!author || author.endsWith(':')) throw new Error('لم يتم العثور على هوية LinkedIn');
+  const response = await fetchWithRetry('https://api.linkedin.com/v2/ugcPosts', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'X-Restli-Protocol-Version': '2.0', 'LinkedIn-Version': '202401' }, body: JSON.stringify({ author, lifecycleState: 'PUBLISHED', specificContent: { 'com.linkedin.ugc.ShareContent': { shareCommentary: { text: buildPostText(variant) }, shareMediaCategory: 'NONE' } }, visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' } }) });
+  const body = await response.json().catch(() => ({}));
+  const postId = response.headers.get('x-restli-id') ?? body.id;
+  if (!response.ok || !postId) throw new Error(body?.message ?? 'فشل النشر على لينكدإن');
+  return { id: String(postId), url: null };
+}
+
 async function publishToX(variant: Variant, account: Record<string, unknown>): Promise<{ id: string; url: string | null }> {
   const accessToken = await getFreshXToken(String(account.id));
   const text = buildPostText(variant, 280);
 
-  const res = await fetch('https://api.twitter.com/2/tweets', {
+  const res = await fetchWithRetry('https://api.twitter.com/2/tweets', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({ text }),
@@ -238,6 +296,9 @@ Deno.serve(async (req: Request) => {
   if (existingJob?.status === 'succeeded') {
     return jsonRes(200, { ok: true, alreadyPublished: true, job: existingJob });
   }
+  if (existingJob && Number(existingJob.attempts ?? 0) >= Number(existingJob.max_attempts ?? 3)) {
+    return jsonRes(409, { error: 'تم الوصول إلى الحد الأقصى لمحاولات النشر؛ أعد ربط الحساب أو أنشئ محاولة جديدة.', job: existingJob });
+  }
 
   let job = existingJob;
   if (job) {
@@ -263,7 +324,14 @@ Deno.serve(async (req: Request) => {
       })
       .select()
       .single();
-    if (insertError || !inserted) return jsonRes(500, { error: 'تعذّر إنشاء مهمة النشر' });
+    if (insertError || !inserted) {
+      if (insertError?.code === '23505') {
+        const { data: racedJob } = await supabase.from('publishing_jobs').select('*').eq('idempotency_key', idempotencyKey).maybeSingle();
+        if (racedJob?.status === 'succeeded') return jsonRes(200, { ok: true, alreadyPublished: true, job: racedJob });
+        if (racedJob) return jsonRes(409, { error: 'توجد محاولة نشر جارية لنفس المحتوى؛ أعد المحاولة بعد لحظات.', job: racedJob });
+      }
+      return jsonRes(500, { error: 'تعذّر إنشاء مهمة النشر' });
+    }
     job = inserted;
   }
 
@@ -274,11 +342,22 @@ Deno.serve(async (req: Request) => {
   try {
     const result = platform === 'telegram'
       ? await publishToTelegram(variant as Variant, account)
-      : await publishToX(variant as Variant, account);
+      : platform === 'x'
+        ? await publishToX(variant as Variant, account)
+        : platform === 'facebook'
+          ? await publishToFacebook(variant as Variant, account)
+          : platform === 'instagram'
+            ? await publishToInstagram(variant as Variant, account)
+            : await publishToLinkedIn(variant as Variant, account);
 
+    const publishedAt = new Date().toISOString();
     await supabase.from('publishing_jobs').update({
       status: 'succeeded',
-      completed_at: new Date().toISOString(),
+      completed_at: publishedAt,
+      published_at: publishedAt,
+      last_attempt_at: publishedAt,
+      external_post_id: result.id,
+      platform,
       last_error: null,
       result: { platform, post_id: result.id, url: result.url },
     }).eq('id', job.id);
@@ -313,6 +392,7 @@ Deno.serve(async (req: Request) => {
 
     await supabase.from('publishing_jobs').update({
       status: 'failed',
+      last_attempt_at: new Date().toISOString(),
       last_error: message,
     }).eq('id', job.id);
 

@@ -5,11 +5,28 @@ import { useAuth } from '@/lib/auth';
 import { callAiGateway } from '@/lib/api';
 import { Button, Card, ErrorBanner, Spinner, Badge } from '@/components/ui';
 import { PLATFORM_META } from '@/lib/constants';
+import { parseIntent, scheduleDates, DEFAULT_SCHEDULE_HOUR } from '@/lib/intent';
 import type { GeneratedContent, ContentPlan } from '@/lib/types';
 
 type Mode = 'idle' | 'thinking' | 'content' | 'plan' | 'advice' | 'error';
 
 type ChatTurn = { role: 'user' | 'ai'; text: string };
+
+function toScheduledIso(date: string): string {
+  return `${date}T${String(DEFAULT_SCHEDULE_HOUR).padStart(2, '0')}:00:00.000Z`;
+}
+
+function qualityStatusOf(verdict: string | undefined): 'pending' | 'passed' | 'needs_improvement' | 'failed' {
+  if (verdict === 'pass') return 'passed';
+  if (verdict === 'fail') return 'failed';
+  if (verdict === 'review') return 'needs_improvement';
+  return 'pending';
+}
+
+function averageScore(scores: Record<string, number> | undefined): number | null {
+  const values = Object.values(scores ?? {}).filter((v): v is number => typeof v === 'number');
+  return values.length > 0 ? Math.round(values.reduce((sum, v) => sum + v, 0) / values.length) : null;
+}
 
 const SUGGESTIONS = [
   'اكتبلي بوست قوي عن التأمين',
@@ -30,6 +47,8 @@ export function CreateScreen() {
   const [copied, setCopied] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [planSaved, setPlanSaved] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -46,18 +65,38 @@ export function CreateScreen() {
     setPlan(null);
     setAdvice(null);
     setSaved(false);
+    setPlanSaved(false);
     setChat((prev) => [...prev, { role: 'user', text: message }]);
     setMode('thinking');
 
-    // Intent detection — the orchestrator on the server side handles detailed routing,
-    // but we do lightweight classification here for UI mode selection.
-    const intent = classifyIntent(message);
+    const parsed = parseIntent(message);
+    const intent = parsed.intent;
 
     try {
+      const { data: recentInsights } = await supabase
+        .from('post_insights')
+        .select('metric,value,platform,timestamp')
+        .eq('workspace_id', workspace.id)
+        .order('timestamp', { ascending: false })
+        .limit(200);
+      const performance = (recentInsights ?? []).reduce<Record<string, number>>((summary, row) => {
+        const key = `${row.platform}:${row.metric}`;
+        summary[key] = (summary[key] ?? 0) + Number(row.value ?? 0);
+        return summary;
+      }, {});
       const res = await callAiGateway({
         intent,
         workspaceId: workspace.id,
         message,
+        platforms: parsed.platforms.length > 0 ? parsed.platforms : undefined,
+        context: {
+          post_count: parsed.postCount,
+          start_date: parsed.startDate,
+          end_date: parsed.endDate,
+          frequency: parsed.frequency,
+          schedule: parsed.schedule,
+          performance,
+        },
       });
 
       setChat((prev) => [...prev, { role: 'ai', text: summarizeResult(res.result, intent) }]);
@@ -101,7 +140,10 @@ export function CreateScreen() {
         .single();
 
       if (inserted && content.variants.length > 0) {
-        await supabase.from('content_variants').insert(
+        const userTurns = chat.filter((turn) => turn.role === 'user');
+        const parsed = parseIntent(userTurns[userTurns.length - 1]?.text ?? '');
+        const scheduledDates = scheduleDates(parsed, content.variants.length);
+        const { data: insertedVariants, error: variantsError } = await supabase.from('content_variants').insert(
           content.variants.map((v) => ({
             content_id: inserted.id,
             workspace_id: workspace.id,
@@ -110,14 +152,135 @@ export function CreateScreen() {
             hashtags: v.hashtags,
             cta: v.cta,
             media_brief: v.media_brief,
+            status: 'review',
           }))
-        );
+        ).select('id, platform');
+        if (variantsError) throw variantsError;
+
+        const quality = content.quality;
+        if (quality && insertedVariants?.length) {
+          const scoreValues = Object.values(quality.scores).filter((score): score is number => typeof score === 'number');
+          const qualityScore = scoreValues.length > 0 ? Math.round(scoreValues.reduce((sum, score) => sum + score, 0) / scoreValues.length) : null;
+          await supabase.from('quality_reviews').insert(insertedVariants.map((variant) => ({
+            variant_id: variant.id,
+            workspace_id: workspace.id,
+            verdict: quality.verdict,
+            scores: quality.scores,
+            reasons: [...quality.reasons, ...(quality.suggested_improvements ?? [])],
+            fixes_applied: 0,
+          })));
+          await supabase.from('content').update({
+            quality_score: qualityScore,
+            quality_status: quality.verdict === 'pass' ? 'passed' : quality.verdict === 'fail' ? 'failed' : 'needs_improvement',
+          }).eq('id', inserted.id).eq('workspace_id', workspace.id);
+        }
+
+        if (scheduledDates.length > 0) {
+          const { data: variants } = await supabase
+            .from('content_variants')
+            .select('id, platform')
+            .eq('content_id', inserted.id)
+            .order('created_at', { ascending: true });
+          if (variants?.length) {
+            await supabase.from('calendar_items').upsert(
+              variants.map((variant, index) => ({
+                workspace_id: workspace.id,
+                content_id: inserted.id,
+                variant_id: variant.id,
+                platform: variant.platform,
+                scheduled_for: toScheduledIso(scheduledDates[index] ?? scheduledDates[scheduledDates.length - 1]),
+                status: 'planned',
+              })),
+              { onConflict: 'workspace_id,variant_id' },
+            );
+          }
+          await supabase.from('content').update({ status: 'scheduled' }).eq('id', inserted.id).eq('workspace_id', workspace.id);
+        }
       }
       setSaved(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'فشل حفظ المحتوى');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function savePlan() {
+    if (!plan || !workspace || plan.slots.length === 0) return;
+    setSavingPlan(true);
+    setError(null);
+    try {
+      const batchId = crypto.randomUUID();
+      for (const slot of plan.slots) {
+        const body = slot.content?.trim() || slot.title;
+        const scheduledIso = toScheduledIso(slot.date);
+        const qualityStatus = qualityStatusOf(slot.quality?.verdict);
+        const qualityScore = averageScore(slot.quality?.scores);
+
+        const { data: inserted, error: contentError } = await supabase
+          .from('content')
+          .insert({
+            workspace_id: workspace.id,
+            batch_id: batchId,
+            title: slot.title,
+            goal: slot.goal || plan.theme,
+            topic: plan.theme,
+            master_text: body,
+            platforms: [slot.platform],
+            status: 'scheduled',
+            scheduled_at: scheduledIso,
+            quality_score: qualityScore,
+            quality_status: qualityStatus,
+          })
+          .select('id')
+          .single();
+        if (contentError || !inserted) throw contentError ?? new Error('فشل إنشاء عنصر الخطة');
+
+        const { data: variant, error: variantError } = await supabase
+          .from('content_variants')
+          .insert({
+            content_id: inserted.id,
+            workspace_id: workspace.id,
+            platform: slot.platform,
+            text: body,
+            hashtags: slot.hashtags ?? [],
+            cta: slot.cta ?? null,
+            media_brief: {},
+            status: 'review',
+            scheduled_at: scheduledIso,
+            quality_score: qualityScore,
+            quality_status: qualityStatus,
+          })
+          .select('id')
+          .single();
+        if (variantError || !variant) throw variantError ?? new Error('فشل إنشاء نسخة المنصة');
+
+        if (slot.quality) {
+          await supabase.from('quality_reviews').insert({
+            variant_id: variant.id,
+            workspace_id: workspace.id,
+            verdict: slot.quality.verdict,
+            scores: slot.quality.scores,
+            reasons: [...(slot.quality.reasons ?? []), ...(slot.quality.suggested_improvements ?? [])],
+            fixes_applied: 0,
+          });
+        }
+
+        const { error: calendarError } = await supabase.from('calendar_items').upsert({
+          workspace_id: workspace.id,
+          content_id: inserted.id,
+          variant_id: variant.id,
+          platform: slot.platform,
+          scheduled_for: scheduledIso,
+          status: 'planned',
+        }, { onConflict: 'workspace_id,variant_id' });
+        if (calendarError) throw calendarError;
+      }
+      setPlanSaved(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'فشل حفظ خطة المحتوى');
+    } finally {
+      setSavingPlan(false);
     }
   }
 
@@ -210,6 +373,8 @@ export function CreateScreen() {
               <p className="text-ink-400 text-sm">{content.master_text}</p>
             </Card>
 
+            {content.quality && <SingleContentQuality quality={content.quality} />}
+
             <p className="text-ink-500 text-xs px-1">نسخ المنصات ({content.variants.length})</p>
             {content.variants.map((v, i) => {
               const meta = PLATFORM_META[v.platform as keyof typeof PLATFORM_META];
@@ -258,17 +423,38 @@ export function CreateScreen() {
                 <p className="text-ink-100 font-medium">خطة المحتوى: {plan.theme}</p>
               </div>
             </Card>
-            {plan.slots.map((slot, i) => (
-              <Card key={i}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-ink-100 text-sm">{slot.title}</p>
-                    <p className="text-ink-500 text-xs mt-1">{slot.date}</p>
+            <p className="text-ink-500 text-xs px-1">المنشورات ({plan.slots.length})</p>
+            {plan.slots.map((slot, i) => {
+              const meta = PLATFORM_META[slot.platform as keyof typeof PLATFORM_META];
+              const qStatus = qualityStatusOf(slot.quality?.verdict);
+              const qColor = qStatus === 'passed' ? 'brand' : qStatus === 'failed' ? 'danger' : 'accent';
+              const qLabel = qStatus === 'passed' ? 'جاهز' : qStatus === 'failed' ? 'مرفوض' : qStatus === 'needs_improvement' ? 'يحتاج تحسين' : 'قيد التقييم';
+              return (
+                <Card key={i}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Badge color="brand">{meta?.label ?? slot.platform}</Badge>
+                      <span className="text-ink-500 text-xs">{slot.date}</span>
+                    </div>
+                    <Badge color={qColor}>{qLabel}{typeof averageScore(slot.quality?.scores) === 'number' ? ` · ${averageScore(slot.quality?.scores)}` : ''}</Badge>
                   </div>
-                  <Badge color="brand">{slot.platform}</Badge>
-                </div>
-              </Card>
-            ))}
+                  <p className="text-ink-100 text-sm font-medium">{slot.title}</p>
+                  {slot.content && <p className="text-ink-400 text-xs mt-1 whitespace-pre-wrap leading-relaxed">{slot.content}</p>}
+                  {slot.quality?.reasons && slot.quality.reasons.length > 0 && qStatus !== 'passed' && (
+                    <p className="text-ink-500 text-xs mt-2">ملاحظات: {slot.quality.reasons.join('، ')}</p>
+                  )}
+                </Card>
+              );
+            })}
+            {planSaved ? (
+              <div className="flex items-center justify-center gap-2 py-3 text-brand-400">
+                <Check size={18} /> <span className="text-sm">تم حفظ الخطة وربطها بالتقويم</span>
+              </div>
+            ) : (
+              <Button onClick={savePlan} disabled={savingPlan} size="lg">
+                {savingPlan ? 'جارٍ حفظ الخطة...' : 'حفظ الخطة في المحتوى والتقويم'}
+              </Button>
+            )}
           </div>
         )}
 
@@ -307,13 +493,48 @@ export function CreateScreen() {
   );
 }
 
-function classifyIntent(message: string): 'create_content' | 'create_content_plan' | 'suggest_ideas' | 'analyze_performance' | 'general_advice' {
-  const m = message.toLowerCase();
-  if (/خطة|plan|جدول|الأسبوع|الشهر|schedule/.test(m)) return 'create_content_plan';
-  if (/بوست|اكتب|محتوى|post|write|content/.test(m)) return 'create_content';
-  if (/أفكار|اقترح|ideas|suggest/.test(m)) return 'suggest_ideas';
-  if (/أداء|تحليل|analyze|performance|حلل/.test(m)) return 'analyze_performance';
-  return 'general_advice';
+function SingleContentQuality({
+  quality,
+}: {
+  quality: NonNullable<GeneratedContent['quality']>;
+}) {
+  const status = qualityStatusOf(quality.verdict);
+  const score = averageScore(quality.scores);
+  const badgeColor = status === 'passed' ? 'brand' : status === 'failed' ? 'danger' : 'warning';
+  const label = status === 'passed' ? 'اجتاز المراجعة' : status === 'failed' ? 'فشل المراجعة' : 'يحتاج تحسين';
+  const reasons = quality.reasons ?? [];
+  const suggestions = quality.suggested_improvements ?? [];
+
+  return (
+    <Card className="border-brand-500/20">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div>
+          <p className="text-ink-200 text-sm font-medium">مراجعة الجودة</p>
+          <p className="text-ink-500 text-xs mt-1">تقييم آلي قبل الحفظ والاعتماد</p>
+        </div>
+        <Badge color={badgeColor}>{label}{typeof score === 'number' ? ` · ${score}/100` : ''}</Badge>
+      </div>
+      {reasons.length > 0 && (
+        <div className="mb-3">
+          <p className="text-ink-400 text-xs mb-1">المشكلات الرئيسية</p>
+          <ul className="flex flex-col gap-1 text-ink-300 text-xs list-disc pr-4">
+            {reasons.map((reason, index) => <li key={`${reason}-${index}`}>{reason}</li>)}
+          </ul>
+        </div>
+      )}
+      {suggestions.length > 0 && (
+        <div>
+          <p className="text-ink-400 text-xs mb-1">التحسينات المقترحة</p>
+          <ul className="flex flex-col gap-1 text-accent-300 text-xs list-disc pr-4">
+            {suggestions.map((suggestion, index) => <li key={`${suggestion}-${index}`}>{suggestion}</li>)}
+          </ul>
+        </div>
+      )}
+      {reasons.length === 0 && suggestions.length === 0 && (
+        <p className="text-ink-500 text-xs">لم تُرجع المراجعة ملاحظات إضافية.</p>
+      )}
+    </Card>
+  );
 }
 
 function summarizeResult(result: Record<string, unknown>, intent: string): string {

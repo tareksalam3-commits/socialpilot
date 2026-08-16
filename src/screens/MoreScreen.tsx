@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Settings, Brain, Link2, LogOut, Shield, TrendingUp, ChevronLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
@@ -47,11 +47,11 @@ export function MoreScreen() {
   const [telegramInput, setTelegramInput] = useState('');
   const [telegramBusy, setTelegramBusy] = useState(false);
 
-  async function loadAccounts() {
+  const loadAccounts = useCallback(async () => {
     if (!workspace) return;
     const { data } = await supabase.from('social_accounts').select('*').eq('workspace_id', workspace.id);
     setAccounts((data as SocialAccount[]) ?? []);
-  }
+  }, [workspace]);
 
   useEffect(() => {
     if (!workspace) return;
@@ -60,7 +60,7 @@ export function MoreScreen() {
       const dna = await supabase.from('brand_dna').select('*').eq('workspace_id', workspace.id).maybeSingle();
       setBrandDna(dna.data as BrandDna | null);
     })();
-  }, [workspace]);
+  }, [workspace, loadAccounts]);
 
   useEffect(() => {
     checkIsSuperAdmin().then(setIsSuperAdmin);

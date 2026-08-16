@@ -179,16 +179,31 @@ async function assembleContext(workspaceId: string, intent: Intent): Promise<{
 function brandContextString(brand: Record<string, unknown> | null): string {
   if (!brand) return 'لا يوجد Brand DNA بعد.';
   const parts: string[] = [];
-  const basics = brand.basics as Record<string, string> | undefined;
-  if (basics) parts.push(`البراند: ${basics.name ?? 'غير معروف'} — ${basics.description ?? ''}`);
+  const basics = brand.basics as Record<string, unknown> | undefined;
+  if (basics) parts.push(`البراند: ${String(basics.name ?? 'غير معروف')} — ${String(basics.description ?? '')}`);
   const identity = brand.identity as Record<string, unknown> | undefined;
-  if (identity) parts.push(`الهوية: ${JSON.stringify(identity)}`);
+  if (identity) parts.push(`الهوية والقيم: ${JSON.stringify(identity)}`);
   const tone = brand.tone as Record<string, unknown> | undefined;
-  if (tone) parts.push(`النبرة: ${JSON.stringify(tone)}`);
+  if (tone) parts.push(`النبرة والصوت: ${JSON.stringify(tone)}`);
   const audience = brand.audience as Record<string, unknown> | undefined;
   if (audience) parts.push(`الجمهور: ${JSON.stringify(audience)}`);
   const content = brand.content as Record<string, unknown> | undefined;
-  if (content) parts.push(`المحتوى: ${JSON.stringify(content)}`);
+  if (content) parts.push(`محاور المحتوى: ${JSON.stringify(content)}`);
+  const visual = brand.visual as Record<string, unknown> | undefined;
+  if (visual) parts.push(`الهوية البصرية: ${JSON.stringify(visual)}`);
+
+  const positioning = brand.positioning ?? identity?.positioning;
+  if (positioning) parts.push(`التموضع الإلزامي: ${String(positioning)}`);
+  const preferred = Array.isArray(brand.preferred_phrases)
+    ? brand.preferred_phrases
+    : Array.isArray(tone?.preferred_phrases) ? tone.preferred_phrases : [];
+  if (preferred.length > 0) parts.push(`عبارات مفضلة: ${preferred.join('، ')}`);
+  const forbidden = Array.isArray(brand.forbidden_phrases)
+    ? brand.forbidden_phrases
+    : Array.isArray(tone?.forbidden_phrases) ? tone.forbidden_phrases : [];
+  if (forbidden.length > 0) parts.push(`عبارات ممنوعة: ${forbidden.join('، ')}`);
+  const ctaStyle = brand.cta_style ?? (content?.cta_style ?? tone?.cta_style);
+  if (ctaStyle) parts.push(`أسلوب CTA: ${String(ctaStyle)}`);
   return parts.join('\n');
 }
 
@@ -213,12 +228,14 @@ const AGENTS = {
     `أنت Content Creator Agent متخصص في كتابة محتوى تسويقي عربي قوي وجذاب.
 اكتب محتوى أصلي، طبيعي، وقريب من القارئ. تجنب المقدمات الطويلة العامة.
 لكل منصة، اكتب نسخة مخصصة: نبرة، طول، هاشتاجات، CTA، وفورمات يناسب المنصة.
-لا تكرر نفس النص عبر المنصات. التزم بهوية البراند.
+لا تكرر نفس النص عبر المنصات. التزم بهوية البراند، واستخدم العبارات المفضلة فقط، وتجنب العبارات الممنوعة حرفيًا.
+عند وجود بيانات أداء سابقة، غيّر الاختيارات الفعلية في الخطاف والموضوع والـ CTA بما يتناسب مع المؤشرات الأفضل، ولا تكتفِ بذكر الأرقام.
 سياق البراند:\n${brandStr}\nالذاكرة:\n${memStr}`,
 
   strategy_planner: (brandStr: string, memStr: string) =>
     `أنت Strategy & Planner Agent. مهمتك بناء خطة محتوى أسبوعية/شهرية مبنية على البراند والجمهور.
 حدد محاور، مواضيع، منصات، وأوقات مقترحة. اجعل الخطة قابلة للتنفيذ.
+إذا وُجدت بيانات أداء سابقة، اجعلها تؤثر في توزيع المحاور والمنصات والأوقات والـ CTA بدل إعادة خطة عامة.
 سياق البراند:\n${brandStr}\nالذاكرة:\n${memStr}`,
 
   quality_engine: () =>
@@ -289,7 +306,8 @@ async function executeIntent(
   intent: Intent,
   message: string,
   ctx: { brand: Record<string, unknown> | null; memory: { key: string; value: string; type: string }[] },
-  platforms: string[]
+  platforms: string[],
+  runtimeContext: Record<string, unknown> = {},
 ): Promise<{ result: Record<string, unknown>; tokensIn: number; tokensOut: number; meta: ExecutionMeta }> {
   const brandStr = brandContextString(ctx.brand);
   const memStr = memoryContextString(ctx.memory);
@@ -298,7 +316,8 @@ async function executeIntent(
     case 'generate_brand_dna': {
       const sys = AGENTS.brand_intelligence(message);
       const prompt = `بناءً على هذه المعلومات الأساسية، ابنِ هوية براند كاملة بصيغة JSON تحتوي على مفاتيح:
-identity, tone, audience, content, visual, platforms, summary.
+identity, tone, audience, content, visual, positioning, preferred_phrases, forbidden_phrases, cta_style, platforms, summary.
+preferred_phrases و forbidden_phrases يجب أن تكونا مصفوفتين من عبارات قصيرة، وcta_style وpositioning نصين واضحين.
 المعلومات الأساسية: ${message}
 أرجع JSON فقط بدون نص إضافي.`;
       const r = await callLLM(intent, sys, prompt, true);
@@ -311,6 +330,7 @@ identity, tone, audience, content, visual, platforms, summary.
       const sys = AGENTS.content_creator(brandStr, memStr);
       const prompt = `اكتب محتوى للطلب التالي: "${message}"
 المنصات المطلوبة: ${plats}
+بيانات الأداء السابقة التي يجب التعلم منها إن وُجدت: ${JSON.stringify(runtimeContext.performance ?? {})}
 أرجع JSON بصيغة:
 {
   "title": "...",
@@ -326,29 +346,133 @@ identity, tone, audience, content, visual, platforms, summary.
 أرجع JSON فقط. كل نسخة منصة يجب أن تكون مخصصة وغير مكررة.`;
       const r = await callLLM(intent, sys, prompt, true);
       const parsed = parseJsonLoose<Record<string, unknown>>(r.content, (raw) => ({ master_text: raw, variants: [] }));
-      return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };
+
+      const qualityPrompt = `قيّم المحتوى التالي وفق المعايير: Hook, Clarity, Brand Fit, Brand Voice, Platform Fit, Engagement Potential, CTA, Readability, Structure, Originality, Overall Score.\nأرجع JSON فقط بصيغة { "verdict": "pass|review|fail", "scores": { "hook": 0 }, "reasons": [], "suggested_improvements": [] }.\nالمحتوى: ${JSON.stringify(parsed)}`;
+      const qualityRun = await callLLM(intent, AGENTS.quality_engine(), qualityPrompt, true);
+      const quality = parseJsonLoose<Record<string, unknown>>(qualityRun.content, () => ({ verdict: 'review', scores: {}, reasons: ['تعذر تحليل الجودة'], suggested_improvements: [] }));
+      return {
+        result: { ...parsed, quality },
+        tokensIn: r.tokensIn + qualityRun.tokensIn,
+        tokensOut: r.tokensOut + qualityRun.tokensOut,
+        meta: { ...r, fallbackCount: r.fallbackCount + qualityRun.fallbackCount, fallbackLog: [...r.fallbackLog, ...qualityRun.fallbackLog] },
+      };
     }
 
     case 'create_content_plan': {
+      // --- Deterministic slot skeleton: count/dates/platforms come from the
+      // Intent Engine (frontend), NOT from the model, so the batch always has
+      // exactly the number of posts the user asked for. ---
+      const scheduleDates = (runtimeContext.schedule as { dates?: string[] } | undefined)?.dates ?? [];
+      const requestedCount = Math.max(1, Number(runtimeContext.post_count ?? scheduleDates.length) || scheduleDates.length || 1);
+      const plats = platforms.length > 0 ? platforms : ['linkedin', 'facebook', 'instagram'];
+      const today = new Date().toISOString().slice(0, 10);
+      const slotDates = scheduleDates.length > 0
+        ? Array.from({ length: requestedCount }, (_, i) => scheduleDates[Math.min(i, scheduleDates.length - 1)])
+        : Array.from({ length: requestedCount }, () => today);
+      const skeletons = slotDates.map((date, i) => ({ date, platform: plats[i % plats.length] }));
+
       const sys = AGENTS.strategy_planner(brandStr, memStr);
       const prompt = `الطلب: "${message}"
-ابنِ خطة محتوى بصيغة JSON:
+اكتب محتوى فعلي كامل (وليس عنوانًا فقط) لكل فترة من الفترات التالية، بنفس الترتيب والعدد بالضبط (${skeletons.length} فترة):
+${JSON.stringify(skeletons)}
+بيانات الأداء السابقة التي يجب أن تؤثر على اختيار المحاور: ${JSON.stringify(runtimeContext.performance ?? {})}
+هدف المحتوى (إن وُجد): ${runtimeContext.content_goal ?? 'غير محدد'}
+أرجع JSON فقط بصيغة:
 {
   "theme": "...",
   "slots": [
-    { "date": "YYYY-MM-DD", "platform": "linkedin", "title": "..." }
+    { "date": "YYYY-MM-DD", "platform": "...", "title": "...", "content": "النص الكامل للمنشور", "goal": "...", "hashtags": ["..."], "cta": "..." }
   ]
 }
-اقترح 5-7 فترات. أرجع JSON فقط.`;
+كل "content" نص كامل أصلي مخصص لمنصته، ولا تكرر نفس النص بين الفترات. أرجع JSON فقط.`;
       const r = await callLLM(intent, sys, prompt, true);
-      const parsed = parseJsonLoose<Record<string, unknown>>(r.content, () => ({ theme: message, slots: [] }));
-      return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };
+      const parsed = parseJsonLoose<{ theme?: string; slots?: Array<Record<string, unknown>> }>(r.content, () => ({ theme: message, slots: [] }));
+      const rawSlots = Array.isArray(parsed.slots) ? parsed.slots : [];
+
+      type Slot = { date: string; platform: string; title: string; content: string; goal?: string; content_type?: string; hashtags: string[]; cta?: string };
+      const slots: Slot[] = skeletons.map((skeleton, i) => {
+        const s = rawSlots[i] ?? {};
+        return {
+          date: skeleton.date,
+          platform: skeleton.platform,
+          title: String(s.title ?? `منشور ${i + 1}`),
+          content: String(s.content ?? s.body ?? s.title ?? ''),
+          goal: s.goal ? String(s.goal) : (runtimeContext.content_goal as string | undefined),
+          content_type: runtimeContext.content_type as string | undefined,
+          hashtags: Array.isArray(s.hashtags) ? (s.hashtags as string[]) : [],
+          cta: s.cta ? String(s.cta) : undefined,
+        };
+      });
+
+      // --- Quality Engine pass (batched), with one bounded improve+recheck round ---
+      let tokensIn = r.tokensIn;
+      let tokensOut = r.tokensOut;
+      let fallbackCount = r.fallbackCount;
+      let fallbackLog = r.fallbackLog;
+
+      const runQuality = async (items: Slot[]): Promise<Record<string, unknown>[]> => {
+        if (items.length === 0) return [];
+        const qPrompt = `قيّم كل عنصر من عناصر المحتوى التالية وفق: Hook, Clarity, Brand Fit, Brand Voice, Platform Fit, Engagement Potential, CTA, Readability, Structure, Originality, Overall Score.
+أرجع JSON فقط بصيغة مصفوفة بنفس الترتيب والعدد (${items.length} عنصر):
+[{ "verdict": "pass|review|fail", "scores": { "hook": 0 }, "reasons": [], "suggested_improvements": [] }]
+المحتوى: ${JSON.stringify(items.map((s) => ({ platform: s.platform, title: s.title, content: s.content })))}`;
+        const run = await callLLM(intent, AGENTS.quality_engine(), qPrompt, true);
+        tokensIn += run.tokensIn; tokensOut += run.tokensOut;
+        fallbackCount += run.fallbackCount; fallbackLog = [...fallbackLog, ...run.fallbackLog];
+        const arr = parseJsonLoose<Array<Record<string, unknown>>>(run.content, () => []);
+        return items.map((_, i) => (Array.isArray(arr) ? arr[i] : undefined) ?? { verdict: 'review', scores: {}, reasons: ['تعذر تحليل الجودة'], suggested_improvements: [] });
+      };
+
+      const qualities = await runQuality(slots);
+      const MAX_IMPROVEMENT_ROUNDS = 1; // hard cap to prevent infinite improve/recheck loops
+      for (let round = 0; round < MAX_IMPROVEMENT_ROUNDS; round++) {
+        const needsWork = slots
+          .map((slot, i) => ({ slot, i, q: qualities[i] as { verdict?: string; reasons?: string[]; suggested_improvements?: string[] } }))
+          .filter(({ q }) => q?.verdict !== 'pass');
+        if (needsWork.length === 0) break;
+
+        const improvePrompt = `حسّن عناصر المحتوى التالية بناءً على ملاحظات الجودة، مع الحفاظ على المنصة والموضوع الأساسي لكل عنصر.
+أرجع JSON فقط بصيغة مصفوفة بنفس العدد والترتيب (${needsWork.length} عنصر): [{ "title": "...", "content": "...", "hashtags": [], "cta": "..." }]
+العناصر وملاحظاتها: ${JSON.stringify(needsWork.map(({ slot, q }) => ({ platform: slot.platform, title: slot.title, content: slot.content, issues: q.reasons ?? [], suggestions: q.suggested_improvements ?? [] })))}`;
+        const improveRun = await callLLM(intent, AGENTS.content_creator(brandStr, memStr), improvePrompt, true);
+        tokensIn += improveRun.tokensIn; tokensOut += improveRun.tokensOut;
+        fallbackCount += improveRun.fallbackCount; fallbackLog = [...fallbackLog, ...improveRun.fallbackLog];
+        const improved = parseJsonLoose<Array<Record<string, unknown>>>(improveRun.content, () => []);
+
+        needsWork.forEach(({ i }, idx) => {
+          const upd = Array.isArray(improved) ? improved[idx] : undefined;
+          if (upd) {
+            slots[i] = {
+              ...slots[i],
+              title: String(upd.title ?? slots[i].title),
+              content: String(upd.content ?? slots[i].content),
+              hashtags: Array.isArray(upd.hashtags) ? (upd.hashtags as string[]) : slots[i].hashtags,
+              cta: upd.cta ? String(upd.cta) : slots[i].cta,
+            };
+          }
+        });
+
+        const recheck = await runQuality(needsWork.map(({ i }) => slots[i]));
+        needsWork.forEach(({ i }, idx) => { qualities[i] = recheck[idx]; });
+      }
+
+      const finalSlots = slots.map((slot, i) => ({ ...slot, quality: qualities[i] }));
+
+      return {
+        result: { theme: String(parsed.theme ?? message), slots: finalSlots },
+        tokensIn,
+        tokensOut,
+        meta: { provider: r.provider, model: r.model, fallbackCount, fallbackLog },
+      };
     }
 
     case 'analyze_performance': {
       const sys = AGENTS.analytics_advisor(brandStr);
       const prompt = `الطلب: "${message}"
-حلل الأداء واقترح قرارات عملية بصيغة JSON: { "advice": "..." }`;
+بيانات الأداء الحقيقية للفترة: ${JSON.stringify(runtimeContext.performance ?? {})}
+أفضل منصة محسوبة: ${String(runtimeContext.best_platform ?? 'غير محدد')}
+عدد أيام الفترة: ${String(runtimeContext.range_days ?? 'غير محدد')}
+حلل المؤشرات الواردة، واذكر ما الذي يجب تغييره فعليًا في الموضوع والمنصة والتوقيت والـ CTA. لا تكتفِ بوصف الأرقام. أرجع JSON بصيغة: { "advice": "..." }`;
       const r = await callLLM(intent, sys, prompt, true);
       const parsed = parseJsonLoose<Record<string, unknown>>(r.content, (raw) => ({ advice: raw }));
       return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };
@@ -391,7 +515,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = (await req.json()) as RequestBody;
-    const { intent, workspaceId, message, platforms } = body;
+    const { intent, workspaceId, message, platforms, context } = body;
 
     if (!intent || !workspaceId || !message) {
       return jsonError(400, 'intent, workspaceId, and message are required');
@@ -426,7 +550,7 @@ Deno.serve(async (req: Request) => {
     try {
       const ctx = await assembleContext(workspaceId, intent);
       const plats = platforms ?? [];
-      const { result, tokensIn, tokensOut, meta } = await executeIntent(intent, message, ctx, plats);
+      const { result, tokensIn, tokensOut, meta } = await executeIntent(intent, message, ctx, plats, context ?? {});
       const latencyMs = Date.now() - started;
 
       const { data: modelRow } = await supabase

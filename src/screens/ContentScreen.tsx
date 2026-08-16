@@ -29,9 +29,8 @@ const STATUS_COLORS: Record<ContentStatus, 'neutral' | 'brand' | 'warning' | 'ac
   rejected: 'danger',
 };
 
-// Only platforms social-publish actually knows how to post to right now.
 // Keep this in sync with SUPPORTED_PLATFORMS in supabase/functions/social-publish.
-const PUBLISHABLE_PLATFORMS = new Set<SocialPlatform>(['telegram', 'x']);
+const PUBLISHABLE_PLATFORMS = new Set<SocialPlatform>(['telegram', 'x', 'facebook', 'instagram', 'linkedin']);
 
 type PublishOutcome = { ok: boolean; message: string; url?: string | null };
 
@@ -42,6 +41,7 @@ export function ContentScreen() {
   const [calendar, setCalendar] = useState<CalendarItem[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -49,6 +49,10 @@ export function ContentScreen() {
   const [variantsLoading, setVariantsLoading] = useState<string | null>(null);
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [publishResults, setPublishResults] = useState<Record<string, PublishOutcome>>({});
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [approvalResults, setApprovalResults] = useState<Record<string, string>>({});
+  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
+  const [calendarMessage, setCalendarMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!workspace) return;
@@ -69,6 +73,8 @@ export function ContentScreen() {
           .select('*')
           .eq('workspace_id', workspace.id),
       ]);
+      const firstError = c.error ?? cal.error ?? acc.error;
+      if (firstError) setLoadError(firstError.message);
       setContent((c.data as Content[]) ?? []);
       setCalendar((cal.data as CalendarItem[]) ?? []);
       setAccounts((acc.data as SocialAccount[]) ?? []);
@@ -94,6 +100,53 @@ export function ContentScreen() {
     setVariantsLoading(null);
   }
 
+  async function handleApprove(variant: ContentVariant) {
+    if (!workspace) return;
+    setApprovingId(variant.id);
+    try {
+      const { error } = await supabase.rpc('approve_content_variant', {
+        p_workspace_id: workspace.id,
+        p_variant_id: variant.id,
+        p_scheduled_for: variant.scheduled_at ?? null,
+      });
+      if (error) throw error;
+      setApprovalResults((prev) => ({ ...prev, [variant.id]: 'تمت الموافقة وربط المحتوى بالتقويم ومهمة النشر' }));
+      setVariantsByContent((prev) => ({
+        ...prev,
+        [variant.content_id]: (prev[variant.content_id] ?? []).map((item) => item.id === variant.id ? { ...item, status: 'approved' } : item),
+      }));
+      setContent((prev) => prev.map((item) => item.id === variant.content_id ? { ...item, status: 'scheduled' } : item));
+      const { data } = await supabase.from('calendar_items').select('*').eq('workspace_id', workspace.id).order('scheduled_for', { ascending: true });
+      setCalendar((data as CalendarItem[]) ?? []);
+    } catch (e) {
+      setApprovalResults((prev) => ({ ...prev, [variant.id]: e instanceof Error ? e.message : 'فشلت الموافقة' }));
+    } finally {
+      setApprovingId(null);
+    }
+  }
+
+  async function handleReschedule(item: CalendarItem, value: string) {
+    if (!workspace || !value) return;
+    setReschedulingId(item.id);
+    setCalendarMessage(null);
+    try {
+      const scheduledFor = new Date(value).toISOString();
+      const { error } = await supabase.rpc('reschedule_calendar_item', {
+        p_workspace_id: workspace.id,
+        p_calendar_item_id: item.id,
+        p_scheduled_for: scheduledFor,
+      });
+      if (error) throw error;
+      setCalendar((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, scheduled_for: scheduledFor, status: 'scheduled' } : entry));
+      setContent((prev) => prev.map((entry) => entry.id === item.content_id ? { ...entry, scheduled_at: scheduledFor, status: 'scheduled' } : entry));
+      setCalendarMessage('تم تحديث الموعد ومهمة النشر المرتبطة بدون إنشاء مهمة مكررة.');
+    } catch (e) {
+      setCalendarMessage(e instanceof Error ? e.message : 'فشل تعديل موعد النشر');
+    } finally {
+      setReschedulingId(null);
+    }
+  }
+
   async function handlePublish(variant: ContentVariant) {
     if (!workspace) return;
     setPublishingId(variant.id);
@@ -103,7 +156,8 @@ export function ContentScreen() {
       return next;
     });
     try {
-      const res = await publishVariant({ workspaceId: workspace.id, variantId: variant.id });
+      const linkedCalendarItem = calendar.find((item) => item.variant_id === variant.id);
+      const res = await publishVariant({ workspaceId: workspace.id, variantId: variant.id, calendarItemId: linkedCalendarItem?.id });
       setPublishResults((prev) => ({
         ...prev,
         [variant.id]: {
@@ -146,6 +200,9 @@ export function ContentScreen() {
           <CalendarIcon size={16} /> التقويم
         </button>
       </div>
+
+      {loadError && <div className="mb-4"><ErrorBanner message={loadError} /></div>}
+      {calendarMessage && <div className="mb-4"><ErrorBanner message={calendarMessage} /></div>}
 
       {view === 'list' ? (
         content.length === 0 ? (
@@ -208,6 +265,15 @@ export function ContentScreen() {
                                   {Icon && <Icon size={16} style={{ color: meta.color }} />}
                                   <span className="text-ink-200 text-sm font-medium">{meta?.label ?? v.platform}</span>
                                 </div>
+                                {v.status !== 'approved' && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleApprove(v)}
+                                    disabled={approvingId === v.id || v.quality_status === 'needs_improvement' || v.quality_status === 'failed'}
+                                  >
+                                    {approvingId === v.id ? 'جارٍ الاعتماد...' : 'اعتماد وجدولة'}
+                                  </Button>
+                                )}
                                 <Button
                                   size="sm"
                                   onClick={() => handlePublish(v)}
@@ -229,6 +295,11 @@ export function ContentScreen() {
                               <p className="text-ink-400 text-xs whitespace-pre-wrap leading-relaxed line-clamp-3">
                                 {v.text}
                               </p>
+                              {approvalResults[v.id] && (
+                                <p className={`text-[11px] mt-2 ${approvalResults[v.id].startsWith('تمت') ? 'text-brand-400' : 'text-red-400'}`}>
+                                  {approvalResults[v.id]}
+                                </p>
+                              )}
                               {disabledReason && !result && (
                                 <p className="text-ink-600 text-[11px] mt-2">{disabledReason}</p>
                               )}
@@ -259,20 +330,39 @@ export function ContentScreen() {
           </div>
         )
       ) : (
-        <CalendarView items={calendar} weekOffset={weekOffset} setWeekOffset={setWeekOffset} />
+        <CalendarView
+          items={calendar}
+          content={content}
+          weekOffset={weekOffset}
+          setWeekOffset={setWeekOffset}
+          onReschedule={handleReschedule}
+          reschedulingId={reschedulingId}
+        />
       )}
     </div>
   );
 }
 
+function toLocalDateTimeInput(iso: string): string {
+  const date = new Date(iso);
+  const offset = date.getTimezoneOffset();
+  return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 16);
+}
+
 function CalendarView({
   items,
+  content,
   weekOffset,
   setWeekOffset,
+  onReschedule,
+  reschedulingId,
 }: {
   items: CalendarItem[];
+  content: Content[];
   weekOffset: number;
   setWeekOffset: (n: number) => void;
+  onReschedule: (item: CalendarItem, value: string) => void;
+  reschedulingId: string | null;
 }) {
   const today = new Date();
   const startOfWeek = new Date(today);
@@ -338,15 +428,31 @@ function CalendarView({
                   {dayItems.map((item) => {
                     const meta = PLATFORM_META[item.platform as keyof typeof PLATFORM_META];
                     const Icon = meta?.icon;
+                    const linkedContent = content.find((entry) => entry.id === item.content_id);
+                    const isLocked = ['published', 'publishing', 'cancelled'].includes(item.status);
                     return (
                       <Card key={item.id}>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-start gap-3">
                           {Icon && <Icon size={18} style={{ color: meta.color }} />}
-                          <div className="flex-1">
-                            <p className="text-ink-100 text-sm">{new Date(item.scheduled_for).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</p>
-                            <Badge color={item.status === 'published' ? 'brand' : item.status === 'failed' ? 'danger' : 'neutral'}>
-                              {item.status}
-                            </Badge>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-ink-100 text-sm font-medium truncate">{linkedContent?.title ?? 'محتوى مجدول'}</p>
+                            {linkedContent?.master_text && <p className="text-ink-500 text-xs mt-1 line-clamp-2">{linkedContent.master_text}</p>}
+                            <div className="flex items-center gap-2 mt-2">
+                              <Badge color={item.status === 'published' ? 'brand' : item.status === 'failed' ? 'danger' : 'neutral'}>
+                                {item.status}
+                              </Badge>
+                              <span className="text-ink-500 text-xs">{new Date(item.scheduled_for).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+                            {!isLocked && (
+                              <input
+                                type="datetime-local"
+                                defaultValue={toLocalDateTimeInput(item.scheduled_for)}
+                                onChange={(event) => onReschedule(item, event.target.value)}
+                                disabled={reschedulingId === item.id}
+                                aria-label="تعديل موعد النشر"
+                                className="mt-3 w-full rounded-lg border border-ink-700 bg-ink-900 px-2 py-1.5 text-xs text-ink-200 focus:border-brand-500/50 focus:outline-none"
+                              />
+                            )}
                           </div>
                         </div>
                       </Card>

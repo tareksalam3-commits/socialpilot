@@ -15,7 +15,7 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
-const GRAPH_VERSION = 'v20.0';
+const GRAPH_VERSION = Deno.env.get('META_GRAPH_VERSION') ?? 'v26.0';
 
 async function getAppUrl(): Promise<string> {
   const { data } = await supabase.from('system_settings').select('value').eq('key', 'app_url').maybeSingle();

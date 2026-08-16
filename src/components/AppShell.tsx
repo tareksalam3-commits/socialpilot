@@ -1,18 +1,20 @@
 import { useState, type ReactNode } from 'react';
-import { Home, Plus, FileText, MessageSquare, MoreHorizontal } from 'lucide-react';
+import { Home, Plus, FileText, MessageSquare, MoreHorizontal, BarChart3 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { HomeScreen } from '@/screens/HomeScreen';
 import { CreateScreen } from '@/screens/CreateScreen';
 import { ContentScreen } from '@/screens/ContentScreen';
 import { InboxScreen } from '@/screens/InboxScreen';
 import { MoreScreen } from '@/screens/MoreScreen';
+import { AnalyticsScreen } from '@/screens/AnalyticsScreen';
 
-type Tab = 'home' | 'create' | 'content' | 'inbox' | 'more';
+type Tab = 'home' | 'create' | 'content' | 'analytics' | 'inbox' | 'more';
 
 const TABS: { id: Tab; label: string; icon: typeof Home }[] = [
   { id: 'home', label: 'الرئيسية', icon: Home },
   { id: 'create', label: 'إنشاء', icon: Plus },
   { id: 'content', label: 'المحتوى', icon: FileText },
+  { id: 'analytics', label: 'التحليلات', icon: BarChart3 },
   { id: 'inbox', label: 'الرسائل', icon: MessageSquare },
   { id: 'more', label: 'المزيد', icon: MoreHorizontal },
 ];
@@ -29,6 +31,7 @@ export function AppShell() {
     home: <HomeScreen onNavigate={(t: Tab) => setTab(t)} />,
     create: <CreateScreen />,
     content: <ContentScreen />,
+    analytics: <AnalyticsScreen />,
     inbox: <InboxScreen />,
     more: <MoreScreen />,
   };

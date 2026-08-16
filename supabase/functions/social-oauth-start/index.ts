@@ -134,8 +134,8 @@ Deno.serve(async (req: Request) => {
     }
     case 'meta':
     default: {
-      const scope = app.scopes || 'pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_metadata,instagram_basic,instagram_content_publish,business_management';
-      authUrl = new URL('https://www.facebook.com/v20.0/dialog/oauth');
+      const scope = app.scopes || 'pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_metadata,read_insights,instagram_basic,instagram_manage_insights,instagram_content_publish,business_management';
+      authUrl = new URL('https://www.facebook.com/v26.0/dialog/oauth');
       authUrl.searchParams.set('client_id', app.app_id);
       authUrl.searchParams.set('redirect_uri', redirectUri);
       authUrl.searchParams.set('state', state);

@@ -60,6 +60,10 @@ export function BrandBrainOnboarding() {
         audience: generated.audience,
         content: generated.content,
         visual: generated.visual,
+        positioning: generated.positioning ?? null,
+        preferred_phrases: generated.preferred_phrases ?? [],
+        forbidden_phrases: generated.forbidden_phrases ?? [],
+        cta_style: generated.cta_style ?? null,
         platforms: generated.platforms ?? [],
       }).eq('workspace_id', workspace.id);
 
@@ -113,6 +117,10 @@ export function BrandBrainOnboarding() {
           <ReviewSection title="الجمهور" data={generated.audience} />
           <ReviewSection title="محاور المحتوى" data={generated.content} />
           <ReviewSection title="الهوية البصرية" data={generated.visual} />
+          {generated.positioning && <ReviewSection title="التموضع" data={{ positioning: generated.positioning }} />}
+          {(generated.preferred_phrases?.length ?? 0) > 0 && <ReviewSection title="عبارات مفضلة" data={{ preferred_phrases: generated.preferred_phrases }} />}
+          {(generated.forbidden_phrases?.length ?? 0) > 0 && <ReviewSection title="عبارات ممنوعة" data={{ forbidden_phrases: generated.forbidden_phrases }} />}
+          {generated.cta_style && <ReviewSection title="أسلوب الدعوة للإجراء" data={{ cta_style: generated.cta_style }} />}
           {generated.platforms && generated.platforms.length > 0 && (
             <Card>
               <p className="text-ink-400 text-xs mb-2">المنصات المفضلة</p>
@@ -299,6 +307,8 @@ function formatKey(key: string): string {
     preferred_topics: 'المواضيع المفضلة',
     forbidden_topics: 'مواضيع ممنوعة',
     cta_style: 'أسلوب الدعوة للإجراء',
+    preferred_phrases: 'عبارات مفضلة',
+    forbidden_phrases: 'عبارات ممنوعة',
     vocabulary: 'المفردات',
     writing_style: 'أسلوب الكتابة',
     visual_style: 'الأسلوب البصري',

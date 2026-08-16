@@ -28,6 +28,10 @@ export type BrandDna = {
   audience: Record<string, unknown>;
   content: Record<string, unknown>;
   visual: Record<string, unknown>;
+  positioning?: string | null;
+  preferred_phrases?: string[];
+  forbidden_phrases?: string[];
+  cta_style?: string | null;
   platforms: string[];
   created_at: string;
   updated_at: string;
@@ -77,6 +81,10 @@ export type Content = {
   audience: string | null;
   master_text: string | null;
   status: ContentStatus;
+  batch_id?: string | null;
+  scheduled_at?: string | null;
+  quality_score?: number | null;
+  quality_status?: 'pending' | 'passed' | 'needs_improvement' | 'failed';
   platforms: string[];
   ai_meta: Record<string, unknown>;
   created_at: string;
@@ -93,6 +101,9 @@ export type ContentVariant = {
   cta: string | null;
   media_brief: Record<string, unknown>;
   status: 'draft' | 'review' | 'approved' | 'rejected';
+  scheduled_at?: string | null;
+  quality_score?: number | null;
+  quality_status?: 'pending' | 'passed' | 'needs_improvement' | 'failed';
   created_at: string;
   updated_at: string;
 };
@@ -193,6 +204,10 @@ export type GeneratedBrandDna = {
   audience: Record<string, unknown>;
   content: Record<string, unknown>;
   visual: Record<string, unknown>;
+  positioning?: string | null;
+  preferred_phrases?: string[];
+  forbidden_phrases?: string[];
+  cta_style?: string | null;
   platforms: string[];
   summary: string;
 };
@@ -213,6 +228,12 @@ export type GeneratedContent = {
   master_text: string;
   platforms: string[];
   variants: GeneratedVariant[];
+  quality?: {
+    verdict: QualityVerdict;
+    scores: Record<string, number>;
+    reasons: string[];
+    suggested_improvements?: string[];
+  };
 };
 
 export type QualityAnalysis = {
@@ -225,6 +246,17 @@ export type CalendarSlot = {
   date: string;
   platform: string;
   title: string;
+  content?: string;
+  goal?: string;
+  content_type?: string;
+  hashtags?: string[];
+  cta?: string;
+  quality?: {
+    verdict: QualityVerdict;
+    scores: Record<string, number>;
+    reasons: string[];
+    suggested_improvements?: string[];
+  };
 };
 
 export type ContentPlan = {
