@@ -501,7 +501,9 @@ ${JSON.stringify(skeletons)}
 
 function estimateCost(tokensIn: number, tokensOut: number, rate: { in: number; out: number } | null): number {
   if (!rate) return 0;
-  return (tokensIn / 1000) * rate.in + (tokensOut / 1000) * rate.out;
+  const safeInputRate = Math.max(0, Number(rate.in) || 0);
+  const safeOutputRate = Math.max(0, Number(rate.out) || 0);
+  return Math.max(0, (tokensIn / 1000) * safeInputRate + (tokensOut / 1000) * safeOutputRate);
 }
 
 // ---------------------------------------------------------------------------
@@ -559,7 +561,7 @@ Deno.serve(async (req: Request) => {
         .eq('provider_key', meta.provider)
         .eq('model_id', meta.model)
         .maybeSingle();
-      const rate = modelRow ? { in: modelRow.input_cost_per_1k ?? 0, out: modelRow.output_cost_per_1k ?? 0 } : null;
+      const rate = modelRow ? { in: Math.max(0, Number(modelRow.input_cost_per_1k ?? 0)), out: Math.max(0, Number(modelRow.output_cost_per_1k ?? 0)) } : null;
       const cost = estimateCost(tokensIn, tokensOut, rate);
 
       await supabase.from('ai_runs').update({

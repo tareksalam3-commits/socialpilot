@@ -1,5 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
-import { getAdapter, computeQualityScore, type ProviderKey, PROVIDER_CATALOG } from '../ai-gateway/providers.ts';
+import { getAdapter, computeQualityScore, type ProviderKey, PROVIDER_CATALOG } from './providers.ts';
 
 // ---------------------------------------------------------------------------
 // AI Control Center backend. Every action here requires the caller to be a
@@ -253,14 +253,17 @@ Deno.serve(async (req: Request) => {
           (acc, r) => {
             acc.requests += 1;
             acc.tokens += (r.input_tokens ?? 0) + (r.output_tokens ?? 0);
-            acc.cost += r.cost_usd ?? 0;
+            acc.cost += Math.max(0, Number(r.cost_usd ?? 0));
             acc.fallbacks += r.fallback_count ?? 0;
             if (r.status === 'failed') acc.failures += 1;
             return acc;
           },
           { requests: 0, tokens: 0, cost: 0, fallbacks: 0, failures: 0 }
         );
-        return jsonRes(200, { totals, recent: rows.slice(0, 30) });
+        return jsonRes(200, {
+          totals,
+          recent: rows.slice(0, 30).map((r) => ({ ...r, cost_usd: Math.max(0, Number(r.cost_usd ?? 0)) })),
+        });
       }
 
       case 'add_provider':

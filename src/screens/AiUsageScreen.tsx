@@ -52,7 +52,7 @@ export function AiUsageScreen({ onBack }: { onBack: () => void }) {
     (acc, r) => {
       acc.requests += 1;
       acc.tokens += (r.input_tokens ?? 0) + (r.output_tokens ?? 0);
-      acc.cost += r.cost_usd ?? 0;
+      acc.cost += Math.max(0, Number(r.cost_usd ?? 0));
       if (r.status === 'failed') acc.failures += 1;
       return acc;
     },
@@ -108,7 +108,7 @@ export function AiUsageScreen({ onBack }: { onBack: () => void }) {
               </div>
               <div className="flex items-center justify-between text-xs text-ink-500">
                 <span>{r.provider ?? '—'} / {r.model ?? '—'}</span>
-                <span dir="ltr">${(r.cost_usd ?? 0).toFixed(4)}</span>
+                <span dir="ltr">${Math.max(0, Number(r.cost_usd ?? 0)).toFixed(4)}</span>
               </div>
               <div className="flex items-center justify-between text-[10px] text-ink-600 mt-1">
                 <span>{(r.input_tokens ?? 0) + (r.output_tokens ?? 0)} tokens</span>
