@@ -306,11 +306,23 @@ export function SuperAdminScreen({ onBack }: { onBack: () => void }) {
 
                 {isEditing && (
                   <div className="px-4 pb-4 flex flex-col gap-2 animate-slide-up border-t border-ink-800 pt-3">
-                    <Input value={socialAppIdInput} onChange={setSocialAppIdInput} placeholder="App ID" />
+                    <Input
+                      value={socialAppIdInput}
+                      onChange={setSocialAppIdInput}
+                      placeholder={app.platform_key === 'telegram' ? 'يوزر البوت (من غير @)' : 'App ID'}
+                    />
                     <Input
                       value={socialAppSecretInput}
                       onChange={setSocialAppSecretInput}
-                      placeholder={app.has_secret ? 'App Secret (اتركه فاضي لو مش هتغيّره)' : 'App Secret'}
+                      placeholder={
+                        app.platform_key === 'telegram'
+                          ? app.has_secret
+                            ? 'Bot Token (اتركه فاضي لو مش هتغيّره)'
+                            : 'Bot Token'
+                          : app.has_secret
+                            ? 'App Secret (اتركه فاضي لو مش هتغيّره)'
+                            : 'App Secret'
+                      }
                       type="password"
                     />
                     {app.redirect_uri && (
@@ -351,7 +363,7 @@ export function SuperAdminScreen({ onBack }: { onBack: () => void }) {
           })}
         </div>
         <p className="text-ink-600 text-[11px] mt-2">
-          تطبيق Meta الواحد بيغطي فيسبوك وإنستجرام معًا (Meta for Developers). تطبيق لينكدإن منفصل وبيغطي النشر على الحساب الشخصي فقط حاليًا (LinkedIn Developer Portal). ملحوظة: توكن لينكدإن بينتهي كل ٦٠ يوم ولازم إعادة ربط.
+          تطبيق Meta الواحد بيغطي فيسبوك وإنستجرام معًا (Meta for Developers). تطبيق لينكدإن منفصل وبيغطي النشر على الحساب الشخصي فقط حاليًا (LinkedIn Developer Portal). ملحوظة: توكن لينكدإن بينتهي كل ٦٠ يوم ولازم إعادة ربط. تيليجرام مختلف: اعمل بوت من BotFather@ في تيليجرام، وحط يوزره في الحقل الأول وتوكنه في التاني — نفس البوت ده هيبقى محتاج كل مساحات العمل تضيفه Admin في قنواتها.
         </p>
       </div>
 

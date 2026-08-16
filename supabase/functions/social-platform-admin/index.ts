@@ -37,7 +37,12 @@ async function requireSuperAdmin(req: Request): Promise<{ ok: true; userId: stri
   return { ok: true, userId: userData.user.id };
 }
 
-const VALID_PLATFORM_KEYS = new Set(['meta', 'linkedin']);
+const VALID_PLATFORM_KEYS = new Set(['meta', 'linkedin', 'telegram']);
+
+// Telegram doesn't use redirect-based OAuth (no app is "installed" on a
+// domain) — app_id holds the shared bot's @username and app_secret holds
+// its Bot Token, so there's no redirect_uri to generate or display.
+const REDIRECT_URI_PLATFORMS = new Set(['meta', 'linkedin']);
 
 type Action =
   | { action: 'list_apps' }
@@ -72,7 +77,9 @@ Deno.serve(async (req: Request) => {
         if (!body.appId || body.appId.trim().length < 3) return jsonRes(400, { error: 'App ID is required' });
 
         const functionsBase = `${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1`;
-        const redirectUri = body.redirectUri?.trim() || `${functionsBase}/social-oauth-callback`;
+        const redirectUri = REDIRECT_URI_PLATFORMS.has(body.platformKey)
+          ? body.redirectUri?.trim() || `${functionsBase}/social-oauth-callback`
+          : null;
 
         if (body.appSecret && body.appSecret.trim().length > 0) {
           await supabase.from('social_platform_app_secrets').upsert({
