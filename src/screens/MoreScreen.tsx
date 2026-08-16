@@ -12,10 +12,10 @@ import { SettingsScreen } from '@/screens/SettingsScreen';
 import type { SocialAccount, SocialPlatform, BrandDna } from '@/lib/types';
 
 // Only these platforms have a real OAuth flow wired up so far. facebook +
-// instagram share the Meta app; linkedin has its own app. The rest still
-// show in the list but are marked "قريبًا" until their own OAuth integration
-// is built.
-const OAUTH_READY_PLATFORMS = new Set<SocialPlatform>(['facebook', 'instagram', 'linkedin']);
+// instagram share the Meta app; linkedin and x each have their own app.
+// The rest still show in the list but are marked "قريبًا" until their own
+// OAuth integration is built.
+const OAUTH_READY_PLATFORMS = new Set<SocialPlatform>(['facebook', 'instagram', 'linkedin', 'x']);
 
 // Telegram doesn't use redirect OAuth — it connects via a shared bot that
 // the workspace adds as admin to their channel (see social-telegram-connect).
@@ -23,10 +23,11 @@ const BOT_READY_PLATFORMS = new Set<SocialPlatform>(['telegram']);
 
 // Maps a connectable platform to the social_platform_apps row that drives
 // its OAuth flow (facebook/instagram share the single "meta" app).
-const PLATFORM_APP_KEY: Partial<Record<SocialPlatform, 'meta' | 'linkedin'>> = {
+const PLATFORM_APP_KEY: Partial<Record<SocialPlatform, 'meta' | 'linkedin' | 'x'>> = {
   facebook: 'meta',
   instagram: 'meta',
   linkedin: 'linkedin',
+  x: 'x',
 };
 
 export function MoreScreen() {
@@ -81,9 +82,10 @@ export function MoreScreen() {
       const fb = Number(params.get('facebook') ?? 0);
       const ig = Number(params.get('instagram') ?? 0);
       const li = Number(params.get('linkedin') ?? 0);
+      const x = Number(params.get('x') ?? 0);
       setConnectNotice(
-        fb || ig || li
-          ? `تم الربط بنجاح${fb ? ' — فيسبوك' : ''}${ig ? ' — إنستجرام' : ''}${li ? ' — لينكدإن' : ''}`
+        fb || ig || li || x
+          ? `تم الربط بنجاح${fb ? ' — فيسبوك' : ''}${ig ? ' — إنستجرام' : ''}${li ? ' — لينكدإن' : ''}${x ? ' — إكس' : ''}`
           : 'تم الربط بنجاح'
       );
       setShowAccounts(true);
@@ -98,6 +100,7 @@ export function MoreScreen() {
     params.delete('facebook');
     params.delete('instagram');
     params.delete('linkedin');
+    params.delete('x');
     params.delete('message');
     const cleanUrl = window.location.pathname + (params.toString() ? `?${params}` : '');
     window.history.replaceState({}, '', cleanUrl);

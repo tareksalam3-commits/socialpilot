@@ -28,7 +28,26 @@ function jsonRes(status: number, body: unknown): Response {
 const PLATFORM_LABELS: Record<string, string> = {
   meta: 'فيسبوك/إنستجرام',
   linkedin: 'لينكدإن',
+  x: 'إكس',
 };
+
+// X (Twitter) OAuth 2.0 requires PKCE on the authorization request — we
+// generate a code_verifier here, keep it on the state row (server-side
+// only), and send its S256 challenge in the auth URL. social-oauth-callback
+// reads the verifier back off the state row to complete the exchange.
+function base64UrlEncode(bytes: Uint8Array): string {
+  let str = '';
+  for (const b of bytes) str += String.fromCharCode(b);
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function generatePkcePair(): Promise<{ verifier: string; challenge: string }> {
+  const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
+  const verifier = base64UrlEncode(verifierBytes);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = base64UrlEncode(new Uint8Array(digest));
+  return { verifier, challenge };
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
@@ -76,11 +95,14 @@ Deno.serve(async (req: Request) => {
   }
 
   const state = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+  const pkce = platformKey === 'x' ? await generatePkcePair() : null;
+
   const { error: stateError } = await supabase.from('social_oauth_states').insert({
     state,
     workspace_id: workspaceId,
     user_id: userId,
     platform_key: platformKey,
+    code_verifier: pkce?.verifier ?? null,
   });
   if (stateError) return jsonRes(500, { error: 'تعذّر بدء عملية الربط' });
 
@@ -88,6 +110,18 @@ Deno.serve(async (req: Request) => {
 
   let authUrl: URL;
   switch (platformKey) {
+    case 'x': {
+      const scope = app.scopes || 'tweet.read tweet.write users.read offline.access';
+      authUrl = new URL('https://twitter.com/i/oauth2/authorize');
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('client_id', app.app_id);
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      authUrl.searchParams.set('state', state);
+      authUrl.searchParams.set('scope', scope);
+      authUrl.searchParams.set('code_challenge', pkce!.challenge);
+      authUrl.searchParams.set('code_challenge_method', 'S256');
+      break;
+    }
     case 'linkedin': {
       const scope = app.scopes || 'openid profile email w_member_social';
       authUrl = new URL('https://www.linkedin.com/oauth/v2/authorization');

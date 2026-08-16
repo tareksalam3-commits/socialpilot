@@ -67,7 +67,7 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (!app?.app_id || !secretRow?.app_secret) {
-    const label = stateRow.platform_key === 'linkedin' ? 'لينكدإن' : 'فيسبوك/إنستجرام';
+    const label = stateRow.platform_key === 'linkedin' ? 'لينكدإن' : stateRow.platform_key === 'x' ? 'إكس' : 'فيسبوك/إنستجرام';
     return redirectToApp({ social: 'error', message: `إعدادات ربط ${label} غير مكتملة` });
   }
 
@@ -75,6 +75,9 @@ Deno.serve(async (req: Request) => {
 
   if (stateRow.platform_key === 'linkedin') {
     return handleLinkedInCallback({ code, app, secretRow, redirectUri, stateRow });
+  }
+  if (stateRow.platform_key === 'x') {
+    return handleXCallback({ code, app, secretRow, redirectUri, stateRow });
   }
 
   try {
@@ -279,6 +282,94 @@ async function handleLinkedInCallback(params: {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'فشل ربط حساب لينكدإن';
     await supabase.from('social_platform_apps').update({ last_error: message, status: 'error' }).eq('platform_key', 'linkedin');
+    return redirectToApp({ social: 'error', message });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// X (Twitter) — OAuth 2.0 with mandatory PKCE. code_verifier travels on the
+// state row social-oauth-start created (it never leaves the server). We
+// request offline.access so we get a refresh_token, since access tokens
+// expire in ~2 hours — social-publish refreshes it on demand before posting.
+// ---------------------------------------------------------------------------
+async function handleXCallback(params: {
+  code: string;
+  app: Record<string, unknown>;
+  secretRow: { app_secret: string };
+  redirectUri: string;
+  stateRow: Record<string, unknown>;
+}): Promise<Response> {
+  const { code, app, secretRow, redirectUri, stateRow } = params;
+
+  try {
+    const codeVerifier = stateRow.code_verifier as string | null;
+    if (!codeVerifier) throw new Error('جلسة ربط إكس غير صالحة (PKCE)');
+
+    // 1. Exchange the authorization code for an access + refresh token.
+    const tokenRes = await fetch('https://api.twitter.com/2/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${btoa(`${app.app_id}:${secretRow.app_secret}`)}`,
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+        code_verifier: codeVerifier,
+        client_id: String(app.app_id),
+      }),
+    });
+    const tokenJson = await tokenRes.json();
+    if (!tokenRes.ok || !tokenJson.access_token) {
+      throw new Error(tokenJson?.error_description ?? tokenJson?.error ?? 'فشل تبادل رمز الدخول مع إكس');
+    }
+    const accessToken = tokenJson.access_token as string;
+    const refreshToken = (tokenJson.refresh_token as string | undefined) ?? null;
+    const expiresInSec = typeof tokenJson.expires_in === 'number' ? tokenJson.expires_in : null;
+    const tokenExpiresAt = expiresInSec ? new Date(Date.now() + expiresInSec * 1000).toISOString() : null;
+
+    // 2. Fetch the member's identity.
+    const profileRes = await fetch('https://api.twitter.com/2/users/me?user.fields=profile_image_url,username,name', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const profileJson = await profileRes.json();
+    if (!profileRes.ok || !profileJson.data?.id) {
+      throw new Error(profileJson?.detail ?? profileJson?.title ?? 'تعذّر جلب بيانات حساب إكس');
+    }
+    const profile = profileJson.data as { id: string; username: string; name?: string; profile_image_url?: string };
+
+    const { data: account, error: upsertError } = await supabase
+      .from('social_accounts')
+      .upsert({
+        workspace_id: stateRow.workspace_id,
+        platform: 'x',
+        handle: `@${profile.username}`,
+        display_name: profile.name ?? profile.username,
+        status: 'connected',
+        needs_reconnect: false,
+        external_id: profile.id,
+        metadata: { picture: profile.profile_image_url ?? null },
+        last_sync_at: new Date().toISOString(),
+      }, { onConflict: 'workspace_id,platform' })
+      .select()
+      .single();
+
+    if (upsertError || !account) throw new Error('تعذّر حفظ حساب إكس');
+
+    await supabase.from('social_account_tokens').upsert({
+      account_id: account.id,
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_type: 'member',
+      expires_at: tokenExpiresAt,
+      updated_at: new Date().toISOString(),
+    });
+
+    return redirectToApp({ social: 'connected', platform: 'x', x: '1' });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'فشل ربط حساب إكس';
+    await supabase.from('social_platform_apps').update({ last_error: message, status: 'error' }).eq('platform_key', 'x');
     return redirectToApp({ social: 'error', message });
   }
 }

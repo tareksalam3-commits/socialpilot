@@ -61,6 +61,44 @@ export async function connectTelegramChannel(workspaceId: string, channelUsernam
   return callTelegramConnect<{ ok: true; account: unknown }>({ action: 'connect', workspaceId, channelUsername });
 }
 
+export type PublishResult = {
+  ok: true;
+  postId?: string;
+  url?: string | null;
+  alreadyPublished?: boolean;
+  job?: unknown;
+};
+
+export async function publishVariant(params: {
+  workspaceId: string;
+  variantId: string;
+  calendarItemId?: string;
+}): Promise<PublishResult> {
+  const { data: session } = await supabase.auth.getSession();
+  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/social-publish`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.session?.access_token ?? ''}`,
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+    },
+    body: JSON.stringify(params),
+  });
+
+  let resBody: Record<string, unknown> = {};
+  try {
+    resBody = await res.json();
+  } catch {
+    // ignore parse errors, handled below
+  }
+
+  if (!res.ok) {
+    throw new Error((resBody?.error as string) ?? `فشل النشر (${res.status})`);
+  }
+  return resBody as PublishResult;
+}
+
 export async function callAiGateway(req: AiGatewayRequest): Promise<AiGatewayResponse> {
   const { data: session } = await supabase.auth.getSession();
   const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-gateway`;

@@ -328,7 +328,12 @@ export function SuperAdminScreen({ onBack }: { onBack: () => void }) {
                     {app.redirect_uri && (
                       <div className="bg-ink-900 rounded-lg p-2.5">
                         <p className="text-ink-500 text-[10px] mb-1">
-                          Redirect URI — ضيفه في إعدادات تطبيق {app.platform_key === 'linkedin' ? 'LinkedIn Developer' : 'Meta Developer'}
+                          Redirect URI — ضيفه في إعدادات تطبيق{' '}
+                          {app.platform_key === 'linkedin'
+                            ? 'LinkedIn Developer'
+                            : app.platform_key === 'x'
+                              ? 'X Developer Portal'
+                              : 'Meta Developer'}
                         </p>
                         <p className="text-ink-300 text-xs break-all" dir="ltr">{app.redirect_uri}</p>
                       </div>
