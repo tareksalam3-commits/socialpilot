@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileText, Calendar as CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, Send, Check, ExternalLink } from 'lucide-react';
+import { FileText, Calendar as CalendarIcon, ChevronLeft, ChevronRight, ChevronDown, Send, Check, ExternalLink, Pencil, Save, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import { publishVariant } from '@/lib/api';
@@ -49,6 +49,10 @@ export function ContentScreen() {
   const [variantsLoading, setVariantsLoading] = useState<string | null>(null);
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [publishResults, setPublishResults] = useState<Record<string, PublishOutcome>>({});
+  const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [savingVariantId, setSavingVariantId] = useState<string | null>(null);
+  const [editResults, setEditResults] = useState<Record<string, string>>({});
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [approvalResults, setApprovalResults] = useState<Record<string, string>>({});
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
@@ -98,6 +102,45 @@ export function ContentScreen() {
       .order('platform', { ascending: true });
     setVariantsByContent((prev) => ({ ...prev, [contentId]: (data as ContentVariant[]) ?? [] }));
     setVariantsLoading(null);
+  }
+
+  function startEditingVariant(variant: ContentVariant) {
+    setEditingVariantId(variant.id);
+    setEditingText(variant.text);
+    setEditResults((prev) => ({ ...prev, [variant.id]: '' }));
+  }
+
+  function cancelEditingVariant() {
+    setEditingVariantId(null);
+    setEditingText('');
+  }
+
+  async function handleSaveVariant(variant: ContentVariant) {
+    if (!workspace || !editingText.trim()) return;
+    setSavingVariantId(variant.id);
+    setEditResults((prev) => ({ ...prev, [variant.id]: '' }));
+    try {
+      const nextStatus = variant.status === 'approved' ? 'review' : variant.status;
+      const { error } = await supabase
+        .from('content_variants')
+        .update({ text: editingText.trim(), status: nextStatus, updated_at: new Date().toISOString() })
+        .eq('id', variant.id)
+        .eq('workspace_id', workspace.id);
+      if (error) throw error;
+      setVariantsByContent((prev) => ({
+        ...prev,
+        [variant.content_id]: (prev[variant.content_id] ?? []).map((item) => item.id === variant.id ? { ...item, text: editingText.trim(), status: nextStatus } : item),
+      }));
+      if (nextStatus === 'review') {
+        setContent((prev) => prev.map((item) => item.id === variant.content_id && item.status === 'approved' ? { ...item, status: 'draft' } : item));
+      }
+      setEditResults((prev) => ({ ...prev, [variant.id]: 'تم حفظ التعديل وإرجاع النسخة للمراجعة قبل النشر.' }));
+      cancelEditingVariant();
+    } catch (e) {
+      setEditResults((prev) => ({ ...prev, [variant.id]: e instanceof Error ? e.message : 'فشل حفظ تعديل المسودة' }));
+    } finally {
+      setSavingVariantId(null);
+    }
   }
 
   async function handleApprove(variant: ContentVariant) {
@@ -253,6 +296,8 @@ export function ContentScreen() {
                           const supported = PUBLISHABLE_PLATFORMS.has(v.platform as SocialPlatform);
                           const busy = publishingId === v.id;
                           const result = publishResults[v.id];
+                          const isEditing = editingVariantId === v.id;
+                          const canEdit = !['published', 'scheduled'].includes(c.status);
 
                           let disabledReason: string | null = null;
                           if (!supported) disabledReason = 'النشر التلقائي غير مدعوم لهذه المنصة بعد';
@@ -265,39 +310,72 @@ export function ContentScreen() {
                                   {Icon && <Icon size={16} style={{ color: meta.color }} />}
                                   <span className="text-ink-200 text-sm font-medium">{meta?.label ?? v.platform}</span>
                                 </div>
-                                {v.status !== 'approved' && (
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {canEdit && !isEditing && (
+                                    <Button size="sm" variant="ghost" onClick={() => startEditingVariant(v)}>
+                                      <span className="flex items-center gap-1"><Pencil size={14} /> تعديل</span>
+                                    </Button>
+                                  )}
+                                  {v.status !== 'approved' && (
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleApprove(v)}
+                                      disabled={approvingId === v.id || v.quality_status === 'needs_improvement' || v.quality_status === 'failed'}
+                                    >
+                                      {approvingId === v.id ? 'جارٍ الاعتماد...' : 'اعتماد وجدولة'}
+                                    </Button>
+                                  )}
                                   <Button
                                     size="sm"
-                                    onClick={() => handleApprove(v)}
-                                    disabled={approvingId === v.id || v.quality_status === 'needs_improvement' || v.quality_status === 'failed'}
+                                    onClick={() => handlePublish(v)}
+                                    disabled={busy || !!disabledReason}
                                   >
-                                    {approvingId === v.id ? 'جارٍ الاعتماد...' : 'اعتماد وجدولة'}
+                                    {busy ? (
+                                      '...جارٍ النشر'
+                                    ) : result?.ok ? (
+                                      <span className="flex items-center gap-1">
+                                        <Check size={14} /> تم النشر
+                                      </span>
+                                    ) : (
+                                      <span className="flex items-center gap-1">
+                                        <Send size={14} /> نشر الآن
+                                      </span>
+                                    )}
                                   </Button>
-                                )}
-                                <Button
-                                  size="sm"
-                                  onClick={() => handlePublish(v)}
-                                  disabled={busy || !!disabledReason}
-                                >
-                                  {busy ? (
-                                    '...جارٍ النشر'
-                                  ) : result?.ok ? (
-                                    <span className="flex items-center gap-1">
-                                      <Check size={14} /> تم النشر
-                                    </span>
-                                  ) : (
-                                    <span className="flex items-center gap-1">
-                                      <Send size={14} /> نشر الآن
-                                    </span>
-                                  )}
-                                </Button>
+                                </div>
                               </div>
-                              <p className="text-ink-400 text-xs whitespace-pre-wrap leading-relaxed line-clamp-3">
-                                {v.text}
-                              </p>
+                              {isEditing ? (
+                                <div className="flex flex-col gap-2">
+                                  <textarea
+                                    value={editingText}
+                                    onChange={(event) => setEditingText(event.target.value)}
+                                    rows={7}
+                                    dir="auto"
+                                    className="w-full rounded-xl border border-brand-500/50 bg-ink-950 px-3 py-2 text-sm leading-relaxed text-ink-100 focus:outline-none"
+                                    aria-label={`تعديل نسخة ${meta?.label ?? v.platform}`}
+                                  />
+                                  <div className="flex items-center justify-end gap-2">
+                                    <Button size="sm" variant="ghost" onClick={cancelEditingVariant} disabled={savingVariantId === v.id}>
+                                      <span className="flex items-center gap-1"><X size={14} /> إلغاء</span>
+                                    </Button>
+                                    <Button size="sm" onClick={() => handleSaveVariant(v)} disabled={savingVariantId === v.id || !editingText.trim()}>
+                                      <span className="flex items-center gap-1"><Save size={14} /> {savingVariantId === v.id ? 'جارٍ الحفظ...' : 'حفظ التعديل'}</span>
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-ink-400 text-xs whitespace-pre-wrap leading-relaxed line-clamp-3">
+                                  {v.text}
+                                </p>
+                              )}
                               {approvalResults[v.id] && (
                                 <p className={`text-[11px] mt-2 ${approvalResults[v.id].startsWith('تمت') ? 'text-brand-400' : 'text-red-400'}`}>
                                   {approvalResults[v.id]}
+                                </p>
+                              )}
+                              {editResults[v.id] && (
+                                <p className={`text-[11px] mt-2 ${editResults[v.id].startsWith('تم حفظ') ? 'text-brand-400' : 'text-red-400'}`}>
+                                  {editResults[v.id]}
                                 </p>
                               )}
                               {disabledReason && !result && (
