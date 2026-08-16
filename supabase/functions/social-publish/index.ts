@@ -31,8 +31,30 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
+const META_GRAPH_VERSION = Deno.env.get('META_GRAPH_VERSION') ?? 'v26.0';
+const LINKEDIN_API_VERSION = Deno.env.get('LINKEDIN_API_VERSION') ?? '202607';
+const LINKEDIN_RESTLI_PROTOCOL_VERSION = '2.0.0';
+
 function jsonRes(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+}
+
+function apiErrorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== 'object') return fallback;
+  const record = body as Record<string, unknown>;
+  if (typeof record.message === 'string' && record.message.trim()) return record.message;
+  if (typeof record.detail === 'string' && record.detail.trim()) return record.detail;
+  if (typeof record.title === 'string' && record.title.trim()) return record.title;
+  if (typeof record.error_description === 'string' && record.error_description.trim()) return record.error_description;
+  if (typeof record.description === 'string' && record.description.trim()) return record.description;
+  if (typeof record.error === 'string' && record.error.trim()) return record.error;
+  if (record.error && typeof record.error === 'object' && typeof (record.error as Record<string, unknown>).message === 'string') {
+    return String((record.error as Record<string, unknown>).message);
+  }
+  if (Array.isArray(record.errors) && record.errors[0] && typeof record.errors[0] === 'object' && typeof (record.errors[0] as Record<string, unknown>).message === 'string') {
+    return String((record.errors[0] as Record<string, unknown>).message);
+  }
+  return fallback;
 }
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -113,7 +135,7 @@ async function publishToTelegram(variant: Variant, account: Record<string, unkno
     body: JSON.stringify(params),
   });
   const json = await res.json();
-  if (!json.ok) throw new Error(json?.description ?? 'فشل النشر على تيليجرام');
+  if (!json.ok) throw new Error(apiErrorMessage(json, 'فشل النشر على تيليجرام'));
 
   const messageId = json.result?.message_id;
   const chatUsername = typeof account.handle === 'string' ? String(account.handle).replace(/^@/, '') : null;
@@ -182,9 +204,9 @@ async function publishToFacebook(variant: Variant, account: Record<string, unkno
   const accessToken = await getStoredAccessToken(String(account.id));
   const pageId = String(account.page_id ?? account.external_id ?? account.handle ?? '');
   if (!pageId) throw new Error('لم يتم العثور على Page ID لفيسبوك');
-  const response = await fetchWithRetry(`https://graph.facebook.com/v20.0/${encodeURIComponent(pageId)}/feed`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: buildPostText(variant), access_token: accessToken }) });
+  const response = await fetchWithRetry(`https://graph.facebook.com/${META_GRAPH_VERSION}/${encodeURIComponent(pageId)}/feed`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: buildPostText(variant), access_token: accessToken }) });
   const body = await response.json();
-  if (!response.ok || !body.id) throw new Error(body?.error?.message ?? 'فشل النشر على فيسبوك');
+  if (!response.ok || !body.id) throw new Error(apiErrorMessage(body, 'فشل النشر على فيسبوك'));
   return { id: String(body.id), url: `https://www.facebook.com/${body.id}` };
 }
 
@@ -193,12 +215,12 @@ async function publishToInstagram(variant: Variant, account: Record<string, unkn
   const igId = String(account.ig_user_id ?? account.external_id ?? '');
   const imageUrl = typeof variant.media_brief?.image_url === 'string' ? variant.media_brief.image_url as string : '';
   if (!igId || !imageUrl) throw new Error('النشر على إنستجرام يحتاج image_url وInstagram Business Account');
-  const createResponse = await fetchWithRetry(`https://graph.facebook.com/v20.0/${encodeURIComponent(igId)}/media`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_url: imageUrl, caption: buildPostText(variant), access_token: accessToken }) });
+  const createResponse = await fetchWithRetry(`https://graph.facebook.com/${META_GRAPH_VERSION}/${encodeURIComponent(igId)}/media`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_url: imageUrl, caption: buildPostText(variant), access_token: accessToken }) });
   const createBody = await createResponse.json();
-  if (!createResponse.ok || !createBody.id) throw new Error(createBody?.error?.message ?? 'فشل إنشاء منشور إنستجرام');
-  const publishResponse = await fetchWithRetry(`https://graph.facebook.com/v20.0/${encodeURIComponent(igId)}/media_publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ creation_id: createBody.id, access_token: accessToken }) });
+  if (!createResponse.ok || !createBody.id) throw new Error(apiErrorMessage(createBody, 'فشل إنشاء منشور إنستجرام'));
+  const publishResponse = await fetchWithRetry(`https://graph.facebook.com/${META_GRAPH_VERSION}/${encodeURIComponent(igId)}/media_publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ creation_id: createBody.id, access_token: accessToken }) });
   const publishBody = await publishResponse.json();
-  if (!publishResponse.ok || !publishBody.id) throw new Error(publishBody?.error?.message ?? 'فشل نشر منشور إنستجرام');
+  if (!publishResponse.ok || !publishBody.id) throw new Error(apiErrorMessage(publishBody, 'فشل نشر منشور إنستجرام'));
   return { id: String(publishBody.id), url: null };
 }
 
@@ -206,10 +228,26 @@ async function publishToLinkedIn(variant: Variant, account: Record<string, unkno
   const accessToken = await getStoredAccessToken(String(account.id));
   const author = String((account.metadata as Record<string, unknown> | undefined)?.urn ?? `urn:li:person:${account.external_id ?? ''}`);
   if (!author || author.endsWith(':')) throw new Error('لم يتم العثور على هوية LinkedIn');
-  const response = await fetchWithRetry('https://api.linkedin.com/v2/ugcPosts', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'X-Restli-Protocol-Version': '2.0', 'LinkedIn-Version': '202401' }, body: JSON.stringify({ author, lifecycleState: 'PUBLISHED', specificContent: { 'com.linkedin.ugc.ShareContent': { shareCommentary: { text: buildPostText(variant) }, shareMediaCategory: 'NONE' } }, visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' } }) });
+  const response = await fetchWithRetry('https://api.linkedin.com/rest/posts', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'X-Restli-Protocol-Version': LINKEDIN_RESTLI_PROTOCOL_VERSION,
+      'Linkedin-Version': LINKEDIN_API_VERSION,
+    },
+    body: JSON.stringify({
+      author,
+      commentary: buildPostText(variant, 3000),
+      visibility: 'PUBLIC',
+      distribution: { feedDistribution: 'MAIN_FEED', targetEntities: [], thirdPartyDistributionChannels: [] },
+      lifecycleState: 'PUBLISHED',
+      isReshareDisabledByAuthor: false,
+    }),
+  });
   const body = await response.json().catch(() => ({}));
-  const postId = response.headers.get('x-restli-id') ?? body.id;
-  if (!response.ok || !postId) throw new Error(body?.message ?? 'فشل النشر على لينكدإن');
+  const postId = response.headers.get('x-restli-id') ?? (body as Record<string, unknown>).id;
+  if (!response.ok || !postId) throw new Error(apiErrorMessage(body, 'فشل النشر على لينكدإن؛ تحقق من صلاحية w_member_social وإعادة ربط الحساب'));
   return { id: String(postId), url: null };
 }
 
@@ -224,7 +262,7 @@ async function publishToX(variant: Variant, account: Record<string, unknown>): P
   });
   const json = await res.json();
   if (!res.ok || !json.data?.id) {
-    const message = json?.detail || json?.title || json?.errors?.[0]?.message || 'فشل النشر على إكس';
+    const message = apiErrorMessage(json, 'فشل النشر على إكس');
     throw new Error(message);
   }
 
