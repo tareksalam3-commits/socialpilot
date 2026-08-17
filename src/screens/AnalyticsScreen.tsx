@@ -125,6 +125,20 @@ export function AnalyticsScreen() {
     return acc;
   }, {}), [insights]);
 
+  const metricRows = useMemo(() => insights.reduce<Record<string, Insight[]>>((acc, row) => {
+    (acc[row.metric] ??= []).push(row);
+    return acc;
+  }, {}), [insights]);
+
+  function displayedMetric(metric: string): number | null {
+    const rows = metricRows[metric] ?? [];
+    if (metric === 'engagements' && rows.length === 0) {
+      const componentRows = insights.filter((row) => ENGAGEMENT_METRICS.has(row.metric) && row.metric !== 'engagements');
+      return componentRows.length > 0 ? componentRows.reduce((sum, row) => sum + Number(row.value ?? 0), 0) : null;
+    }
+    return rows.length > 0 ? rows.reduce((sum, row) => sum + Number(row.value ?? 0), 0) : null;
+  }
+
   const contentById = useMemo(() => new Map(content.map((item) => [item.id, item])), [content]);
 
   const rankedPosts = useMemo(() => {
@@ -144,7 +158,10 @@ export function AnalyticsScreen() {
       acc[row.platform] = (acc[row.platform] ?? 0) + engagementValue(row);
       return acc;
     }, {});
-    return Object.entries(scores).map(([label, score]) => ({ label, score })).sort((a, b) => b.score - a.score)[0] ?? null;
+    return Object.entries(scores)
+      .filter(([, score]) => score > 0)
+      .map(([label, score]) => ({ label, score }))
+      .sort((a, b) => b.score - a.score)[0] ?? null;
   }, [insights]);
 
   const bestContentType = useMemo(() => {
@@ -163,7 +180,10 @@ export function AnalyticsScreen() {
       acc[label] = (acc[label] ?? 0) + engagementValue(row);
       return acc;
     }, {});
-    return Object.entries(scores).map(([label, score]) => ({ label, score })).sort((a, b) => b.score - a.score)[0] ?? null;
+    return Object.entries(scores)
+      .filter(([, score]) => score > 0)
+      .map(([label, score]) => ({ label, score }))
+      .sort((a, b) => b.score - a.score)[0] ?? null;
   }, [insights]);
 
   const trend = useMemo(() => {
@@ -265,7 +285,7 @@ export function AnalyticsScreen() {
       {syncMessage && <div className="mb-4 rounded-xl border border-accent-500/30 bg-accent-500/10 px-4 py-3 text-sm text-accent-300">{syncMessage}</div>}
 
       {insights.length === 0 ? <EmptyState icon={<BarChart3 size={28} />} title="لا توجد Insights بعد" subtitle="انشر محتوى ثم شغّل مزامنة التحليلات من الحسابات المتصلة." /> : <>
-        <div className="grid grid-cols-2 gap-3 mb-5">{['reach', 'impressions', 'engagements', 'follower_growth'].map((metric) => <Card key={metric}><p className="text-ink-500 text-xs">{METRIC_LABELS[metric]}</p><p className="text-2xl font-bold text-ink-50 mt-1">{Math.round(totals[metric] ?? 0).toLocaleString('ar-EG')}</p></Card>)}</div>
+        <div className="grid grid-cols-2 gap-3 mb-5">{['reach', 'impressions', 'engagements', 'follower_growth'].map((metric) => { const value = displayedMetric(metric); return <Card key={metric}><p className="text-ink-500 text-xs">{METRIC_LABELS[metric]}</p><p className="text-2xl font-bold text-ink-50 mt-1">{value === null ? 'N/A' : Math.round(value).toLocaleString('ar-EG')}</p></Card>; })}</div>
 
         <div className="grid grid-cols-2 gap-3 mb-5">
           <RankCard title="أفضل منشور" item={rankedPosts[0] ?? null} />

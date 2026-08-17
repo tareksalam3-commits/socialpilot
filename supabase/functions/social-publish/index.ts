@@ -429,7 +429,7 @@ Deno.serve(async (req: Request) => {
             : await publishToLinkedIn(variant as Variant, account);
 
     const publishedAt = new Date().toISOString();
-    await supabase.from('publishing_jobs').update({
+    const publishState = {
       status: 'succeeded',
       completed_at: publishedAt,
       published_at: publishedAt,
@@ -437,8 +437,15 @@ Deno.serve(async (req: Request) => {
       external_post_id: result.id,
       platform,
       last_error: null,
+    };
+    const { error: publishStateError } = await supabase.from('publishing_jobs').update({
+      ...publishState,
       result: { platform, post_id: result.id, url: result.url },
     }).eq('id', job.id);
+    if (publishStateError) {
+      const { error: fallbackStateError } = await supabase.from('publishing_jobs').update(publishState).eq('id', job.id);
+      if (fallbackStateError) throw new Error(`تمت استجابة المنصة لكن تعذر حفظ حالة النشر: ${fallbackStateError.message}`);
+    }
 
     if (calendarItemId) {
       await supabase.from('calendar_items').update({ status: 'published' }).eq('id', calendarItemId);
