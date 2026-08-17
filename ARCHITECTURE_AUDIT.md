@@ -109,3 +109,24 @@
 ### الخلاصة
 
 أصبحت المسارات الحرجة **Inbox → Reply**, **Schedule → Publish**, و**Account Sync** ممثلة في GitHub ومتصلة بالبنية الحالية لـ Supabase. ما تبقى ليس فشلًا مخفيًا في هذه المسارات، بل فجوات مصدر حقيقة واختبارات قبول خارجية تحتاج بيانات اعتماد المنصات وبيئة Sandbox. لا ينبغي اعتبار الاختبارات الحالية إثباتًا للنشر الاجتماعي الفعلي قبل تنفيذ اختبار قبول خارجي مضبوط.
+
+
+## مراجعة الأمن النهائية — 2026-08-17
+
+أُعيد فحص Supabase الحي بعد نشر migrations `revoke_public_rpc_exec` و`harden_security_definer_helpers`. الجداول التشغيلية الأساسية مثل `workspaces`, `workspace_members`, `social_accounts`, `publishing_jobs`, `calendar_items`, `content`, `content_variants`, `inbox_conversations`, `inbox_messages`, `post_insights`, `notifications`, و`audit_logs` مفعّل عليها RLS، وسياسات القراءة والكتابة تعتمد على `user_workspace_role(workspace_id)` أو على دور `owner/admin` في العمليات الحساسة. لا تستخدم واجهة المستخدم جدول `social_account_tokens`، ولا توجد له سياسات قراءة للمستخدمين؛ كما لا توجد سياسات خارجية على جداول الأسرار وحالات OAuth (`ai_provider_secrets`, `social_platform_app_secrets`, `social_oauth_states`, و`platform_admins`). هذه الجداول تُعامل كمخازن خادم/خاصة، وليس كمصدر بيانات للواجهة.
+
+| مجال التحقق | النتيجة الفعلية | القرار |
+|---|---|---|
+| RLS وعزل Workspace | السياسات الحية تربط الصفوف بعضوية workspace، مع تقييد الحذف وعمليات insights/accounts على owner/admin حيث يلزم | مقبول للمسارات الحالية؛ لا توجد قراءة عابرة لمساحات العمل في الاختبار المنفذ |
+| RPCs الخاصة بالجدولة | `approve_content_variant`, `reschedule_calendar_item`, و`schedule_content_variant` أصبحت قابلة للتنفيذ من `authenticated` فقط، بعد إزالة `PUBLIC/anon` | تم الإصلاح في migration `0020_revoke_public_rpc_exec` |
+| وظائف trigger الداخلية | أُزيل execute عن `handle_new_user_workspace`, `touch_inbox_conversation`, و`am_i_platform_admin` من الأدوار الخارجية؛ بقي استخدامها داخل قاعدة البيانات أو لم يعد مكشوفًا كـ RPC | تم الإصلاح في migration `0021_harden_security_definer_helpers` |
+| `is_super_admin` | بقيت `SECURITY DEFINER` لأنها تقرأ جدول `platform_admins` الخاص، لكن أصبحت تُرجع true فقط عندما يطابق `check_uid` هوية JWT الحالية | تم تقليل خطر probing مع الحفاظ على عقد `ai-admin` و`social-platform-admin` |
+| Supabase Security Advisor | اختفت تحذيرات الدوال trigger-only؛ بقيت تحذيرات WARN المقصودة لـ `create_workspace_with_owner`, `is_super_admin`, و`user_workspace_role` لأن الأولى تنشئ workspace عبر definer، والثانية والثالثة لازمتان للإدارة وRLS. بقي تحذير حماية كلمات المرور المسرّبة معطّلًا | يلزم تفعيل Leaked Password Protection من إعدادات Auth قبل اعتماد أمني كامل [1] |
+| Supabase Performance Advisor | بقيت INFO عن فهارس غير مستخدمة، منها فهارس `content`, `post_insights`, `social_oauth_states`, و`inbox_messages` | لا تُحذف قبل قياس workload حقيقي؛ التنبيهات ليست فشلًا وظيفيًا [2] |
+
+> **حدود النتيجة:** وجود RLS مفعّل لا يثبت وحده أن كل تكامل خارجي نجح؛ اختبار النشر والرد الفعليين يتطلب حسابات Sandbox ورموز OAuth صالحة لكل منصة. كما أن تحذيرات `SECURITY DEFINER` المتبقية موثقة كقرارات تصميم مقصودة وليست مُخفاة.
+
+### References
+
+[1]: https://supabase.com/docs/guides/auth/password-security "Supabase Auth password security"
+[2]: https://supabase.com/docs/guides/database/database-linter "Supabase database advisors and linter"

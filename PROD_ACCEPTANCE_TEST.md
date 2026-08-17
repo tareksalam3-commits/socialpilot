@@ -63,3 +63,25 @@
 ## Automation-control contract probe — 2026-08-17
 
 استُخدمت جلسة المستخدم الفعلية وworkspace المرتبط بها لإرسال `action: contract_probe` إلى `automation-control`. أعادت الوظيفة HTTP 400 برسالة `Unknown action: contract_probe` بدل 401/403، ما يثبت مرور المصادقة والتحقق من عضوية workspace والوصول إلى عقد الوظيفة. لم يُستخدم `run_now` أو retry حتى لا يبدأ نشرًا أو يغير بيانات الإنتاج.
+
+
+## Deep-link deployment verification — 2026-08-17
+
+بعد دفع commit `e91303f`، أعاد HTTP لمسار `/app/accounts` الحالة 200 بدل 404، وبعد تحديث المتصفح فتح التطبيق شاشة «المزيد» مباشرة مع جلسة المستخدم. بذلك أصبحت إعادة كتابة Vercel وقراءة pathname في AppShell فعالتين في الإنتاج.
+
+
+## X reconnect UI verification — 2026-08-17
+
+على الإصدار المنشور عبر `/app/accounts` ظهر صف X بحالة «غير مربوط» وزر «ربط» بعد الإصلاح، بدل زر «إزالة» السابق. عند الضغط على «ربط» دخل الزر حالة «جارٍ التحويل»؛ لم تتم الموافقة على OAuth أو إدخال بيانات خارجية، لذلك لم يُنشأ ارتباط جديد ولم تتغير بيانات الإنتاج.
+
+
+## X OAuth start endpoint verification — 2026-08-17
+
+ضغط زر ربط X نقل المتصفح فعليًا إلى `https://x.com/i/oauth2/authorize` مع `response_type=code` و`code_challenge_method=S256` ونطاقات `tweet.read`, `tweet.write`, `users.read`, و`offline.access`. كان `redirect_uri` هو `https://iqbuedqugkpxqdrzhfzn.supabase.co/functions/v1/social-oauth-callback`. عرض X رسالة «To use this App you have to be logged in to X»، لذلك لم يُكمل الاختبار دون جلسة X أو Sandbox؛ وهذا يثبت بدء التدفق وعقد PKCE، لا نجاح callback أو حفظ التوكن.
+
+
+## Security regression check — 2026-08-17
+
+بعد تطبيق migrations `0020_revoke_public_rpc_exec` و`0021_harden_security_definer_helpers`، أُعيد فتح `https://socialpilot-eta.vercel.app/` بجلسة المستخدم الحالية. اكتمل التحميل وظهرت لوحة المستخدم، تنبيه X لإعادة الربط، عدد الحسابات المربوطة (3)، ومحتوى منشور سابق؛ لم يظهر خطأ مصادقة أو خطأ RLS. هذا يثبت عدم كسر واجهة المستخدم الأساسية، ولا يثبت نجاح نشر اجتماعي خارجي جديد.
+
+فحص grants النهائي أظهر أن RPCs التشغيلية اللازمة بقيت `authenticated` فقط، بينما لم تعد وظائف `handle_new_user_workspace`, `touch_inbox_conversation`, و`am_i_platform_admin` ظاهرة كـ execute grants للأدوار الخارجية. بقيت تحذيرات Security Advisor المقصودة للدوال `create_workspace_with_owner`, `is_super_admin`, و`user_workspace_role`، إضافة إلى تنبيه تفعيل حماية كلمات المرور المسرّبة.
