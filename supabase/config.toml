@@ -1,0 +1,6 @@
+# OAuth callbacks are reached by the platform's browser redirect and therefore
+# do not carry the user's Supabase Authorization header. Authentication is
+# provided by the short-lived, single-use social_oauth_states row in the
+# callback implementation.
+[functions.social-oauth-callback]
+verify_jwt = false
