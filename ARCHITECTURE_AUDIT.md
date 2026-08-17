@@ -15,7 +15,7 @@
 | API | `src/lib/api.ts` يعرّف مسارات AI وOAuth وTelegram والنشر، ولا توجد طبقة API ظاهرة لمسارات Inbox/Comments/Analytics sync | فجوة بين متطلبات Unified Inbox وبين نقاط الاستخدام في الواجهة |
 | المخطط المحلي | توجد الجداول الأساسية للمحتوى والجودة والجدولة والنشر، إضافة إلى `post_insights` و`inbox_conversations` و`inbox_messages` في migrations لاحقة/حالة Supabase | توجد نواة جيدة، لكن يجب التحقق من التدفق والـ RLS والوظائف المرتبطة |
 | قاعدة البيانات الحية | Supabase يحتوي على `inbox_conversations` و`inbox_messages`، ولا يظهر جدول مستقل باسم `comments` أو `messages` | ينبغي اعتماد نموذج Inbox الموحد إن كان يغطي التعليقات، أو إضافة طبقة ربط واضحة دون إنشاء Architecture مكررة |
-| انجراف المخطط | Supabase يحتوي على migrations إضافية بعد `0016`، منها `0017` و`0018_inbox_schema` و`0019_inbox_realtime`، بينما المستودع المحلي يحتوي حتى `0016` فقط | المستودع لا يمثل كامل الحالة المنشورة؛ يجب توثيق/مزامنة migrations قبل أي تعديل DDL |
+| انجراف المخطط | Supabase يحتوي على migrations إضافية بعد `0016`، منها `0017` و`0018_inbox_schema` و`0019_inbox_realtime`، بينما المصدر المحلي يحتوي migrations حتى `0021`، مع توثيق migrations التشغيل والأمن الأخيرة | المستودع لا يمثل كامل الحالة المنشورة؛ يجب توثيق/مزامنة migrations قبل أي تعديل DDL |
 | الوظائف المنشورة | Supabase ينشر وظائف عديدة غير موجودة في `supabase/functions` المحلي، منها `inbox-webhook`, `inbox-reply`, `account-sync`, `run-scheduler`, `social-publish`, `analytics-sync` وغيرها | يوجد انجراف كبير بين الكود المنشور والكود المصدر؛ لا يجوز افتراض أن تعديل المحلي يحدّث الوظيفة الحية دون استعادة المصدر أو إعادة بنائه بعناية |
 | التكاملات | الوظائف الحية تغطي Meta وLinkedIn وX وThreads وTikTok وTelegram وWhatsApp، بينما المصدر المحلي يحتوي عددًا أقل من وظائف OAuth | يلزم تدقيق منصة-بمنصة، وتحديد ما هو مكتوب محليًا مقابل ما هو منشور فقط |
 | بيانات العينة | توجد سجلات فعلية قليلة في المشروع الحي: Workspace واحد، 4 حسابات اجتماعية، 3 variants، 3 quality reviews، 3 publishing jobs، ولا توجد post insights أو inbox records | توجد بيانات تشغيل/اختبار فعلية، لكن لا تكفي لإثبات المسارات الحية للرسائل والتحليلات |
@@ -82,7 +82,7 @@
 | `scheduler-tick` دون Authorization | 401 | لم يتم تشغيل دورة النشر. |
 | `inbox-webhook` دون توقيع | 401 | تم رفض Webhook ذي التوقيع المفقود. |
 | Scheduler Cron | ناجح | الجدولة كل دقيقة، والـ command يقرأ السر من `vault.decrypted_secrets` بدل تضمينه نصيًا. |
-| Supabase migrations | ناجح | migrations `inbox_and_security_hardening`, `scheduler_security`, و`drop_duplicate_inbox_index` مسجلة حيًا. |
+| Supabase migrations | ناجح | migrations `inbox_and_security_hardening`, `scheduler_security`, `drop_duplicate_inbox_index`, `revoke_public_rpc_exec`, و`harden_security_definer_helpers` مسجلة حيًا. |
 | Supabase performance advisors | تحسن | اختفى تحذير الفهرس المكرر؛ بقيت تنبيهات INFO عن فهارس غير مستخدمة، وهي ليست أخطاء تشغيلية. |
 
 ## حدود الاختبار
@@ -97,7 +97,7 @@
 
 | البند | القرار |
 |---|---|
-| مصدر الكود | تم دفع الإصلاحات إلى [`tareksalammohamed/socialpilot`](https://github.com/tareksalammohamed/socialpilot) على `main` في commit `d2c77d8`. |
+| مصدر الكود | تم دفع الإصلاحات إلى [`tareksalammohamed/socialpilot`](https://github.com/tareksalammohamed/socialpilot) على `main` في commit `2c2ec61`. |
 | Inbox | قابل للمراجعة وإعادة النشر من GitHub، مع قراءة/تعليم كمقروء/رد، Webhook، idempotency، وRLS. |
 | Scheduler | `scheduler-tick` هو المسار المعتمد؛ `run-scheduler` القديمة بقيت غير مستخدمة لأنها تعتمد على schema legacy. |
 | Account Sync | مصدر محلي وحَيّ متوافق مع `social_accounts` و`social_account_tokens` ومربوط بواجهة الحسابات. |
