@@ -66,6 +66,7 @@ export function AnalyticsScreen() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
@@ -180,6 +181,7 @@ export function AnalyticsScreen() {
     if (!workspace) return;
     setSyncing(true);
     setError(null);
+    setSyncMessage(null);
     try {
       const { data: session } = await supabase.auth.getSession();
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analytics-sync`, {
@@ -193,7 +195,13 @@ export function AnalyticsScreen() {
       const syncNotes: string[] = [];
       if (Array.isArray(body.errors) && body.errors.length > 0) syncNotes.push(`فشل ${body.errors.length} من ${body.attempted ?? body.errors.length} مهمة`);
       if (Array.isArray(body.unsupportedPlatforms) && body.unsupportedPlatforms.length > 0) syncNotes.push(`لا توجد مزامنة metrics بعد لـ: ${body.unsupportedPlatforms.join('، ')}`);
-      if (syncNotes.length > 0) setError(`اكتملت المزامنة جزئيًا: ${syncNotes.join('؛ ')}. البيانات السابقة محفوظة.`);
+      if (syncNotes.length > 0) {
+        setError(`اكتملت المزامنة جزئيًا: ${syncNotes.join('؛ ')}. البيانات السابقة محفوظة.`);
+      } else if (Number(body.attempted ?? 0) === 0) {
+        setSyncMessage('تمت المزامنة بنجاح. لا توجد منشورات منشورة قابلة لجلب Metrics بعد.');
+      } else {
+        setSyncMessage(`تمت المزامنة بنجاح: تمت معالجة ${Number(body.attempted ?? 0).toLocaleString('ar-EG')} مهمة وحُفظت ${Number(body.synced ?? 0).toLocaleString('ar-EG')} قراءة Metric.`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'فشل مزامنة التحليلات');
     } finally {
@@ -254,6 +262,7 @@ export function AnalyticsScreen() {
         </Card>
       )}
       {error && <div className="mb-4"><ErrorBanner message={error} /></div>}
+      {syncMessage && <div className="mb-4 rounded-xl border border-accent-500/30 bg-accent-500/10 px-4 py-3 text-sm text-accent-300">{syncMessage}</div>}
 
       {insights.length === 0 ? <EmptyState icon={<BarChart3 size={28} />} title="لا توجد Insights بعد" subtitle="انشر محتوى ثم شغّل مزامنة التحليلات من الحسابات المتصلة." /> : <>
         <div className="grid grid-cols-2 gap-3 mb-5">{['reach', 'impressions', 'engagements', 'follower_growth'].map((metric) => <Card key={metric}><p className="text-ink-500 text-xs">{METRIC_LABELS[metric]}</p><p className="text-2xl font-bold text-ink-50 mt-1">{Math.round(totals[metric] ?? 0).toLocaleString('ar-EG')}</p></Card>)}</div>
