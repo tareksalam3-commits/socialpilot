@@ -119,6 +119,15 @@ Deno.serve(async (req: Request) => {
     const auth = await authorize(req, workspaceId);
     if (auth instanceof Response) return auth;
 
+    const { data: settings } = await supabase
+      .from('lead_hunter_settings')
+      .select('lead_hunter_enabled,lead_search_enabled,kill_switch')
+      .eq('id', true)
+      .maybeSingle();
+    if (body.action === 'start_search' && settings && (!settings.lead_hunter_enabled || !settings.lead_search_enabled || settings.kill_switch)) {
+      return json(423, { error: settings.kill_switch ? 'مركز العملاء متوقف مؤقتًا للصيانة.' : 'البحث عن العملاء معطّل حاليًا من إعدادات النظام.' });
+    }
+
     if (body.action === 'start_search') {
       if (!body.search_request_id) return json(400, { error: 'معرّف طلب البحث مطلوب.' });
       const { data: request } = await supabase
