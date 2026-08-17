@@ -123,8 +123,9 @@ export function MoreScreen() {
   async function togglePlatform(platform: SocialPlatform) {
     if (!workspace) return;
     const existing = accounts.find((a) => a.platform === platform);
+    const isConnected = existing?.status === 'connected';
 
-    if (existing) {
+    if (existing && isConnected) {
       await supabase.from('social_accounts').delete().eq('id', existing.id);
       setAccounts(accounts.filter((a) => a.id !== existing.id));
       return;
@@ -263,6 +264,7 @@ export function MoreScreen() {
               const isBotPlatform = BOT_READY_PLATFORMS.has(platform);
               const botConfigured = isBotPlatform && !!telegramBotUsername;
               const ready = OAUTH_READY_PLATFORMS.has(platform) || botConfigured;
+              const isConnected = acc?.status === 'connected';
               const busy = connectingPlatform === platform;
               return (
                 <Card key={platform}>
@@ -278,12 +280,12 @@ export function MoreScreen() {
                       {!acc && !ready && <Badge color="neutral">قريبًا</Badge>}
                     </div>
                     <Button
-                      variant={acc ? 'danger' : 'secondary'}
+                      variant={isConnected ? 'danger' : 'secondary'}
                       size="sm"
                       onClick={() => togglePlatform(platform)}
-                      disabled={busy || (!acc && !ready)}
+                      disabled={busy || (!isConnected && !ready)}
                     >
-                      {acc ? 'إزالة' : busy ? '...جارٍ التحويل' : 'ربط'}
+                      {isConnected ? 'إزالة' : busy ? '...جارٍ التحويل' : 'ربط'}
                     </Button>
                   </div>
 

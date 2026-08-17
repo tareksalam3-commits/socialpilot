@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Home, Plus, FileText, MessageSquare, MoreHorizontal, BarChart3 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { HomeScreen } from '@/screens/HomeScreen';
@@ -19,16 +19,48 @@ const TABS: { id: Tab; label: string; icon: typeof Home }[] = [
   { id: 'more', label: 'المزيد', icon: MoreHorizontal },
 ];
 
+const TAB_PATHS: Record<Tab, string> = {
+  home: '/app/dashboard',
+  create: '/app/create',
+  content: '/app/content',
+  analytics: '/app/analytics',
+  inbox: '/app/inbox',
+  more: '/app/accounts',
+};
+
+function tabFromPath(pathname: string): Tab {
+  if (pathname === '/app/create') return 'create';
+  if (pathname === '/app/content') return 'content';
+  if (pathname === '/app/analytics') return 'analytics';
+  if (pathname === '/app/inbox' || pathname === '/app/messages') return 'inbox';
+  if (pathname === '/app/accounts' || pathname === '/app/more') return 'more';
+  return 'home';
+}
+
 export type AppShellProps = {
-  navigate: (tab: Tab) => void;
+  navigate?: (tab: Tab) => void;
 };
 
 export function AppShell() {
   const { workspace } = useAuth();
-  const [tab, setTab] = useState<Tab>('home');
+  const [tab, setTab] = useState<Tab>(() => tabFromPath(window.location.pathname));
+
+  useEffect(() => {
+    const handlePopState = () => setTab(tabFromPath(window.location.pathname));
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigate = (nextTab: Tab) => {
+    setTab(nextTab);
+    const nextPath = TAB_PATHS[nextTab];
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, '', nextPath);
+    }
+  };
 
   const screens: Record<Tab, ReactNode> = {
-    home: <HomeScreen onNavigate={(t: Tab) => setTab(t)} />,
+    home: <HomeScreen onNavigate={navigate} />,
     create: <CreateScreen />,
     content: <ContentScreen />,
     analytics: <AnalyticsScreen />,
@@ -52,7 +84,7 @@ export function AppShell() {
             return (
               <button
                 key={id}
-                onClick={() => setTab(id)}
+                onClick={() => navigate(id)}
                 className="flex flex-col items-center gap-1 flex-1 py-2 transition-all"
               >
                 {isCreate ? (
