@@ -1,42 +1,46 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
 
 // ---------------------------------------------------------------------------
-// Called by a logged-in workspace member from "المحتوى" (or the calendar)
-// to actually push a content_variant to its platform. This is the piece
-// that was missing: social-oauth-* only *connects* accounts, nothing ever
-// called the platform's API to post. This function:
-//   1. Verifies the caller belongs to the workspace and the variant exists.
-//   2. Opens/reuses a `publishing_jobs` row (idempotent by variant/calendar
-//      item — clicking twice or retrying a failed job never double-posts).
-//   3. Actually calls the platform API (Telegram bot API / X API v2).
-//   4. Writes the outcome back to the database: publishing_jobs, the
-//      calendar_item (if scheduled), content.status, a notification, and
-//      an audit_log row.
+// scheduler-tick
 //
-// Real posting helpers exist for Telegram, X, Facebook, Instagram, and
-// LinkedIn. Each platform still depends on valid OAuth scopes, account
-// metadata, and platform-side permissions; missing prerequisites return an
-// explicit error and never mark the job as successful.
+// Called every minute by a pg_cron job (via pg_net) to actually publish
+// calendar_items whose scheduled_for time has arrived. Nothing else in the
+// project drives scheduled publishing automatically — social-publish only
+// fires when a logged-in user clicks "publish now" in the UI. This function
+// closes that gap.
+//
+// Auth: NOT a user-facing endpoint. Callers must send the value stored in
+// Supabase Vault as `socialpilot_scheduler_cron_secret`. The pg_cron job reads
+// that value at execution time; the function reads it through a service-role
+// RPC, so no scheduler secret is committed to GitHub or embedded in the code.
+//
+// The actual publish logic (per platform) intentionally mirrors
+// supabase/functions/social-publish/index.ts. It is duplicated rather than
+// imported because each Edge Function in this project is deployed as a
+// self-contained bundle with its own _shared copy (see the existing
+// publish-post / run-scheduler functions for the same pattern) — there is
+// no cross-function import mechanism in this deployment model.
 // ---------------------------------------------------------------------------
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
-};
+async function getCronSecret(): Promise<string | null> {
+  const { data, error } = await supabase.rpc('get_scheduler_cron_secret');
+  if (error) {
+    console.error('scheduler-tick: could not read cron secret', error);
+    return null;
+  }
+  return typeof data === 'string' && data.length > 0 ? data : null;
+}
 
-const supabase = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-  { auth: { persistSession: false } }
-);
+const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
 const META_GRAPH_VERSION = Deno.env.get('META_GRAPH_VERSION') ?? 'v26.0';
 const LINKEDIN_API_VERSION = Deno.env.get('LINKEDIN_API_VERSION') ?? '202607';
 const LINKEDIN_RESTLI_PROTOCOL_VERSION = '2.0.0';
 
 function jsonRes(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
 function apiErrorMessage(body: unknown, fallback: string): string {
@@ -81,6 +85,16 @@ type Variant = {
   media_brief: Record<string, unknown>;
 };
 
+type CalendarItem = {
+  id: string;
+  workspace_id: string;
+  content_id: string | null;
+  variant_id: string | null;
+  platform: string;
+  scheduled_for: string;
+  status: string;
+};
+
 function buildPostText(variant: Variant, maxLen?: number): string {
   const parts = [variant.text.trim()];
   if (variant.cta && variant.cta.trim()) parts.push(variant.cta.trim());
@@ -103,11 +117,6 @@ async function fetchWithRetry(input: string | URL, init: RequestInit, maxAttempt
   return response as Response;
 }
 
-// ---------------------------------------------------------------------------
-// Telegram — bot posts into the channel the workspace connected. Uses
-// sendPhoto when the variant has an image in media_brief, sendMessage
-// otherwise. Bot token lives in social_platform_app_secrets (shared bot).
-// ---------------------------------------------------------------------------
 async function publishToTelegram(variant: Variant, account: Record<string, unknown>): Promise<{ id: string; url: string | null }> {
   const { data: secretRow } = await supabase
     .from('social_platform_app_secrets')
@@ -143,11 +152,6 @@ async function publishToTelegram(variant: Variant, account: Record<string, unkno
   return { id: String(messageId ?? ''), url };
 }
 
-// ---------------------------------------------------------------------------
-// X (Twitter) — posts as the connected member via API v2 POST /2/tweets.
-// Refreshes the access token first if it's expired (offline.access scope
-// was requested at connect time, so a refresh_token should be on file).
-// ---------------------------------------------------------------------------
 async function getFreshXToken(accountId: string): Promise<string> {
   const { data: tokenRow } = await supabase
     .from('social_account_tokens')
@@ -262,8 +266,7 @@ async function publishToX(variant: Variant, account: Record<string, unknown>): P
   });
   const json = await res.json();
   if (!res.ok || !json.data?.id) {
-    const message = apiErrorMessage(json, 'فشل النشر على إكس');
-    throw new Error(message);
+    throw new Error(apiErrorMessage(json, 'فشل النشر على إكس'));
   }
 
   const handle = typeof account.handle === 'string' ? String(account.handle).replace(/^@/, '') : null;
@@ -271,76 +274,49 @@ async function publishToX(variant: Variant, account: Record<string, unknown>): P
   return { id: String(json.data.id), url };
 }
 
-Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
-  if (req.method !== 'POST') return jsonRes(405, { error: 'Method not allowed' });
-
-  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
-  if (!token) return jsonRes(401, { error: 'Missing authentication token' });
-  const { data: userData, error: userError } = await supabase.auth.getUser(token);
-  if (userError || !userData.user) return jsonRes(401, { error: 'Invalid or expired token' });
-  const userId = userData.user.id;
-
-  let body: { workspaceId?: string; variantId?: string; calendarItemId?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return jsonRes(400, { error: 'Invalid JSON body' });
+async function publishCalendarItem(item: CalendarItem): Promise<'published' | 'skipped'> {
+  const { data: variant } = await supabase.from('content_variants').select('*').eq('id', item.variant_id as string).maybeSingle();
+  if (!variant) {
+    await supabase.from('calendar_items').update({ status: 'failed' }).eq('id', item.id);
+    throw new Error('النسخة (variant) المرتبطة بهذا الموعد لم تعد موجودة');
   }
-
-  const { workspaceId, variantId, calendarItemId } = body;
-  if (!workspaceId || !variantId) return jsonRes(400, { error: 'workspaceId و variantId مطلوبين' });
-
-  const { data: membership } = await supabase
-    .from('workspace_members')
-    .select('role')
-    .eq('workspace_id', workspaceId)
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (!membership) return jsonRes(403, { error: 'مش عضو في مساحة العمل دي' });
-
-  const { data: variant } = await supabase
-    .from('content_variants')
-    .select('*')
-    .eq('id', variantId)
-    .eq('workspace_id', workspaceId)
-    .maybeSingle();
-  if (!variant) return jsonRes(404, { error: 'النسخة غير موجودة' });
 
   const platform = variant.platform as string;
   const platformLabel = PLATFORM_LABELS[platform] ?? platform;
 
   if (!SUPPORTED_PLATFORMS.has(platform)) {
-    return jsonRes(409, { error: `النشر التلقائي على ${platformLabel} غير مدعوم بعد — تقدر تنسخ النص وتنشره يدويًا` });
+    // Not one of our auto-publish platforms — leave it scheduled rather than
+    // silently failing forever; a human still needs to post it manually.
+    return 'skipped';
   }
 
   const { data: account } = await supabase
     .from('social_accounts')
     .select('*')
-    .eq('workspace_id', workspaceId)
+    .eq('workspace_id', item.workspace_id)
     .eq('platform', platform)
     .eq('status', 'connected')
     .maybeSingle();
-  if (!account) return jsonRes(409, { error: `مفيش حساب ${platformLabel} مربوط بهذه المساحة` });
+  if (!account) {
+    await supabase.from('calendar_items').update({ status: 'failed' }).eq('id', item.id);
+    throw new Error(`مفيش حساب ${platformLabel} مربوط بهذه المساحة`);
+  }
 
-  const idempotencyKey = calendarItemId ? `cal:${calendarItemId}` : `manual:${variantId}`;
-
+  const idempotencyKey = `cal:${item.id}`;
   let { data: existingJob } = await supabase
     .from('publishing_jobs')
     .select('*')
     .eq('idempotency_key', idempotencyKey)
     .maybeSingle();
 
-  // Scheduled jobs use a stable workspace/variant/time key. Reuse that row
-  // when a user clicks Publish Now for the same calendar item; otherwise the
-  // manual path and scheduler could publish the same variant twice.
-  if (!existingJob && calendarItemId) {
+  // schedule_content_variant creates a queued job with its own stable key.
+  // Reuse it instead of creating a second publish job for the same calendar item.
+  if (!existingJob) {
     const { data: scheduledJob } = await supabase
       .from('publishing_jobs')
       .select('*')
-      .eq('workspace_id', workspaceId)
-      .eq('variant_id', variantId)
-      .eq('calendar_item_id', calendarItemId)
+      .eq('calendar_item_id', item.id)
+      .eq('variant_id', item.variant_id)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -348,42 +324,49 @@ Deno.serve(async (req: Request) => {
   }
 
   if (existingJob?.status === 'succeeded') {
-    return jsonRes(200, { ok: true, alreadyPublished: true, job: existingJob });
-  }
-  if (existingJob && Number(existingJob.attempts ?? 0) >= Number(existingJob.max_attempts ?? 3)) {
-    return jsonRes(409, { error: 'تم الوصول إلى الحد الأقصى لمحاولات النشر؛ أعد ربط الحساب أو أنشئ محاولة جديدة.', job: existingJob });
-  }
-  if (existingJob?.status === 'running') {
-    return jsonRes(409, { error: 'توجد محاولة نشر جارية لنفس المحتوى؛ أعد المحاولة بعد لحظات.', job: existingJob });
+    await supabase.from('calendar_items').update({ status: 'published' }).eq('id', item.id);
+    return 'skipped';
   }
 
   let job = existingJob;
   if (job) {
-    const { data: updated, error: updateError } = await supabase
+    const attempts = Number(job.attempts ?? 0);
+    const maxAttempts = Number(job.max_attempts ?? 3);
+    if (attempts >= maxAttempts) {
+      await supabase.from('calendar_items').update({ status: 'failed' }).eq('id', item.id);
+      throw new Error('تم الوصول إلى الحد الأقصى لمحاولات النشر');
+    }
+
+    const lastAttemptMs = job.last_attempt_at ? new Date(String(job.last_attempt_at)).getTime() : NaN;
+    const runningIsFresh = job.status === 'running'
+      && Number.isFinite(lastAttemptMs)
+      && Date.now() - lastAttemptMs < 15 * 60 * 1000;
+    if (runningIsFresh) return 'skipped';
+
+    const claimStatuses = job.status === 'running' ? ['running'] : ['queued', 'failed'];
+    const { data: claimed, error: claimError } = await supabase
       .from('publishing_jobs')
       .update({
         action: 'publish',
         status: 'running',
-        attempts: Number(job.attempts ?? 0) + 1,
+        attempts: attempts + 1,
         last_error: null,
         last_attempt_at: new Date().toISOString(),
         platform,
       })
       .eq('id', job.id)
-      .in('status', ['queued', 'failed'])
+      .in('status', claimStatuses)
       .select()
       .maybeSingle();
-    if (updateError || !updated) {
-      return jsonRes(409, { error: 'توجد محاولة نشر جارية لنفس المحتوى؛ أعد المحاولة بعد لحظات.', job });
-    }
-    job = updated;
+    if (claimError || !claimed) return 'skipped';
+    job = claimed;
   } else {
     const { data: inserted, error: insertError } = await supabase
       .from('publishing_jobs')
       .insert({
-        workspace_id: workspaceId,
-        variant_id: variantId,
-        calendar_item_id: calendarItemId ?? null,
+        workspace_id: item.workspace_id,
+        variant_id: item.variant_id,
+        calendar_item_id: item.id,
         idempotency_key: idempotencyKey,
         action: 'publish',
         status: 'running',
@@ -398,24 +381,23 @@ Deno.serve(async (req: Request) => {
       if (insertError?.code === '23505') {
         const { data: racedJob } = await supabase
           .from('publishing_jobs')
-          .select('*')
-          .eq('workspace_id', workspaceId)
-          .eq('variant_id', variantId)
-          .eq('calendar_item_id', calendarItemId)
+          .select('status')
+          .eq('calendar_item_id', item.id)
+          .eq('variant_id', item.variant_id)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (racedJob?.status === 'succeeded') return jsonRes(200, { ok: true, alreadyPublished: true, job: racedJob });
-        if (racedJob) return jsonRes(409, { error: 'توجد محاولة نشر جارية لنفس المحتوى؛ أعد المحاولة بعد لحظات.', job: racedJob });
+        if (racedJob?.status === 'succeeded') {
+          await supabase.from('calendar_items').update({ status: 'published' }).eq('id', item.id);
+        }
+        return 'skipped';
       }
-      return jsonRes(500, { error: insertError?.message ?? 'تعذّر إنشاء مهمة النشر' });
+      throw new Error(insertError?.message ?? 'تعذّر إنشاء مهمة النشر');
     }
     job = inserted;
   }
 
-  if (calendarItemId) {
-    await supabase.from('calendar_items').update({ status: 'publishing' }).eq('id', calendarItemId);
-  }
+  await supabase.from('calendar_items').update({ status: 'publishing' }).eq('id', item.id);
 
   try {
     const result = platform === 'telegram'
@@ -440,31 +422,25 @@ Deno.serve(async (req: Request) => {
       result: { platform, post_id: result.id, url: result.url },
     }).eq('id', job.id);
 
-    if (calendarItemId) {
-      await supabase.from('calendar_items').update({ status: 'published' }).eq('id', calendarItemId);
-    }
-    // Best-effort: mark the parent content as published once at least one
-    // of its variants has actually gone out.
+    await supabase.from('calendar_items').update({ status: 'published' }).eq('id', item.id);
     await supabase.from('content').update({ status: 'published' }).eq('id', variant.content_id);
 
     await supabase.from('notifications').insert({
-      workspace_id: workspaceId,
-      user_id: userId,
+      workspace_id: item.workspace_id,
+      user_id: null,
       type: 'publish_succeeded',
-      title: `تم النشر على ${platformLabel}`,
+      title: `تم النشر تلقائيًا على ${platformLabel}`,
       body: result.url ?? null,
-      payload: { variant_id: variantId, platform, post_id: result.id, url: result.url },
+      payload: { variant_id: item.variant_id, platform, post_id: result.id, url: result.url, calendar_item_id: item.id },
     });
     await supabase.from('audit_logs').insert({
-      workspace_id: workspaceId,
-      user_id: userId,
+      workspace_id: item.workspace_id,
+      user_id: null,
       action: 'publish_succeeded',
       entity: 'content_variants',
-      entity_id: variantId,
-      detail: { platform, post_id: result.id },
+      entity_id: item.variant_id,
+      detail: { platform, post_id: result.id, triggered_by: 'scheduler' },
     });
-
-    return jsonRes(200, { ok: true, postId: result.id, url: result.url, job: { ...job, status: 'succeeded' } });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'فشل النشر';
 
@@ -474,27 +450,72 @@ Deno.serve(async (req: Request) => {
       last_error: message,
     }).eq('id', job.id);
 
-    if (calendarItemId) {
-      await supabase.from('calendar_items').update({ status: 'failed' }).eq('id', calendarItemId);
-    }
+    await supabase.from('calendar_items').update({ status: 'failed' }).eq('id', item.id);
 
     await supabase.from('notifications').insert({
-      workspace_id: workspaceId,
-      user_id: userId,
+      workspace_id: item.workspace_id,
+      user_id: null,
       type: 'publish_failed',
-      title: `فشل النشر على ${platformLabel}`,
+      title: `فشل النشر التلقائي على ${platformLabel}`,
       body: message,
-      payload: { variant_id: variantId, platform },
+      payload: { variant_id: item.variant_id, platform, calendar_item_id: item.id },
     });
     await supabase.from('audit_logs').insert({
-      workspace_id: workspaceId,
-      user_id: userId,
+      workspace_id: item.workspace_id,
+      user_id: null,
       action: 'publish_failed',
       entity: 'content_variants',
-      entity_id: variantId,
-      detail: { platform, error: message },
+      entity_id: item.variant_id,
+      detail: { platform, error: message, triggered_by: 'scheduler' },
     });
 
-    return jsonRes(502, { error: message });
+    throw err;
+  }
+}
+
+Deno.serve(async (req: Request) => {
+  const authHeader = req.headers.get('Authorization') ?? '';
+  const token = authHeader.replace(/^Bearer\s+/i, '');
+  const expectedSecret = await getCronSecret();
+  if (!expectedSecret || token !== expectedSecret) {
+    return jsonRes(401, { error: 'Unauthorized' });
+  }
+
+  const now = new Date().toISOString();
+  const results = { checked: 0, published: 0, failed: 0, skipped: 0, errors: [] as string[] };
+
+  try {
+    const { data: dueItems, error: dueErr } = await supabase
+      .from('calendar_items')
+      .select('id, workspace_id, content_id, variant_id, platform, scheduled_for, status')
+      .eq('status', 'scheduled')
+      .lte('scheduled_for', now)
+      .limit(25);
+
+    if (dueErr) throw new Error(dueErr.message);
+
+    for (const item of (dueItems ?? []) as CalendarItem[]) {
+      results.checked++;
+      if (!item.variant_id) {
+        results.skipped++;
+        continue;
+      }
+      try {
+        const outcome = await publishCalendarItem(item);
+        if (outcome === 'published') results.published++;
+        else results.skipped++;
+      } catch (e) {
+        results.failed++;
+        const msg = e instanceof Error ? e.message : String(e);
+        results.errors.push(`${item.id}: ${msg}`);
+        console.error(`scheduler-tick: failed to publish calendar_item ${item.id}`, e);
+      }
+    }
+
+    return jsonRes(200, { ...results, checked_at: now });
+  } catch (e) {
+    console.error('scheduler-tick: unhandled error', e);
+    return jsonRes(500, { error: e instanceof Error ? e.message : 'Unexpected error', checked_at: now });
   }
 });
+

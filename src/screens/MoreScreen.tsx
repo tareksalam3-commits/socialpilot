@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Settings, Brain, Link2, LogOut, Shield, TrendingUp, ChevronLeft } from 'lucide-react';
+import { Settings, Brain, Link2, LogOut, Shield, TrendingUp, ChevronLeft, RefreshCw } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import { checkIsSuperAdmin } from '@/lib/superAdmin';
-import { startSocialOAuth, getTelegramBotInfo, connectTelegramChannel } from '@/lib/api';
+import { startSocialOAuth, getTelegramBotInfo, connectTelegramChannel, syncAccounts } from '@/lib/api';
 import { Card, Button, Badge, ErrorBanner, Input } from '@/components/ui';
 import { PLATFORMS, PLATFORM_META } from '@/lib/constants';
 import { SuperAdminScreen } from '@/screens/SuperAdminScreen';
@@ -46,6 +46,7 @@ export function MoreScreen() {
   const [telegramOpen, setTelegramOpen] = useState(false);
   const [telegramInput, setTelegramInput] = useState('');
   const [telegramBusy, setTelegramBusy] = useState(false);
+  const [accountSyncBusy, setAccountSyncBusy] = useState(false);
 
   const loadAccounts = useCallback(async () => {
     if (!workspace) return;
@@ -151,6 +152,27 @@ export function MoreScreen() {
     }
   }
 
+  async function handleSyncAccounts() {
+    if (!workspace) return;
+    setAccountSyncBusy(true);
+    setConnectError(null);
+    setConnectNotice(null);
+    try {
+      const result = await syncAccounts(workspace.id);
+      await loadAccounts();
+      const failed = result.results.filter((item) => !item.ok);
+      setConnectNotice(
+        failed.length > 0
+          ? `اكتملت المزامنة جزئيًا: ${result.synced - failed.length} ناجح، ${failed.length} يحتاج مراجعة.`
+          : `تم فحص ${result.synced} حساب${result.synced === 1 ? '' : 'ات'} بنجاح.`
+      );
+    } catch (e) {
+      setConnectError(e instanceof Error ? e.message : 'فشلت مزامنة الحسابات');
+    } finally {
+      setAccountSyncBusy(false);
+    }
+  }
+
   async function handleConnectTelegram() {
     if (!workspace || !telegramInput.trim()) return;
     setTelegramBusy(true);
@@ -230,6 +252,10 @@ export function MoreScreen() {
                 {connectNotice}
               </div>
             )}
+            <Button variant="secondary" size="sm" onClick={handleSyncAccounts} disabled={accountSyncBusy}>
+              <RefreshCw size={14} className={accountSyncBusy ? 'animate-spin' : ''} />
+              {accountSyncBusy ? '...جارٍ الفحص' : 'فحص الحسابات الآن'}
+            </Button>
             {PLATFORMS.map((platform) => {
               const meta = PLATFORM_META[platform];
               const Icon = meta.icon;

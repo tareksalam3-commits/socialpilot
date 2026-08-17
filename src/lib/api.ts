@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { AiGatewayRequest, AiGatewayResponse } from './types';
+import type { AiGatewayRequest, AiGatewayResponse, InboxConversation, InboxMessage } from './types';
 
 export async function startSocialOAuth(workspaceId: string, platformKey: 'meta' | 'linkedin' | 'x' = 'meta'): Promise<string> {
   const { data: session } = await supabase.auth.getSession();
@@ -128,4 +128,114 @@ export async function callAiGateway(req: AiGatewayRequest): Promise<AiGatewayRes
     throw new Error('Received an unexpected response from the AI service.');
   }
   return data;
+}
+
+
+export async function listInboxConversations(workspaceId: string): Promise<InboxConversation[]> {
+  const { data, error } = await supabase
+    .from('inbox_conversations')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .order('updated_at', { ascending: false })
+    .limit(100);
+  if (error) throw error;
+  return (data ?? []) as InboxConversation[];
+}
+
+export async function listInboxMessages(workspaceId: string, conversationId: string): Promise<InboxMessage[]> {
+  const { data, error } = await supabase
+    .from('inbox_messages')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true })
+    .limit(200);
+  if (error) throw error;
+  return (data ?? []) as InboxMessage[];
+}
+
+export async function markInboxConversationRead(conversationId: string): Promise<void> {
+  const { error } = await supabase
+    .from('inbox_conversations')
+    .update({ unread: false })
+    .eq('id', conversationId);
+  if (error) throw error;
+}
+
+export async function sendInboxReply(conversationId: string, content: string): Promise<InboxMessage> {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('يجب تسجيل الدخول لإرسال الرد');
+
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/inbox-reply`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+    },
+    body: JSON.stringify({ conversationId, content: content.trim() }),
+  });
+
+  let body: { error?: string; message?: InboxMessage } = {};
+  try {
+    body = (await response.json()) as typeof body;
+  } catch {
+    // handled by the status-based error below
+  }
+  if (!response.ok || !body.message) {
+    throw new Error(body.error ?? `تعذّر إرسال الرد (${response.status})`);
+  }
+  return body.message;
+}
+
+
+export type AccountSyncResult = {
+  account_id: string;
+  platform: string;
+  ok: boolean;
+  status: 'connected' | 'error' | 'expired';
+  handle?: string;
+  display_name?: string;
+  error?: string;
+};
+
+export async function syncAccounts(workspaceId: string): Promise<{ synced: number; results: AccountSyncResult[] }> {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('يجب تسجيل الدخول لمزامنة الحسابات');
+
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/account-sync`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+    },
+    body: JSON.stringify({ workspace_id: workspaceId }),
+  });
+
+  const body = await response.json().catch(() => ({})) as { error?: string; synced?: number; results?: AccountSyncResult[] };
+  if (!response.ok) throw new Error(body.error ?? `فشلت مزامنة الحسابات (${response.status})`);
+  return { synced: Number(body.synced ?? 0), results: body.results ?? [] };
+}
+
+export async function syncAccount(accountId: string): Promise<AccountSyncResult> {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session.session?.access_token;
+  if (!token) throw new Error('يجب تسجيل الدخول لمزامنة الحساب');
+
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/account-sync`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+    },
+    body: JSON.stringify({ account_id: accountId }),
+  });
+
+  const body = await response.json().catch(() => ({})) as { error?: string; results?: AccountSyncResult[] };
+  if (!response.ok || !body.results?.[0]) throw new Error(body.error ?? `فشلت مزامنة الحساب (${response.status})`);
+  return body.results[0];
 }

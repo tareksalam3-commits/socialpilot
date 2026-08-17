@@ -179,6 +179,39 @@ export type Notification = {
   created_at: string;
 };
 
+export type InboxConversation = {
+  id: string;
+  workspace_id: string;
+  account_id: string;
+  platform: SocialPlatform | string;
+  type: 'dm' | 'comment';
+  external_id: string;
+  external_participant_id: string | null;
+  sender_name: string | null;
+  snippet: string | null;
+  unread: boolean;
+  needs_review: boolean;
+  content_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InboxMessage = {
+  id: string;
+  workspace_id: string;
+  conversation_id: string;
+  direction: 'inbound' | 'outbound';
+  content: string;
+  is_ai: boolean;
+  user_id: string | null;
+  external_id: string | null;
+  sender_external_id: string | null;
+  sender_name: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
 // ---- AI Gateway request/response shapes ----
 
 export type AiIntent =
