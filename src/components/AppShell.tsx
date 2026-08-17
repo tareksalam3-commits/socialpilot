@@ -7,6 +7,7 @@ import { ContentScreen } from '@/screens/ContentScreen';
 import { InboxScreen } from '@/screens/InboxScreen';
 import { MoreScreen } from '@/screens/MoreScreen';
 import { AnalyticsScreen } from '@/screens/AnalyticsScreen';
+import { LeadHunterErrorBoundary, LeadHunterScreen } from '@/modules/lead-hunter';
 
 type Tab = 'home' | 'create' | 'content' | 'analytics' | 'inbox' | 'more';
 
@@ -44,20 +45,32 @@ export type AppShellProps = {
 export function AppShell() {
   const { workspace } = useAuth();
   const [tab, setTab] = useState<Tab>(() => tabFromPath(window.location.pathname));
+  const [path, setPath] = useState(() => window.location.pathname);
 
   useEffect(() => {
-    const handlePopState = () => setTab(tabFromPath(window.location.pathname));
+    const handlePopState = () => {
+      setPath(window.location.pathname);
+      setTab(tabFromPath(window.location.pathname));
+    };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const navigate = (nextTab: Tab) => {
-    setTab(nextTab);
-    const nextPath = TAB_PATHS[nextTab];
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState({}, '', nextPath);
-    }
+  const openPath = (nextPath: string) => {
+    setPath(nextPath);
+    setTab(tabFromPath(nextPath));
+    if (window.location.pathname !== nextPath) window.history.pushState({}, '', nextPath);
   };
+
+  const navigate = (nextTab: Tab) => openPath(TAB_PATHS[nextTab]);
+
+  if (path === '/app/leads') {
+    return (
+      <LeadHunterErrorBoundary>
+        <LeadHunterScreen onBack={() => openPath('/app/accounts')} />
+      </LeadHunterErrorBoundary>
+    );
+  }
 
   const screens: Record<Tab, ReactNode> = {
     home: <HomeScreen onNavigate={navigate} />,
@@ -65,7 +78,7 @@ export function AppShell() {
     content: <ContentScreen />,
     analytics: <AnalyticsScreen />,
     inbox: <InboxScreen />,
-    more: <MoreScreen />,
+    more: <MoreScreen onOpenLeadHunter={() => openPath('/app/leads')} />,
   };
 
   return (

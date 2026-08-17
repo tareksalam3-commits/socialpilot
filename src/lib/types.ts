@@ -220,7 +220,8 @@ export type AiIntent =
   | 'create_content_plan'
   | 'analyze_performance'
   | 'suggest_ideas'
-  | 'general_advice';
+  | 'general_advice'
+  | 'understand_lead_query';
 
 export type AiGatewayRequest = {
   intent: AiIntent;

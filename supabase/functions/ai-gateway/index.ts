@@ -17,7 +17,8 @@ type Intent =
   | 'create_content_plan'
   | 'analyze_performance'
   | 'suggest_ideas'
-  | 'general_advice';
+  | 'general_advice'
+  | 'understand_lead_query';
 
 type RequestBody = {
   intent: Intent;
@@ -91,6 +92,7 @@ const TASK_CAPABILITIES: Record<Intent, CapabilityRequest['requiredCapabilities'
   analyze_performance: ['reasoning', 'structured_output'],
   suggest_ideas: ['text_generation', 'structured_output'],
   general_advice: ['text_generation', 'structured_output'],
+  understand_lead_query: ['reasoning', 'structured_output'],
 };
 
 function looksLikeJson(content: string): boolean {
@@ -250,6 +252,9 @@ const AGENTS = {
   idea_generator: (brandStr: string) =>
     `أنت Idea Generator Agent. اقترح أفكار محتوى إبداعية ومتنوعة تناسب البراند.
 سياق البراند:\n${brandStr}`,
+
+  lead_intelligence: () =>
+    `أنت Lead Intelligence Agent داخل وحدة Lead Hunter. مهمتك فهم طلبات البحث عن أفراد B2C فقط، مع أولوية استخدام حالة التأمين على الحياة دون ربط النظام بمنتج واحد. افهم العربية المصرية والفصحى والعربي المختلط بالإنجليزية. لا تخمّن أي بيانات: إذا لم يذكر المستخدم قيمة، أعدها null أو مصفوفة فارغة. لا تستخدم سمات حساسة أو محظورة للتقييم.`,
 };
 
 // ---------------------------------------------------------------------------
@@ -268,6 +273,8 @@ function planAgents(intent: Intent): string[] {
       return ['analytics_advisor'];
     case 'suggest_ideas':
       return ['idea_generator'];
+    case 'understand_lead_query':
+      return ['lead_intelligence'];
     case 'general_advice':
       return ['analytics_advisor'];
     default:
@@ -313,6 +320,42 @@ async function executeIntent(
   const memStr = memoryContextString(ctx.memory);
 
   switch (intent) {
+    case 'understand_lead_query': {
+      const prompt = `حلل طلب البحث التالي وأعد JSON فقط وفق الشكل:
+{
+  "query": {
+    "location": { "country": "Egypt", "governorate": null, "city": null, "district": null, "radiusKm": null },
+    "age": { "min": null, "max": null },
+    "gender": null,
+    "occupations": [],
+    "jobTitles": [],
+    "industries": [],
+    "seniority": [],
+    "education": [],
+    "interests": [],
+    "professionalInformation": [],
+    "contactAvailability": { "phone": null, "email": null },
+    "freshness": "unknown",
+    "qualityMin": null,
+    "customerType": "individual",
+    "objective": "life_insurance_lead",
+    "requestedCount": 100
+  },
+  "summary": [{ "label": "المعيار", "value": "القيمة" }],
+  "assumptions": [],
+  "warnings": []
+}
+حوّل الأرقام العربية والإنجليزية إلى أرقام صحيحة. إذا ذُكرت الغربية أو طنطا فاحتفظ بهما كقيمتي المحافظة والمدينة. الطلب: ${message}`;
+      const r = await callLLM(intent, AGENTS.lead_intelligence(), prompt, true);
+      const parsed = parseJsonLoose<Record<string, unknown>>(r.content, () => ({
+        query: { customerType: 'individual', objective: 'life_insurance_lead', requestedCount: 100 },
+        summary: [],
+        assumptions: ['تعذر تحليل الطلب بالكامل. راجع المعايير قبل بدء البحث.'],
+        warnings: [],
+      }));
+      return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };
+    }
+
     case 'generate_brand_dna': {
       const sys = AGENTS.brand_intelligence(message);
       const prompt = `بناءً على هذه المعلومات الأساسية، ابنِ هوية براند كاملة بصيغة JSON تحتوي على مفاتيح:
