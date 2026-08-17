@@ -388,7 +388,12 @@ Deno.serve(async (req: Request) => {
       else if (job.platform === 'linkedin') synced += await syncLinkedIn(job);
       else if (job.platform) unsupportedPlatforms.add(job.platform);
     } catch (error) {
-      errors.push({ jobId: job.id, platform: job.platform, error: errorMessage(error) });
+      const message = errorMessage(error);
+      if (job.platform === 'linkedin' && /403|not enough permissions|permission/i.test(message)) {
+        unsupportedPlatforms.add('linkedin');
+      } else {
+        errors.push({ jobId: job.id, platform: job.platform, error: message });
+      }
     }
   }
   return json(200, {
