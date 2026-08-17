@@ -13,20 +13,20 @@
 | P0 | Unified Inbox | كانت الشاشة فارغة؛ أضيفت الآن قراءة المحادثات والرسائل والرد عبر Edge Functions | يمنع دورة Listen/Respond | الإبقاء على التغيير، ثم اختبار RLS والرد والتكرار | منفذ، يحتاج اختبارًا حيًا |
 | P0 | مخطط Inbox | الجداول حية لكنها لم تكن ممثلة في migrations المحلية | انجراف يمنع إعادة النشر الآمن | إضافة `0017_inbox_and_security_hardening` مع القيود والفهارس وRLS | منفذ ومطبق حيًا |
 | P0 | أمان الدوال | Security Definer grants واسعة تاريخيًا، وتوقيعات الدوال مختلفة عن الافتراضات | احتمال توسيع سطح التنفيذ العام | سحب grants غير اللازمة مع الحفاظ على مسارات trigger/server | منفذ جزئيًا، يحتاج إعادة فحص Advisors |
-| P0 | مصدر وظائف الإنتاج | 42 وظيفة حية تقريبًا مقابل 12 مجلدًا محليًا؛ تشمل Scheduler وAccount Sync ووظائف OAuth إضافية | نشر نسخة ناقصة قد يكسر وظائف عاملة | استعادة أو إعادة بناء الوظائف ذات المسار الحرج قبل أي نشر لاحق | مفتوح ومصنف كخطر مصدر حقيقة |
-| P1 | Scheduler | `run-scheduler` و`scheduler-tick` حيان وغير ممثلين محليًا | قد تبقى العناصر المجدولة في `queued` دون نشر | استعادة المصدر، تدقيق claim/idempotency، ثم اختبار dry-run وexpired token | مفتوح |
-| P1 | Account Sync | `account-sync` حي فقط تقريبًا | الحسابات قد لا تعكس token expiry أو صلاحيات المنصة | استعادة المصدر وربطه من Accounts/More مع نتائج جزئية واضحة | مفتوح |
+| P0 | مصدر وظائف الإنتاج | ما زالت وظائف حية إضافية غير ممثلة محليًا، خصوصًا OAuth والإدارة والتحليلات | نشر نسخة ناقصة قد يكسر وظائف عاملة | استعادة أو إعادة بناء الوظائف ذات المسار الحرج قبل أي نشر لاحق | جزئي؛ Inbox/Scheduler/Account Sync ممثلة محليًا، والباقي مفتوح |
+| P1 | Scheduler | `run-scheduler` القديمة غير متوافقة، بينما `scheduler-tick` الحالية متوافقة مع schema بعد الإصلاح | قد تبقى العناصر المجدولة في `queued` دون نشر أو تتكرر | استخدام `scheduler-tick` الحالية مع claim ذري وstale recovery وVault | منفذ ومطبق حيًا؛ اختبار النشر الخارجي مشروط بحساب Sandbox |
+| P1 | Account Sync | أُعيد بناء الوظيفة حول `social_accounts` و`social_account_tokens` وربطت بزر مزامنة في MoreScreen | الحسابات تحتاج تحديث حالة الرمز والاسم والمعرّف | فحص المنصات وتحديث `status`, `needs_reconnect`, `metadata`, و`last_sync_at` | منفذ ومطبق حيًا؛ اختبار adapters مشروط بحسابات متصلة |
 | P1 | Social OAuth coverage | وظائف Threads/TikTok/WhatsApp/Telegram وLinkedIn موجودة حيًا، لكن المصدر المحلي لا يغطيها كلها | واجهة التكاملات قد تعرض مسارًا غير قابل للصيانة من GitHub | توحيد العقود وتوثيق كل platform adapter قبل تعديلها | مفتوح جزئيًا |
 | P1 | Analytics | المسارات المحلية تدعم X وMeta بحسب التقرير؛ لا توجد سجلات Insights حية للاختبار | قد تُعرض لوحة بلا بيانات فعلية أو بمنصات N/A | إضافة اختبارات contract وpartial failure دون اختلاق metrics | منفذ جزئيًا، يحتاج اختبارًا |
-| P1 | Publishing | التقرير يوثق Telegram/X/Facebook/Instagram/LinkedIn؛ الوظيفة الحية `publish-post` و`social-publish` تحتاج مصدر حقيقة واضح | فشل منصة واحدة قد يترك job في حالة غير متسقة | تدقيق حالات job transition وbounded retry وtoken expiry | منفذ جزئيًا، يحتاج اختبارًا |
+| P1 | Publishing | `social-publish` هو مسار النشر الحالي ويرتبط بـ `publishing_jobs` وScheduler | فشل منصة واحدة قد يترك job في حالة غير متسقة | توحيد idempotency ومنع سباق Publish Now مع Scheduler | منفذ ومطبق حيًا؛ اختبار المنصة مشروط برمز صالح |
 | P1 | Automation | `automation-control` حي، لكن لا تظهر طبقة محلية مكتملة لتدفقات event/schedule | لا يمكن إثبات trigger أو retry من المستودع | استعادة العقد وتغطية webhook dedupe وretry policy | مفتوح |
 | P2 | AI/content | تقرير التنفيذ يوثق Brand Voice وQuality Engine وAI Gateway | مخاطر أقل من النشر والرسائل، لكن يلزم التحقق من cost/status | إضافة اختبارات schema وnon-negative cost وfailure status | منفذ، يحتاج regression tests |
 | P2 | Admin/Secrets | `admin-secrets`, `admin-users`, `platform-credentials` حية فقط في أجزاء | صعوبة مراجعة صلاحيات الإدارة وتدفق الأسرار | توثيق endpoints وعدم نقل الأسرار إلى الواجهة، ثم استعادة المصدر | مفتوح |
-| P2 | Observability | توجد audit logs وnotifications في المخطط، لكن لا توجد خطة اختبار موحدة لكل failure | صعوبة تشخيص duplicate webhook أو failed publish | إضافة correlation/idempotency identifiers وتقارير فشل قابلة للقراءة | مفتوح |
+| P2 | Observability | توجد audit logs وnotifications في المخطط، مع metadata لأخطاء Inbox وAccount Sync | صعوبة تشخيص duplicate webhook أو failed publish | الحفاظ على correlation/idempotency identifiers وإضافة اختبارات failure matrix | جزئي؛ التغطية الموحدة لكل منصة ما زالت مفتوحة |
 
 ## ترتيب التنفيذ التالي
 
-يبدأ التنفيذ بعد Inbox من **توحيد مصدر وظائف التشغيل الحرجة**، وتحديدًا `run-scheduler` ثم `account-sync`، لأنهما يؤثران مباشرة في الانتقال من Schedule إلى Publish وفي صحة الحسابات. بعد ذلك تُراجع وظائف OAuth الإضافية وAnalytics/Publishing بعقود مشتركة، ثم تُبنى اختبارات الفشل والتكرار قبل أي نشر إضافي.
+بعد Inbox تم توحيد مصدر وظائف التشغيل الحرجة حول `scheduler-tick`, `social-publish`, و`account-sync` المتوافقة مع schema الحالي. المرحلة التالية هي استعادة أو توثيق وظائف OAuth والإدارة وAnalytics المتبقية، ثم إضافة اختبارات قبول بحسابات Sandbox لكل منصة قبل توسيع النشر الخارجي.
 
 ## حدود الاختبار
 
