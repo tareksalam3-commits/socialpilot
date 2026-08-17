@@ -170,7 +170,10 @@ export function AnalyticsScreen() {
       acc[type] = (acc[type] ?? 0) + engagementValue(row);
       return acc;
     }, {});
-    return Object.entries(scores).map(([label, score]) => ({ label, score })).sort((a, b) => b.score - a.score)[0] ?? null;
+    return Object.entries(scores)
+      .filter(([, score]) => score > 0)
+      .map(([label, score]) => ({ label, score }))
+      .sort((a, b) => b.score - a.score)[0] ?? null;
   }, [insights, contentById]);
 
   const bestPostingTime = useMemo(() => {
