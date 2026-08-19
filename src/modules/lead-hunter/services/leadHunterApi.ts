@@ -116,6 +116,9 @@ export async function getLeadStats(workspaceId: string, searchRequestId: string)
     sourcesUsed: Array.isArray(summary.sourcesUsed) ? summary.sourcesUsed.map(String) : [],
     rounds: Number(job?.rounds_completed ?? summary.searchRounds ?? 0),
     stopReason: (job?.stop_reason as string | null | undefined) ?? (summary.stopReason as string | null | undefined) ?? null,
+    aiProvidersUsed: Array.isArray(summary.aiProvidersUsed) ? summary.aiProvidersUsed.map(String) : [],
+    aiModelsUsed: Array.isArray(summary.aiModelsUsed) ? summary.aiModelsUsed.map(String) : [],
+    aiFallbacks: Number(summary.aiFallbacks ?? 0),
   };
 }
 

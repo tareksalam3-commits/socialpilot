@@ -195,6 +195,9 @@ export type LeadSearchStats = {
   sourcesUsed?: string[];
   rounds?: number;
   stopReason?: string | null;
+  aiProvidersUsed?: string[];
+  aiModelsUsed?: string[];
+  aiFallbacks?: number;
 };
 
 export const LEAD_JOB_STAGE_LABELS: Record<string, string> = {

@@ -97,8 +97,14 @@ function buildAiCaller(workspaceId: string, userId: string): AICaller {
         }),
       });
       if (!res.ok) return null;
-      const body = await res.json() as { result?: Record<string, unknown> };
-      return body.result ?? null;
+      const body = await res.json() as { result?: Record<string, unknown>; provider?: string; model?: string; fallbackCount?: number };
+      if (!body.result) return null;
+      return {
+        ...body.result,
+        __ai_provider: body.provider ?? null,
+        __ai_model: body.model ?? null,
+        __ai_fallback_count: Number(body.fallbackCount ?? 0),
+      };
     } catch {
       // AI Gateway unreachable — the loop treats this as ai_unavailable for
       // the step in question and never fabricates a decision (§21, §28).

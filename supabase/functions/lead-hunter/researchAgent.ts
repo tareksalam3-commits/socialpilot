@@ -380,6 +380,16 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
   const strategiesUsed = new Set<string>();
   const successfulQueries: string[] = [];
   const weakQueries: string[] = [];
+  const aiProvidersUsed = new Set<string>();
+  const aiModelsUsed = new Set<string>();
+  let aiFallbacks = 0;
+  const trackAi = (value: unknown) => {
+    if (!value || typeof value !== 'object') return;
+    const meta = value as Record<string, unknown>;
+    if (typeof meta.__ai_provider === 'string' && meta.__ai_provider) aiProvidersUsed.add(meta.__ai_provider);
+    if (typeof meta.__ai_model === 'string' && meta.__ai_model) aiModelsUsed.add(meta.__ai_model);
+    aiFallbacks += Number(meta.__ai_fallback_count ?? 0) || 0;
+  };
   let fetchesUsed = 0;
   let queriesIssued = 0;
   let previousRoundQuality = 0;
@@ -417,6 +427,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
       queryPerformance,
     }) as PlanRoundDecision | null;
 
+    trackAi(planDecision);
     const strategySource: 'ai' | 'fallback_deterministic' = planDecision?.queries?.length ? 'ai' : 'fallback_deterministic';
     const roundQueries = (strategySource === 'ai' ? planDecision!.queries : seedQueries)
       .filter((q) => typeof q === 'string' && q.trim().length > 0)
@@ -476,7 +487,8 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
         // --- ANALYZE / READ (§1 ANALYZE, §4, §9 evidence-based extraction) ---
         await input.onProgress?.('analyzing', Math.min(55 + round * 4, 68));
-        const extraction = await input.aiCall('extract_candidates', { spec, results: raw }) as { candidates: ExtractedCandidate[] } | null;
+        const extraction = await input.aiCall('extract_candidates', { spec, results: raw }) as ({ candidates: ExtractedCandidate[] } & Record<string, unknown>) | null;
+        trackAi(extraction);
         if (!extraction?.candidates?.length) {
           // AI unavailable or found nothing extractable — every raw result is
           // still logged as a collected-but-unprocessed candidate (§7:
@@ -573,7 +585,8 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
                 } catch { /* failover source is optional */ }
               }
             }
-            verified = await input.aiCall('verify_candidate', { spec, candidate: normalized, evidence: item.evidence, corroboration }) as VerifyDecision | null;
+            verified = await input.aiCall('verify_candidate', { spec, candidate: normalized, evidence: item.evidence, corroboration }) as (VerifyDecision & Record<string, unknown>) | null;
+            trackAi(verified);
             totals.verified += 1;
             if (verified?.verdict !== 'confirmed') {
               if (verified?.verdict === 'conflict') totals.verificationConflicts += 1;
@@ -617,7 +630,8 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
       spec, round, roundFound, roundQualified, roundRejected, roundDuplicates,
       totalQualified: accepted.length, requestedCount: spec.requestedCount,
       previousRoundQualified: previousRoundQualified === Infinity ? null : previousRoundQualified,
-    }) as RoundReviewDecision | null;
+    }) as (RoundReviewDecision & Record<string, unknown>) | null;
+    trackAi(review);
 
     strategyNotes.push({
       round, strategy_source: strategySource, queries: roundQueries, reasoning,
@@ -656,6 +670,9 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     searchRounds: round,
     fetchesUsed,
     queriesIssued,
+    aiProvidersUsed: Array.from(aiProvidersUsed),
+    aiModelsUsed: Array.from(aiModelsUsed),
+    aiFallbacks,
   };
   const searchSummary = {
     requested: spec.requestedCount,
@@ -669,6 +686,9 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     sourcesUsed: Array.from(sourcesUsed),
     searchRounds: round,
     stopReason,
+    aiProvidersUsed: Array.from(aiProvidersUsed),
+    aiModelsUsed: Array.from(aiModelsUsed),
+    aiFallbacks,
   };
   return { accepted, candidateLedger, queriesUsed, roundsCompleted: round, stopReason, sourceStats, strategyNotes, searchMemory, searchSummary, totals };
 
