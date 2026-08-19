@@ -31,8 +31,12 @@ async function requireSuperAdmin(req: Request): Promise<{ ok: true; userId: stri
   const { data: userData, error } = await supabase.auth.getUser(token);
   if (error || !userData.user) return { ok: false, response: jsonRes(401, { error: 'Invalid or expired token' }) };
 
-  const { data: isAdmin } = await supabase.rpc('is_super_admin', { check_uid: userData.user.id });
-  if (!isAdmin) return { ok: false, response: jsonRes(403, { error: 'Forbidden — Super Admin only' }) };
+  // The DB helper enforces auth.uid(), which is unavailable when this
+  // service-role client validates a user token. Check the protected table
+  // directly so a real platform admin is not rejected by the service-role hop.
+  const { data: adminRow, error: adminError } = await supabase.from('platform_admins').select('user_id').eq('user_id', userData.user.id).maybeSingle();
+  if (adminError) return { ok: false, response: jsonRes(500, { error: 'Unable to verify Super Admin permissions' }) };
+  if (!adminRow) return { ok: false, response: jsonRes(403, { error: 'Forbidden — Super Admin only' }) };
 
   return { ok: true, userId: userData.user.id };
 }

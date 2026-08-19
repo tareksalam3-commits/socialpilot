@@ -21,8 +21,13 @@ async function requireSuperAdmin(req: Request): Promise<{ userId: string } | Res
   if (!token) return json(401, { error: 'يجب تسجيل الدخول.' });
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user) return json(401, { error: 'انتهت جلسة الدخول.' });
-  const { data: isAdmin } = await supabase.rpc('is_super_admin', { check_uid: data.user.id });
-  if (!isAdmin) return json(403, { error: 'هذه العملية متاحة للـSuper Admin فقط.' });
+  // This function uses a service-role client to validate the user's JWT. Calling
+  // is_super_admin(check_uid) through that client fails when the DB function
+  // enforces check_uid = auth.uid(), because service-role requests have no user
+  // auth.uid(). Read the protected platform_admins table directly instead.
+  const { data: adminRow, error: adminError } = await supabase.from('platform_admins').select('user_id').eq('user_id', data.user.id).maybeSingle();
+  if (adminError) return json(500, { error: 'تعذر التحقق من صلاحية Super Admin.' });
+  if (!adminRow) return json(403, { error: 'هذه العملية متاحة للـSuper Admin فقط.' });
   return { userId: data.user.id };
 }
 
