@@ -69,6 +69,9 @@ export type LeadSearchJob = {
   queries_used?: string[];
   rounds_completed?: number;
   stop_reason?: string | null;
+  strategy_notes?: Array<Record<string, unknown>>;
+  search_memory?: Record<string, unknown>;
+  search_summary?: Record<string, unknown>;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -186,26 +189,39 @@ export type LeadSearchStats = {
   duplicates: number;
   invalid: number;
   qualified: number;
+  verified?: number;
+  averageMatchScore?: number | null;
+  averageDataQuality?: number | null;
+  sourcesUsed?: string[];
+  rounds?: number;
+  stopReason?: string | null;
 };
 
 export const LEAD_JOB_STAGE_LABELS: Record<string, string> = {
   queued: 'في الانتظار',
-  understanding: 'أفهم طلبك...',
-  planning: 'أضع خطة البحث...',
+  understanding: 'أفهم مواصفات العملاء...',
+  planning: 'أحدد أفضل طرق البحث...',
+  discovery: 'أكتشف المرشحين...',
+  searching: 'أبحث في المصادر المناسبة...',
   analyzing: 'أحلل النتائج...',
+  refinement: 'أغير استراتيجية البحث بناءً على النتائج...',
+  investigation: 'أبحث عن البيانات الناقصة...',
   selecting_sources: 'اختيار المصادر',
-  searching: 'أبحث عن المرشحين...',
-  collecting: 'جمع البيانات',
+  collecting: 'أجمع البيانات العامة...',
   cleaning: 'تنظيف البيانات',
   deduplicating: 'إزالة التكرارات',
-  verifying: 'أتحقق من البيانات...',
+  verifying: 'أتحقق من أفضل المرشحين عبر Evidence إضافية...',
   qualifying: 'أستبعد النتائج غير المطابقة...',
   ranking: 'أرتب أفضل العملاء...',
+  final_review: 'أراجع النتيجة النهائية...',
   scoring: 'حساب درجات العملاء',
   completed: 'اكتمل',
   failed: 'فشل',
   not_configured: 'لا توجد مصادر بحث خارجي مهيأة بعد',
   no_source_configured: 'لم يتم تفعيل أي مصدر بيانات',
+  quality_plateau: 'توقّف الباحث بسبب تراجع جودة النتائج',
+  search_budget_exhausted: 'انتهت ميزانية البحث المحددة',
+  time_budget_exhausted: 'انتهى وقت البحث المحدد',
 };
 
 export type LeadSearchMode = 'fast' | 'balanced' | 'deep';

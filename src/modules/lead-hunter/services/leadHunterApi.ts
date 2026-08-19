@@ -98,19 +98,24 @@ export async function listLeads(workspaceId: string, searchRequestId?: string): 
 }
 
 export async function getLeadStats(workspaceId: string, searchRequestId: string): Promise<LeadSearchStats> {
-  const { data, error } = await supabase
-    .from('lead_search_requests')
-    .select('total_found, valid_count, duplicate_count, invalid_count, qualified_count')
-    .eq('workspace_id', workspaceId)
-    .eq('id', searchRequestId)
-    .maybeSingle();
+  const [{ data, error }, { data: job }] = await Promise.all([
+    supabase.from('lead_search_requests').select('total_found, valid_count, duplicate_count, invalid_count, qualified_count').eq('workspace_id', workspaceId).eq('id', searchRequestId).maybeSingle(),
+    supabase.from('lead_search_jobs').select('rounds_completed,stop_reason,search_summary').eq('workspace_id', workspaceId).eq('search_request_id', searchRequestId).maybeSingle(),
+  ]);
   if (error || !data) throw new Error('تعذر تحميل إحصاءات البحث.');
+  const summary = (job?.search_summary ?? {}) as Record<string, unknown>;
   return {
     totalFound: Number(data.total_found ?? 0),
     valid: Number(data.valid_count ?? 0),
     duplicates: Number(data.duplicate_count ?? 0),
     invalid: Number(data.invalid_count ?? 0),
     qualified: Number(data.qualified_count ?? 0),
+    verified: Number(summary.verified ?? 0),
+    averageMatchScore: typeof summary.averageMatchScore === 'number' ? summary.averageMatchScore : null,
+    averageDataQuality: typeof summary.averageDataQuality === 'number' ? summary.averageDataQuality : null,
+    sourcesUsed: Array.isArray(summary.sourcesUsed) ? summary.sourcesUsed.map(String) : [],
+    rounds: Number(job?.rounds_completed ?? summary.searchRounds ?? 0),
+    stopReason: (job?.stop_reason as string | null | undefined) ?? (summary.stopReason as string | null | undefined) ?? null,
   };
 }
 

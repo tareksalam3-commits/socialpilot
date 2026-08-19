@@ -105,20 +105,21 @@ export function meetsHardRequirements(spec: SearchSpecification, candidate: Lead
   const reasons: string[] = [];
   let ok = true;
   const { hard } = spec;
-  if (hard.governorate && candidate.governorate && candidate.governorate !== hard.governorate) {
-    ok = false; reasons.push(`المحافظة (${candidate.governorate}) لا تطابق المطلوب (${hard.governorate}).`);
+  if (hard.governorate) {
+    if (!candidate.governorate) { ok = false; reasons.push('المحافظة المطلوبة غير مثبتة بدليل.'); }
+    else if (candidate.governorate !== hard.governorate) { ok = false; reasons.push(`المحافظة (${candidate.governorate}) لا تطابق المطلوب (${hard.governorate}).`); }
   }
-  if (hard.city && candidate.city && candidate.city !== hard.city) {
-    ok = false; reasons.push(`المدينة (${candidate.city}) لا تطابق المطلوب (${hard.city}).`);
+  if (hard.city) {
+    if (!candidate.city) { ok = false; reasons.push('المدينة المطلوبة غير مثبتة بدليل.'); }
+    else if (candidate.city !== hard.city) { ok = false; reasons.push(`المدينة (${candidate.city}) لا تطابق المطلوب (${hard.city}).`); }
   }
   const occupationPool = [hard.occupations, hard.jobTitles, hard.industries].flat().map((v) => v.toLowerCase());
   if (occupationPool.length > 0) {
     const candidateOccupation = [candidate.occupation, candidate.job_title, candidate.industry]
       .filter(Boolean).map((v) => String(v).toLowerCase());
     const matches = candidateOccupation.some((c) => occupationPool.some((p) => c.includes(p) || p.includes(c)));
-    if (candidateOccupation.length > 0 && !matches) {
-      ok = false; reasons.push('المهنة/الوظيفة لا تطابق أيًا من المطلوب.');
-    }
+    if (candidateOccupation.length === 0) { ok = false; reasons.push('المهنة/الوظيفة المطلوبة غير مثبتة بدليل.'); }
+    else if (!matches) { ok = false; reasons.push('المهنة/الوظيفة لا تطابق أيًا من المطلوب.'); }
   }
   // Contact availability, when requested, is a Hard Requirement (§2 example:
   // "وسيلة اتصال عامة أو مهنية متاحة"). Any one channel (phone or email,
@@ -127,9 +128,7 @@ export function meetsHardRequirements(spec: SearchSpecification, candidate: Lead
   if (spec.soft.contactPhone || spec.soft.contactEmail) {
     const hasPhone = Boolean(candidate.public_contact_phone || candidate.business_phone);
     const hasEmail = Boolean(candidate.public_email || candidate.business_email);
-    if (!hasPhone && !hasEmail) {
-      ok = false; reasons.push('لا توجد وسيلة اتصال عامة أو مهنية مؤكدة بدليل.');
-    }
+    if (!hasPhone && !hasEmail) { ok = false; reasons.push('لا توجد وسيلة اتصال عامة أو مهنية مؤكدة بدليل.'); }
   }
   return { ok, reasons };
 }
@@ -244,11 +243,13 @@ export type RawCandidate = Record<string, unknown> & { source_url?: string; evid
 // Credentials are passed per-call, never held as connector/module state —
 // a connector instance is shared across every workspace's job in this
 // isolate, and API keys must never leak across a concurrent job boundary.
-export type SourceCredentials = { apiKey: string | null };
+export type SourceCredentials = { apiKey: string | null; baseUrl?: string | null };
 
 export interface LeadSourceConnector {
   readonly key: string;
   search(query: string, spec: SearchSpecification, credentials: SourceCredentials): Promise<RawCandidate[]>;
+  fetchPublicPage?(url: string): Promise<{ text: string; finalUrl: string } | null>;
+  healthCheck?(credentials: SourceCredentials): Promise<{ status: string; message: string }>;
   normalize(record: RawCandidate): Promise<LeadRecord>;
   validate(record: LeadRecord): Promise<{ valid: boolean; errors: string[] }>;
 }
@@ -298,7 +299,7 @@ export type RoundReviewDecision = {
 export type SourceRoundStat = {
   round: number;
   source: string;
-  status: 'ok' | 'not_configured' | 'error';
+  status: 'ok' | 'not_configured' | 'error' | 'rate_limited' | 'timeout' | 'source_error' | 'no_results' | 'permission_error';
   query?: string;
   records_found: number;
   error?: string;
@@ -330,21 +331,26 @@ export type LoopInput = {
   spec: SearchSpecification;
   mode: SearchModeName;
   maxRounds: number;
+  maxQueries: number;
+  maxFetches: number;
   maxCandidatesPerRound: number;
   maxRuntimeMs: number;
-  sources: Array<{ connector_key: string; enabled: boolean; apiKey: string | null }>;
+  sources: Array<{ source_id?: string; connector_key: string; enabled: boolean; apiKey: string | null; baseUrl?: string | null }>;
   isDuplicate: (candidate: LeadRecord) => Promise<boolean>;
   aiCall: AICaller;
+  onProgress?: (stage: string, percent: number) => Promise<void>;
 };
 
 export type LoopOutput = {
-  accepted: Array<{ lead: LeadRecord; dataQuality: { score: number; reasons: string[] }; score: { score: number; priority: string; reasons: string[] } }>;
+  accepted: Array<{ lead: LeadRecord; dataQuality: { score: number; reasons: string[] }; score: { score: number; priority: string; reasons: string[] }; evidence: Array<{ field: string; source_url: string; snippet: string; verified?: boolean }> }>;
   candidateLedger: CandidateLedgerEntry[];
   queriesUsed: string[];
   roundsCompleted: number;
   stopReason: string;
   sourceStats: SourceRoundStat[];
   strategyNotes: RoundStrategyNote[];
+  searchMemory: Record<string, unknown>;
+  searchSummary: Record<string, unknown>;
   totals: { found: number; duplicates: number; rejected: number; qualified: number; verified: number; verificationConflicts: number };
 };
 
@@ -368,13 +374,27 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
   const strategyNotes: RoundStrategyNote[] = [];
   const totals = { found: 0, duplicates: 0, rejected: 0, qualified: 0, verified: 0, verificationConflicts: 0 };
   const queryPerformance: Record<string, { issued: number; qualified: number; rejected: number }> = {};
+  const rejectedReasons: string[] = [];
+  const missingFields = new Set<string>();
+  const sourcesUsed = new Set<string>();
+  const strategiesUsed = new Set<string>();
+  const successfulQueries: string[] = [];
+  const weakQueries: string[] = [];
+  let fetchesUsed = 0;
+  let queriesIssued = 0;
+  let previousRoundQuality = 0;
 
   const anyConnectorAvailable = enabledSources.some((s) => CONNECTOR_REGISTRY.has(s.connector_key));
   if (!anyConnectorAvailable) {
     for (const source of enabledSources) {
       sourceStats.push({ round: 0, source: source.connector_key, status: 'not_configured', records_found: 0, error: 'المصدر غير مهيأ لهذا النوع من البيانات.' });
     }
-    return { accepted, candidateLedger, queriesUsed, roundsCompleted: 0, stopReason: 'NOT_CONFIGURED', sourceStats, strategyNotes, totals };
+    return {
+      accepted, candidateLedger, queriesUsed, roundsCompleted: 0, stopReason: 'NOT_CONFIGURED', sourceStats, strategyNotes,
+      searchMemory: { sourcesUsed: [], strategiesUsed: [], candidatesSeen: 0, rejectedCandidates: 0, rejectionReasons: [], verifiedCandidates: 0, duplicates: 0, missingFields: [], successfulQueries: [], weakQueries: [], searchRounds: 0 },
+      searchSummary: { requested: spec.requestedCount, candidates: 0, verified: 0, qualified: 0, rejected: 0, duplicates: 0, averageMatchScore: null, averageDataQuality: null, sourcesUsed: [], searchRounds: 0 },
+      totals,
+    };
   }
 
   let round = 0;
@@ -384,7 +404,9 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
   while (round < input.maxRounds && accepted.length < spec.requestedCount) {
     if (Date.now() - startedAt > input.maxRuntimeMs) { stopReason = 'time_budget_exhausted'; break; }
+    if (queriesIssued >= input.maxQueries) { stopReason = 'search_budget_exhausted'; break; }
     round += 1;
+    await input.onProgress?.('planning', Math.min(20 + round * 4, 30));
 
     // --- PLAN (§1 THINK/PLAN, §15 learn from previous round) ---
     const planDecision = await input.aiCall('plan_round', {
@@ -398,9 +420,13 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     const strategySource: 'ai' | 'fallback_deterministic' = planDecision?.queries?.length ? 'ai' : 'fallback_deterministic';
     const roundQueries = (strategySource === 'ai' ? planDecision!.queries : seedQueries)
       .filter((q) => typeof q === 'string' && q.trim().length > 0)
-      .slice(0, MODE_QUERY_BUDGET[mode]);
+      .filter((q, index, all) => all.indexOf(q) === index && !queriesUsed.includes(q))
+      .slice(0, Math.min(MODE_QUERY_BUDGET[mode], input.maxQueries - queriesIssued));
+    strategiesUsed.add(strategySource === 'ai' ? 'ai_adaptive' : 'deterministic_seed');
+    roundQueries.forEach((q) => { if (queryPerformance[q]?.qualified > 0) successfulQueries.push(q); });
     const reasoning = planDecision?.reasoning ?? 'استعلامات احتياطية ثابتة (AI Gateway غير متاح لهذه الجولة).';
 
+    const roundStartAccepted = accepted.length;
     let roundQualified = 0;
     let roundRejected = 0;
     let roundDuplicates = 0;
@@ -408,23 +434,40 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
     // --- SEARCH + OBSERVE (§1 SEARCH/OBSERVE, real tool calls) ---
     for (const query of roundQueries) {
+      if (queriesIssued >= input.maxQueries) { stopReason = 'search_budget_exhausted'; break; }
+      queriesIssued += 1;
       queriesUsed.push(query);
       queryPerformance[query] ??= { issued: 0, qualified: 0, rejected: 0 };
       queryPerformance[query].issued += 1;
 
+      await input.onProgress?.('searching', Math.min(35 + round * 5, 55));
       for (const source of enabledSources) {
         const connector = CONNECTOR_REGISTRY.get(source.connector_key);
+        sourcesUsed.add(source.connector_key);
         if (!connector) {
           sourceStats.push({ round, source: source.connector_key, status: 'not_configured', records_found: 0, error: 'المصدر غير مهيأ.' });
           continue;
         }
         let raw: RawCandidate[] = [];
         try {
-          raw = (await connector.search(query, spec, { apiKey: source.apiKey })).slice(0, input.maxCandidatesPerRound);
-          sourceStats.push({ round, source: source.connector_key, status: 'ok', query, records_found: raw.length });
+          raw = (await connector.search(query, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl })).slice(0, input.maxCandidatesPerRound);
+          if (raw.length > 0) successfulQueries.push(query);
+          else weakQueries.push(query);
+          if (connector.fetchPublicPage) {
+            for (const result of raw.slice(0, Math.min(5, input.maxFetches - fetchesUsed))) {
+              if (!result.source_url || fetchesUsed >= input.maxFetches) break;
+              fetchesUsed += 1;
+              const page = await connector.fetchPublicPage(String(result.source_url));
+              if (page?.text) result._public_page_text = page.text;
+            }
+          }
+          sourceStats.push({ round, source: source.connector_key, status: raw.length > 0 ? 'ok' : 'no_results', query, records_found: raw.length });
         } catch (error) {
           const message = error instanceof Error ? error.message : 'تعذر الوصول إلى المصدر.';
-          sourceStats.push({ round, source: source.connector_key, status: message === 'NOT_CONFIGURED' ? 'not_configured' : 'error', query, records_found: 0, error: message });
+          const errorCode = (error as { code?: string })?.code;
+          const status = errorCode === 'NOT_CONFIGURED' ? 'not_configured' : errorCode === 'RATE_LIMITED' ? 'rate_limited' : errorCode === 'TIMEOUT' ? 'timeout' : errorCode === 'PERMISSION_ERROR' ? 'permission_error' : 'source_error';
+          sourceStats.push({ round, source: source.connector_key, status, query, records_found: 0, error: message });
+          weakQueries.push(query);
           continue;
         }
         roundFound += raw.length;
@@ -432,6 +475,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
         if (raw.length === 0) continue;
 
         // --- ANALYZE / READ (§1 ANALYZE, §4, §9 evidence-based extraction) ---
+        await input.onProgress?.('analyzing', Math.min(55 + round * 4, 68));
         const extraction = await input.aiCall('extract_candidates', { spec, results: raw }) as { candidates: ExtractedCandidate[] } | null;
         if (!extraction?.candidates?.length) {
           // AI unavailable or found nothing extractable — every raw result is
@@ -447,6 +491,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
               validation_error: extraction ? 'لم يتعرف AI على مرشحين فعليين في هذه النتائج.' : 'تعذر الوصول إلى AI Gateway لاستخراج المرشحين.',
               normalized_lead: null,
             });
+            rejectedReasons.push(extraction ? 'لم يتعرف AI على مرشحين فعليين.' : 'AI Gateway غير متاح للاستخراج.');
           });
           continue;
         }
@@ -468,11 +513,12 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
             ledgerEntry.extraction_status = 'rejected';
             ledgerEntry.validation_error = 'النتيجة ليست فردًا (شركة/صفحة عامة/غير ذلك).';
             candidateLedger.push(ledgerEntry);
+            rejectedReasons.push(ledgerEntry.validation_error);
             totals.rejected += 1; roundRejected += 1; queryPerformance[query].rejected += 1;
             continue;
           }
 
-          const meta: LeadIntakeMeta = { sourceType: 'search_engine', sourceUrl: sourceRow?.source_url as string | undefined, collectedAt: new Date().toISOString() };
+          const meta: LeadIntakeMeta = { sourceType: 'search_engine', sourceId: source.source_id ?? null, sourceUrl: sourceRow?.source_url as string | undefined, collectedAt: new Date().toISOString() };
           const { normalized, formatIssues } = normalizeLead(item.raw as RawLeadInput, meta);
           const validation = validateLead(normalized, formatIssues);
           ledgerEntry.extraction_status = 'normalized';
@@ -481,6 +527,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
             ledgerEntry.extraction_status = 'rejected';
             ledgerEntry.validation_error = validation.errors.join(' ');
             candidateLedger.push(ledgerEntry);
+            rejectedReasons.push(ledgerEntry.validation_error);
             totals.rejected += 1; roundRejected += 1; queryPerformance[query].rejected += 1;
             continue;
           }
@@ -490,6 +537,8 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
             ledgerEntry.extraction_status = 'rejected';
             ledgerEntry.validation_error = hardCheck.reasons.join(' ');
             candidateLedger.push(ledgerEntry);
+            rejectedReasons.push(ledgerEntry.validation_error);
+            hardCheck.reasons.forEach((reason) => { if (/غير مثبتة|لا توجد/.test(reason)) missingFields.add(reason); });
             totals.rejected += 1; roundRejected += 1; queryPerformance[query].rejected += 1;
             continue;
           }
@@ -498,12 +547,14 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
             ledgerEntry.extraction_status = 'rejected';
             ledgerEntry.validation_error = 'مكرر — يطابق عميلًا موجودًا بالفعل.';
             candidateLedger.push(ledgerEntry);
+            rejectedReasons.push(ledgerEntry.validation_error);
             totals.duplicates += 1; roundDuplicates += 1;
             continue;
           }
 
           // --- VERIFY (§1 VERIFY, §10) — only for candidates that would
           // otherwise be accepted, and only up to the mode's verify budget.
+          await input.onProgress?.('verifying', Math.min(68 + round * 3, 78));
           let verified: VerifyDecision | null = null;
           const verifyBudgetLeft = MODE_VERIFY_BUDGET[mode] - totals.verified;
           if (verifyBudgetLeft > 0 && item.confidence !== 'high') {
@@ -511,15 +562,25 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
             let corroboration: RawCandidate[] = [];
             if (connectorForVerify && normalized.full_name) {
               const verifyQuery = [normalized.full_name, normalized.governorate ?? normalized.city].filter(Boolean).join(' ');
-              try { corroboration = (await connectorForVerify.search(verifyQuery, spec, { apiKey: source.apiKey })).slice(0, 5); } catch { /* leave empty — verification simply stays inconclusive */ }
+              try { corroboration = (await connectorForVerify.search(verifyQuery, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl })).slice(0, 5); } catch { /* leave empty — verification stays inconclusive */ }
+              for (const otherSource of enabledSources) {
+                if (otherSource.connector_key === source.connector_key) continue;
+                const otherConnector = CONNECTOR_REGISTRY.get(otherSource.connector_key);
+                if (!otherConnector) continue;
+                try {
+                  const additional = await otherConnector.search(verifyQuery, spec, { apiKey: otherSource.apiKey, baseUrl: otherSource.baseUrl });
+                  corroboration = [...corroboration, ...additional.slice(0, 5)];
+                } catch { /* failover source is optional */ }
+              }
             }
             verified = await input.aiCall('verify_candidate', { spec, candidate: normalized, evidence: item.evidence, corroboration }) as VerifyDecision | null;
             totals.verified += 1;
-            if (verified?.verdict === 'conflict') {
-              totals.verificationConflicts += 1;
+            if (verified?.verdict !== 'confirmed') {
+              if (verified?.verdict === 'conflict') totals.verificationConflicts += 1;
               ledgerEntry.extraction_status = 'rejected';
-              ledgerEntry.validation_error = `تعارض في التحقق: ${verified.reasoning}`;
+              ledgerEntry.validation_error = verified?.verdict === 'conflict' ? `تعارض في التحقق: ${verified.reasoning}` : 'لم يمكن تأكيد هوية المرشح من Evidence إضافية.';
               candidateLedger.push(ledgerEntry);
+              rejectedReasons.push(ledgerEntry.validation_error);
               totals.rejected += 1; roundRejected += 1; queryPerformance[query].rejected += 1;
               continue;
             }
@@ -530,21 +591,28 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
             ledgerEntry.extraction_status = 'rejected';
             ledgerEntry.validation_error = `جودة البيانات (${dataQuality.score}) أقل من الحد الأدنى (${spec.soft.qualityMin}).`;
             candidateLedger.push(ledgerEntry);
+            rejectedReasons.push(ledgerEntry.validation_error);
             totals.rejected += 1; roundRejected += 1; queryPerformance[query].rejected += 1;
             continue;
           }
 
-          const score = scoreLeadIntake({ ...normalized, data_quality_score: dataQuality.score });
+          const ageMatch = normalized.age !== null && normalized.age !== undefined && (spec.soft.ageMin === undefined || Number(normalized.age) >= spec.soft.ageMin) && (spec.soft.ageMax === undefined || Number(normalized.age) <= spec.soft.ageMax);
+          const evidenceStrength = Math.min(100, (item.evidence?.length ?? 0) * 25 + (item.confidence === 'high' ? 25 : item.confidence === 'medium' ? 10 : 0));
+          const score = scoreLeadIntake({ ...normalized, data_quality_score: dataQuality.score }, { ageMatch: spec.soft.ageMin !== undefined || spec.soft.ageMax !== undefined ? ageMatch : null, evidenceStrength });
+          Object.entries(normalized).forEach(([field, value]) => { if (value === null || value === undefined || value === '') missingFields.add(field); });
           ledgerEntry.extraction_status = 'validated';
           ledgerEntry.normalized_lead = normalized;
           candidateLedger.push(ledgerEntry);
-          accepted.push({ lead: normalized, dataQuality, score });
+          accepted.push({ lead: normalized, dataQuality, score, evidence: item.evidence ?? [] });
           totals.qualified += 1; roundQualified += 1; queryPerformance[query].qualified += 1;
         }
       }
     }
 
     // --- REVIEW / ADAPT / STOP (§1 REVIEW/STOP, §14, §19 quality plateau) ---
+    await input.onProgress?.('final_review', Math.min(82 + round * 3, 92));
+    const roundAccepted = accepted.slice(roundStartAccepted);
+    const roundQuality = roundAccepted.length > 0 ? roundAccepted.reduce((sum, item) => sum + item.dataQuality.score, 0) / roundAccepted.length : 0;
     const review = await input.aiCall('round_review', {
       spec, round, roundFound, roundQualified, roundRejected, roundDuplicates,
       totalQualified: accepted.length, requestedCount: spec.requestedCount,
@@ -559,16 +627,49 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
     if (accepted.length >= spec.requestedCount) { stopReason = 'target_reached'; break; }
 
-    // Deterministic quality-plateau floor always applies regardless of what
-    // the AI decides (§17, §19) — two consecutive zero-qualified rounds
-    // means the current approach is exhausted.
+    // Quality plateau is based on the actual data-quality signal, not only on
+    // whether a round happened to produce zero records.
+    if (round > 1 && previousRoundQuality > 0 && roundQuality < previousRoundQuality * 0.75) { stopReason = 'quality_plateau'; break; }
     if (roundQualified === 0 && previousRoundQualified === 0) { stopReason = 'quality_plateau'; break; }
 
     if (review?.decision === 'stop') { stopReason = review.stop_reason || 'ai_decided_stop'; break; }
 
     previousRoundQualified = roundQualified;
+    previousRoundQuality = roundQuality;
   }
 
   accepted.sort((a, b) => b.score.score - a.score.score);
-  return { accepted, candidateLedger, queriesUsed, roundsCompleted: round, stopReason, sourceStats, strategyNotes, totals };
+  const averageMatchScore = accepted.length ? accepted.reduce((sum, item) => sum + item.score.score, 0) / accepted.length : null;
+  const averageDataQuality = accepted.length ? accepted.reduce((sum, item) => sum + item.dataQuality.score, 0) / accepted.length : null;
+  const searchMemory = {
+    queriesUsed,
+    sourcesUsed: Array.from(sourcesUsed),
+    strategiesUsed: Array.from(strategiesUsed),
+    candidatesSeen: totals.found,
+    rejectedCandidates: totals.rejected,
+    rejectionReasons: rejectedReasons.slice(0, 100),
+    verifiedCandidates: totals.verified,
+    duplicates: totals.duplicates,
+    missingFields: Array.from(missingFields).slice(0, 100),
+    successfulQueries: Array.from(new Set(successfulQueries)),
+    weakQueries: Array.from(new Set(weakQueries)),
+    searchRounds: round,
+    fetchesUsed,
+    queriesIssued,
+  };
+  const searchSummary = {
+    requested: spec.requestedCount,
+    candidates: totals.found,
+    verified: totals.verified,
+    qualified: accepted.length,
+    rejected: totals.rejected,
+    duplicates: totals.duplicates,
+    averageMatchScore: averageMatchScore === null ? null : Math.round(averageMatchScore * 10) / 10,
+    averageDataQuality: averageDataQuality === null ? null : Math.round(averageDataQuality * 10) / 10,
+    sourcesUsed: Array.from(sourcesUsed),
+    searchRounds: round,
+    stopReason,
+  };
+  return { accepted, candidateLedger, queriesUsed, roundsCompleted: round, stopReason, sourceStats, strategyNotes, searchMemory, searchSummary, totals };
+
 }

@@ -86,12 +86,18 @@ export function leadPriority(score: number): LeadPriority {
   return 'weak';
 }
 
-export function scoreLeadIntake(lead: LeadRecord): { score: number; priority: LeadPriority; reasons: string[] } {
+export type LeadScoringContext = { ageMatch?: boolean | null; evidenceStrength?: number | null };
+
+export function scoreLeadIntake(lead: LeadRecord, context: LeadScoringContext = {}): { score: number; priority: LeadPriority; reasons: string[] } {
   let score = 0;
   const reasons: string[] = [];
   if (lead.governorate || lead.city) { score += 20; reasons.push('بيانات الموقع متوفرة'); }
   if (lead.occupation || lead.job_title) { score += 20; reasons.push('المهنة أو الوظيفة متوفرة'); }
+  if (context.ageMatch === true) { score += 5; reasons.push('العمر يطابق النطاق المطلوب'); }
+  if (context.ageMatch === false) reasons.push('العمر خارج النطاق أو غير مطابق');
   if (lead.business_phone || lead.public_contact_phone || lead.business_email || lead.public_email) { score += 25; reasons.push('توجد وسيلة تواصل فعلية'); }
+  if (Number(context.evidenceStrength ?? 0) >= 75) { score += 5; reasons.push('Evidence متعددة وقوية'); }
+  else if (Number(context.evidenceStrength ?? 0) > 0) reasons.push('Evidence موجودة لكنها محدودة');
   const quality = (lead.data_quality_score as number | undefined) ?? dataQualityAssessment(lead).score;
   const qualityContribution = Math.round((quality / 100) * 20);
   if (qualityContribution > 0) { score += qualityContribution; reasons.push('جودة البيانات تدعم الدرجة'); }

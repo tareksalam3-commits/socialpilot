@@ -18,6 +18,7 @@ import {
   type AICaller,
 } from './researchAgent.ts';
 import { createSerperConnector } from './connectors/serper.ts';
+import { createSearXNGConnector } from './connectors/searxng.ts';
 
 // Register real search connectors once at module load (§20, §22 — the
 // connector is a tool, shared across every workspace's job in this
@@ -25,6 +26,7 @@ import { createSerperConnector } from './connectors/serper.ts';
 // as an argument (see resolveSourceCredentials below), so concurrent jobs
 // from different workspaces never share or leak a key.
 CONNECTOR_REGISTRY.set('serper_search', createSerperConnector());
+CONNECTOR_REGISTRY.set('searxng_search', createSearXNGConnector());
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -45,6 +47,7 @@ type SourceRow = {
   enabled: boolean;
   status: string;
   priority: number;
+  config?: Record<string, unknown>;
 };
 
 type JobRow = {
@@ -63,6 +66,9 @@ type SettingsRow = {
   max_rounds_deep: number;
   max_candidates_per_round: number;
   max_runtime_seconds: number;
+  max_queries: number;
+  max_fetches: number;
+  searxng_base_url: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -101,15 +107,18 @@ function buildAiCaller(workspaceId: string, userId: string): AICaller {
   };
 }
 
-async function resolveSourceCredentials(sources: SourceRow[]): Promise<Map<string, string | null>> {
+async function resolveSourceCredentials(sources: SourceRow[], searxngBaseUrl: string | null): Promise<Map<string, { apiKey: string | null; baseUrl: string | null }>> {
   const ids = sources.map((s) => s.id);
   if (ids.length === 0) return new Map();
   const { data } = await supabase.from('lead_source_secrets').select('source_id,encrypted_config').in('source_id', ids);
-  const bySourceId = new Map((data ?? []).map((row) => [row.source_id as string, (row.encrypted_config as Record<string, unknown> | null)?.api_key as string | undefined]));
-  const byConnectorKey = new Map<string, string | null>();
+  const bySourceId = new Map((data ?? []).map((row) => [row.source_id as string, (row.encrypted_config as Record<string, unknown> | null) ?? {}]));
+  const byConnectorKey = new Map<string, { apiKey: string | null; baseUrl: string | null }>();
   for (const source of sources) {
-    const key = bySourceId.get(source.id);
-    byConnectorKey.set(source.connector_key, typeof key === 'string' && key.trim() ? key.trim() : null);
+    const secret = bySourceId.get(source.id) ?? {};
+    const config = source.config ?? {};
+    const apiKey = typeof secret.api_key === 'string' && secret.api_key.trim() ? secret.api_key.trim() : null;
+    const baseUrl = typeof config.base_url === 'string' && config.base_url.trim() ? config.base_url.trim() : (source.connector_key === 'searxng_search' ? searxngBaseUrl : null);
+    byConnectorKey.set(source.connector_key, { apiKey, baseUrl });
   }
   return byConnectorKey;
 }
@@ -179,8 +188,8 @@ async function processJob(job: JobRow, userId: string) {
 
   const [{ data: request }, { data: settingsRow }, { data: sources }] = await Promise.all([
     supabase.from('lead_search_requests').select('id,parsed_query,raw_query,requested_count,objective,search_mode').eq('id', job.search_request_id).maybeSingle(),
-    supabase.from('lead_hunter_settings').select('data_quality_threshold,max_rounds_fast,max_rounds_balanced,max_rounds_deep,max_candidates_per_round,max_runtime_seconds').eq('id', true).maybeSingle(),
-    supabase.from('lead_sources').select('id,name,connector_key,enabled,status,priority').eq('workspace_id', job.workspace_id).order('priority', { ascending: true }).limit(100),
+    supabase.from('lead_hunter_settings').select('data_quality_threshold,max_rounds_fast,max_rounds_balanced,max_rounds_deep,max_candidates_per_round,max_runtime_seconds,max_queries,max_fetches,searxng_base_url').eq('id', true).maybeSingle(),
+    supabase.from('lead_sources').select('id,name,connector_key,enabled,status,priority,config').eq('workspace_id', job.workspace_id).order('priority', { ascending: true }).limit(100),
   ]);
 
   if (!request) {
@@ -189,9 +198,9 @@ async function processJob(job: JobRow, userId: string) {
   }
 
   const settings = (settingsRow ?? {
-    data_quality_threshold: 60, max_rounds_fast: 1, max_rounds_balanced: 3, max_rounds_deep: 6, max_candidates_per_round: 200, max_runtime_seconds: 900,
+    data_quality_threshold: 60, max_rounds_fast: 1, max_rounds_balanced: 3, max_rounds_deep: 6, max_candidates_per_round: 200, max_runtime_seconds: 900, max_queries: 24, max_fetches: 40, searxng_base_url: null,
   }) as SettingsRow;
-  const mode = (['fast', 'balanced', 'deep'].includes(String(request.search_mode)) ? request.search_mode : 'balanced') as SearchModeName;
+  const mode = (['fast', 'balanced', 'deep'].includes(String(request.search_mode)) ? request.search_mode : (settings.default_search_mode ?? 'balanced')) as SearchModeName;
   const maxRounds = mode === 'fast' ? settings.max_rounds_fast : mode === 'deep' ? settings.max_rounds_deep : settings.max_rounds_balanced;
 
   const parsedQuery = (request.parsed_query ?? {}) as ParsedLeadQuery;
@@ -209,18 +218,21 @@ async function processJob(job: JobRow, userId: string) {
 
   const sourceRows = (sources ?? []) as SourceRow[];
   const enabledSources = sourceRows.filter((source) => source.enabled && source.status !== 'disabled');
-  const credentials = await resolveSourceCredentials(enabledSources);
+  const credentials = await resolveSourceCredentials(enabledSources, settings.searxng_base_url ?? null);
 
   await updateStage(job.id, 'searching', 35);
   const loopResult = await runResearchLoop({
     spec,
     mode,
     maxRounds,
+    maxQueries: Math.max(1, settings.max_queries ?? 24),
+    maxFetches: Math.max(0, settings.max_fetches ?? 40),
     maxCandidatesPerRound: settings.max_candidates_per_round ?? 200,
     maxRuntimeMs: Math.max(30_000, (settings.max_runtime_seconds ?? 900) * 1000),
-    sources: enabledSources.map((s) => ({ connector_key: s.connector_key, enabled: s.enabled, apiKey: credentials.get(s.connector_key) ?? null })),
+    sources: enabledSources.map((s) => ({ source_id: s.id, connector_key: s.connector_key, enabled: s.enabled, ...(credentials.get(s.connector_key) ?? { apiKey: null, baseUrl: null }) })),
     isDuplicate: async (candidate) => (await fetchDuplicateCandidates(job.workspace_id, candidate)).length > 0,
     aiCall: buildAiCaller(job.workspace_id, userId),
+    onProgress: (stage, percent) => updateStage(job.id, stage, percent),
   });
 
   // Candidate ledger (§7: Candidate ≠ Lead) — every raw result the loop
@@ -277,6 +289,23 @@ async function processJob(job: JobRow, userId: string) {
           .eq('source_url', candidate.lead.source_url as string)
           .is('normalized_lead_id', null);
       }
+      const sourceId = typeof candidate.lead.source_id === 'string' ? candidate.lead.source_id : null;
+      const evidenceRows = candidate.evidence
+        .filter((item) => item.source_url && item.snippet)
+        .map((item) => ({
+          workspace_id: job.workspace_id,
+          lead_id: saved.id,
+          search_request_id: job.search_request_id,
+          source_id: sourceId,
+          source_url: item.source_url,
+          field: item.field || 'general',
+          evidence_text: item.snippet.slice(0, 4000),
+          evidence_type: item.verified ? 'verification' : 'snippet',
+          verified: Boolean(item.verified),
+        }));
+      if (evidenceRows.length > 0) {
+        await supabase.from('lead_evidence').upsert(evidenceRows, { onConflict: 'lead_id,source_url,field,evidence_text', ignoreDuplicates: true });
+      }
       savedCount += 1;
     } catch (error) {
       console.error('failed to save research lead', error);
@@ -295,6 +324,8 @@ async function processJob(job: JobRow, userId: string) {
     rounds_completed: loopResult.roundsCompleted,
     stop_reason: loopResult.stopReason,
     strategy_notes: loopResult.strategyNotes,
+    search_memory: loopResult.searchMemory,
+    search_summary: loopResult.searchSummary,
     completed_at: new Date().toISOString(),
   }).eq('id', job.id);
 
@@ -320,11 +351,12 @@ async function processJob(job: JobRow, userId: string) {
       job_id: job.id, search_request_id: job.search_request_id, qualified_count: savedCount, stop_reason: loopResult.stopReason,
       found: loopResult.totals.found, rejected: loopResult.totals.rejected, duplicates: loopResult.totals.duplicates,
       verified: loopResult.totals.verified, verification_conflicts: loopResult.totals.verificationConflicts,
+      search_summary: loopResult.searchSummary,
     },
   });
   await writeAudit(job.workspace_id, userId, 'SearchCompleted', 'lead_search_job', job.id, {
     source_stats: loopResult.sourceStats, qualified_count: savedCount, stop_reason: loopResult.stopReason, rounds: loopResult.roundsCompleted,
-    strategy_notes: loopResult.strategyNotes, totals: loopResult.totals,
+    strategy_notes: loopResult.strategyNotes, search_memory: loopResult.searchMemory, search_summary: loopResult.searchSummary, totals: loopResult.totals,
   });
 }
 
@@ -482,7 +514,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: settings } = await supabase
       .from('lead_hunter_settings')
-      .select('lead_hunter_enabled,lead_search_enabled,kill_switch')
+      .select('lead_hunter_enabled,lead_search_enabled,kill_switch,search_quota_daily,search_quota_monthly,default_search_mode')
       .eq('id', true)
       .maybeSingle();
     if (settings?.kill_switch) return json(423, { error: 'مركز العملاء متوقف مؤقتًا للصيانة.' });
@@ -506,6 +538,17 @@ Deno.serve(async (req: Request) => {
       if (request.status !== 'confirmed' && request.status !== 'draft') return json(409, { error: 'لا يمكن بدء طلب البحث بهذه الحالة.' });
 
       const { data: existing } = await supabase.from('lead_search_jobs').select('*').eq('search_request_id', search_request_id).maybeSingle();
+      if (!existing) {
+        const now = new Date();
+        const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
+        const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+        const [{ count: dailyCount }, { count: monthlyCount }] = await Promise.all([
+          supabase.from('lead_search_requests').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).gte('created_at', dayStart).limit(1),
+          supabase.from('lead_search_requests').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).gte('created_at', monthStart).limit(1),
+        ]);
+        if (Number(dailyCount ?? 0) >= Number(settings?.search_quota_daily ?? 100)) return json(429, { error: 'تم تجاوز حصة البحث اليومية لهذه المساحة.' });
+        if (Number(monthlyCount ?? 0) >= Number(settings?.search_quota_monthly ?? 2000)) return json(429, { error: 'تم تجاوز حصة البحث الشهرية لهذه المساحة.' });
+      }
       let job = existing as JobRow | null;
       if (!job) {
         const { data: created, error } = await supabase.from('lead_search_jobs').insert({ workspace_id: workspaceId, search_request_id, status: 'queued' }).select('*').single();

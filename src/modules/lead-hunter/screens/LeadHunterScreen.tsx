@@ -177,7 +177,7 @@ export function LeadHunterScreen({ onBack, onOpenManagement }: { onBack: () => v
 }
 
 function JobProgress({ job, stats, leads }: { job: LeadSearchJob; stats: LeadSearchStats | null; leads: Lead[] }) {
-  const stages = ['understanding', 'planning', 'searching', 'analyzing', 'verifying', 'qualifying', 'ranking'];
+  const stages = ['understanding', 'planning', 'discovery', 'searching', 'analyzing', 'refinement', 'investigation', 'verifying', 'qualifying', 'ranking', 'final_review'];
   const noSourceStages = ['not_configured', 'no_source_configured'];
   // A job that finished without any configured connector is NOT a real
   // completed search — never label it "اكتمل" as if leads were actually
@@ -194,12 +194,15 @@ function JobProgress({ job, stats, leads }: { job: LeadSearchJob; stats: LeadSea
         <div className="grid grid-cols-2 gap-2 mt-4">
           {stages.map((stage) => <div key={stage} className="flex items-center gap-1.5 text-xs text-ink-500"><Check size={13} className={job.progress_percent >= 100 || job.progress_stage === stage ? 'text-brand-400' : 'text-ink-700'} />{LEAD_JOB_STAGE_LABELS[stage]}</div>)}
         </div>
+        {job.stop_reason && <p className="text-ink-400 text-xs mt-3">سبب التوقف: {LEAD_JOB_STAGE_LABELS[job.stop_reason] ?? job.stop_reason}</p>}
+        {job.strategy_notes?.length ? <p className="text-ink-500 text-xs leading-6 mt-2">آخر قرار بحث: {String((job.strategy_notes[job.strategy_notes.length - 1] as Record<string, unknown>).reasoning ?? 'تم تحديث الاستراتيجية بناءً على النتائج.')}</p> : null}
         {job.last_error && <p className="text-danger-400 text-xs mt-3">{job.last_error}</p>}
       </Card>
 
       {stats && <div className="grid grid-cols-2 gap-2 mb-4">{[
-        ['تم العثور عليه', stats.totalFound], ['بيانات صالحة', stats.valid], ['تكرار', stats.duplicates], ['غير صالحة', stats.invalid], ['عملاء مؤهلون', stats.qualified],
+        ['تم العثور عليه', stats.totalFound], ['تم التحقق منه', stats.verified ?? 0], ['تكرار', stats.duplicates], ['مرفوض', stats.invalid], ['عملاء مؤهلون', stats.qualified], ['الجولات', stats.rounds ?? 0], ['متوسط Match Score', stats.averageMatchScore ?? 'غير معروف'], ['متوسط جودة البيانات', stats.averageDataQuality ?? 'غير معروف'],
       ].map(([label, value]) => <Card key={label as string} className="p-3"><p className="text-ink-500 text-xs">{label}</p><p className="text-ink-100 text-xl font-bold mt-1">{value}</p></Card>)}</div>}
+      {stats?.sourcesUsed?.length ? <Card className="mb-4"><p className="text-ink-500 text-xs">المصادر المستخدمة فعليًا</p><p className="text-ink-200 text-sm mt-2" dir="ltr">{stats.sourcesUsed.join(' · ')}</p></Card> : null}
 
       {job.status === 'completed' && leads.length === 0 && <EmptyState icon={<Database size={25} />} title="لا توجد نتائج فعلية بعد" subtitle="المصدر غير مهيأ أو لم يُرجع بيانات مسموحًا باستخدامها. أضف مصدرًا من إعدادات Super Admin ثم أعد البحث." />}
       {leads.length > 0 && <div className="flex flex-col gap-3"><h2 className="text-ink-100 font-semibold">أفضل العملاء</h2>{leads.map((lead) => <LeadCard key={lead.id} lead={lead} />)}</div>}

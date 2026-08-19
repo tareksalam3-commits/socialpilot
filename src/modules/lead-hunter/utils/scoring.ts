@@ -134,7 +134,9 @@ export function dataQualityScore(lead: Partial<Lead>): number {
  * it is the base CRM score used in Lead Management, exports, and campaigns
  * for leads that were never attached to a search request.
  */
-export function scoreLeadIntake(lead: Partial<Lead>): { score: number; priority: LeadPriority; reasons: string[] } {
+export type LeadScoringContext = { ageMatch?: boolean | null; evidenceStrength?: number | null };
+
+export function scoreLeadIntake(lead: Partial<Lead>, context: LeadScoringContext = {}): { score: number; priority: LeadPriority; reasons: string[] } {
   let score = 0;
   const reasons: string[] = [];
 
@@ -146,6 +148,11 @@ export function scoreLeadIntake(lead: Partial<Lead>): { score: number; priority:
     score += 20;
     reasons.push('المهنة أو الوظيفة متوفرة');
   }
+  if (context.ageMatch === true) { score += 5; reasons.push('العمر يطابق النطاق المطلوب'); }
+  if (context.ageMatch === false) reasons.push('العمر خارج النطاق أو غير مطابق');
+  const evidenceStrength = Number(context.evidenceStrength ?? 0);
+  if (evidenceStrength >= 75) { score += 5; reasons.push('Evidence متعددة وقوية'); }
+  else if (evidenceStrength > 0) reasons.push('Evidence موجودة لكنها محدودة');
   const hasContact = Boolean(lead.business_phone || lead.public_contact_phone || lead.business_email || lead.public_email);
   if (hasContact) {
     score += 25;
