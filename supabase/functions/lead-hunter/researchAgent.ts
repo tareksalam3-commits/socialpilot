@@ -90,8 +90,8 @@ export function buildSpecification(query: ParsedLeadQuery): SearchSpecification 
       ageMax: query.age?.max ?? null,
       gender: query.gender || null,
       interests: (query.interests ?? []).filter(Boolean),
-      contactPhone: query.contactAvailability?.phone !== false,
-      contactEmail: Boolean(query.contactAvailability?.email),
+      contactPhone: query.contactAvailability?.phone === true,
+      contactEmail: query.contactAvailability?.email === true,
       freshness: query.freshness || null,
       qualityMin: typeof query.qualityMin === 'number' ? query.qualityMin : 60,
     },
@@ -715,14 +715,40 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
           continue;
         }
 
+        // §13 — extraction.candidates is not guaranteed to be positionally
+        // aligned with `raw` (the AI may skip, merge, or reorder results), so
+        // never index raw[i] blindly. Resolve each candidate's origin row by
+        // the source_url its own evidence cites — that's the only honest link
+        // between a person and the page they were found on. A candidate whose
+        // evidence doesn't point at a URL we actually searched is not safely
+        // attributable to any single result and is rejected rather than
+        // silently pinned to the wrong person's source.
+        const rawByUrl = new Map<string, RawCandidate>();
+        for (const r of raw) { if (r.source_url) rawByUrl.set(String(r.source_url), r); }
+
         for (let i = 0; i < extraction.candidates.length; i++) {
           if (isPastDeadline()) { stopReason = 'time_budget_exhausted'; break; }
           const item = extraction.candidates[i];
-          const sourceRow = raw[i];
+          const evidenceUrl = item.evidence?.find((e) => e?.source_url)?.source_url;
+          const sourceRow = evidenceUrl ? rawByUrl.get(String(evidenceUrl)) : undefined;
+          if (!sourceRow) {
+            candidateLedger.push({
+              source_id: source.connector_key,
+              external_id: externalIdFor(evidenceUrl, i),
+              source_url: evidenceUrl ?? null,
+              raw_record: { extraction: item },
+              extraction_status: 'rejected',
+              validation_error: 'المرشح بدون مصدر واضح يمكن التحقق منه ضمن نتائج هذه الجولة — تم رفضه بدل نسبه لنتيجة أخرى.',
+              normalized_lead: null,
+            });
+            rejectedReasons.push('مرشح بدون source_url واضح.');
+            totals.rejected += 1; roundRejected += 1; queryPerformance[query].rejected += 1;
+            continue;
+          }
           const ledgerEntry: CandidateLedgerEntry = {
             source_id: source.connector_key,
-            external_id: externalIdFor(sourceRow?.source_url as string | undefined, i),
-            source_url: (sourceRow?.source_url as string) ?? null,
+            external_id: externalIdFor(sourceRow.source_url as string | undefined, i),
+            source_url: (sourceRow.source_url as string) ?? null,
             raw_record: { serp: sourceRow, extraction: item },
             extraction_status: 'collected',
             validation_error: null,
@@ -738,7 +764,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
             continue;
           }
 
-          const meta: LeadIntakeMeta = { sourceType: 'search_engine', sourceId: source.source_id ?? null, sourceUrl: sourceRow?.source_url as string | undefined, collectedAt: new Date().toISOString() };
+          const meta: LeadIntakeMeta = { sourceType: 'search_engine', sourceId: source.source_id ?? null, sourceUrl: sourceRow.source_url as string | undefined, collectedAt: new Date().toISOString() };
           const { normalized, formatIssues } = normalizeLead(item.raw as RawLeadInput, meta);
           const validation = validateLead(normalized, formatIssues);
           ledgerEntry.extraction_status = 'normalized';
@@ -817,9 +843,20 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
             continue;
           }
 
-          const ageMatch = normalized.age !== null && normalized.age !== undefined && (spec.soft.ageMin === undefined || Number(normalized.age) >= spec.soft.ageMin) && (spec.soft.ageMax === undefined || Number(normalized.age) <= spec.soft.ageMax);
+          // §10: age is only ever a Failure when the user actually asked for an age
+          // range. No range requested → ageMatch stays null (unknown, not a strike
+          // against the candidate). Range requested but candidate's age is unknown →
+          // also null (UNKNOWN beats a fabricated match/mismatch, §32).
+          const ageRequested = spec.soft.ageMin !== null || spec.soft.ageMax !== null;
+          const ageKnown = normalized.age !== null && normalized.age !== undefined;
+          const ageMatch = !ageRequested
+            ? null
+            : !ageKnown
+              ? null
+              : (spec.soft.ageMin === null || Number(normalized.age) >= spec.soft.ageMin)
+                && (spec.soft.ageMax === null || Number(normalized.age) <= spec.soft.ageMax);
           const evidenceStrength = Math.min(100, (item.evidence?.length ?? 0) * 25 + (item.confidence === 'high' ? 25 : item.confidence === 'medium' ? 10 : 0));
-          const score = scoreLeadIntake({ ...normalized, data_quality_score: dataQuality.score }, { ageMatch: spec.soft.ageMin !== undefined || spec.soft.ageMax !== undefined ? ageMatch : null, evidenceStrength });
+          const score = scoreLeadIntake({ ...normalized, data_quality_score: dataQuality.score }, { ageMatch, evidenceStrength });
           Object.entries(normalized).forEach(([field, value]) => { if (value === null || value === undefined || value === '') missingFields.add(field); });
           ledgerEntry.extraction_status = 'validated';
           ledgerEntry.normalized_lead = normalized;
