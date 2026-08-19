@@ -7,7 +7,7 @@ import { ContentScreen } from '@/screens/ContentScreen';
 import { InboxScreen } from '@/screens/InboxScreen';
 import { MoreScreen } from '@/screens/MoreScreen';
 import { AnalyticsScreen } from '@/screens/AnalyticsScreen';
-import { LeadHunterErrorBoundary, LeadHunterScreen } from '@/modules/lead-hunter';
+import { LeadHunterErrorBoundary, LeadHunterScreen, LeadManagementScreen } from '@/modules/lead-hunter';
 
 type Tab = 'home' | 'create' | 'content' | 'analytics' | 'inbox' | 'more';
 
@@ -67,7 +67,15 @@ export function AppShell() {
   if (path === '/app/leads') {
     return (
       <LeadHunterErrorBoundary>
-        <LeadHunterScreen onBack={() => openPath('/app/accounts')} />
+        <LeadHunterScreen onBack={() => openPath('/app/accounts')} onOpenManagement={() => openPath('/app/leads/manage')} />
+      </LeadHunterErrorBoundary>
+    );
+  }
+
+  if (path === '/app/leads/manage') {
+    return (
+      <LeadHunterErrorBoundary>
+        <LeadManagementScreen onBack={() => openPath('/app/leads')} />
       </LeadHunterErrorBoundary>
     );
   }

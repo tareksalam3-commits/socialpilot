@@ -287,8 +287,12 @@ export function AnalyticsScreen() {
       {error && <div className="mb-4"><ErrorBanner message={error} /></div>}
       {syncMessage && <div className="mb-4 rounded-xl border border-accent-500/30 bg-accent-500/10 px-4 py-3 text-sm text-accent-300">{syncMessage}</div>}
 
-      {insights.length === 0 ? <EmptyState icon={<BarChart3 size={28} />} title="لا توجد Insights بعد" subtitle="انشر محتوى ثم شغّل مزامنة التحليلات من الحسابات المتصلة." /> : <>
-        <div className="grid grid-cols-2 gap-3 mb-5">{['reach', 'impressions', 'engagements', 'follower_growth'].map((metric) => { const value = displayedMetric(metric); return <Card key={metric}><p className="text-ink-500 text-xs">{METRIC_LABELS[metric]}</p><p className="text-2xl font-bold text-ink-50 mt-1">{value === null ? 'N/A' : Math.round(value).toLocaleString('ar-EG')}</p></Card>; })}</div>
+      {insights.length === 0 ? (
+        published.length > 0
+          ? <EmptyState icon={<BarChart3 size={28} />} title="المزامنة معلّقة" subtitle={`لديك ${published.length.toLocaleString('ar-EG')} منشور منشور في هذه الفترة بدون Metrics بعد. اضغط مزامنة لجلبها من المنصات.`} />
+          : <EmptyState icon={<BarChart3 size={28} />} title="لا توجد بيانات بعد" subtitle="انشر محتوى ثم شغّل مزامنة التحليلات من الحسابات المتصلة." />
+      ) : <>
+        <div className="grid grid-cols-2 gap-3 mb-5">{['reach', 'impressions', 'engagements', 'clicks'].map((metric) => { const value = displayedMetric(metric); return <Card key={metric}><p className="text-ink-500 text-xs">{METRIC_LABELS[metric]}</p><p className="text-2xl font-bold text-ink-50 mt-1">{value === null ? 'N/A' : Math.round(value).toLocaleString('ar-EG')}</p></Card>; })}</div>
 
         <div className="grid grid-cols-2 gap-3 mb-5">
           <RankCard title="أفضل منشور" item={rankedPosts[0] ?? null} />

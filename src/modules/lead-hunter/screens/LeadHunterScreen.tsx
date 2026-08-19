@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, BrainCircuit, Check, Database, Search, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { ArrowRight, BrainCircuit, Check, Database, Search, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
 import { Badge, Button, Card, EmptyState, ErrorBanner, ScreenLoader, Spinner } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { analyzeLeadQuery, createLeadSearch, getLeadSearchJob, getLeadStats, listLeadSources, listLeads, startLeadSearch } from '../services/leadHunterApi';
-import type { Lead, LeadSearchAnalysis, LeadSearchJob, LeadSearchStats, LeadSource } from '../types';
+import type { Lead, LeadSearchAnalysis, LeadSearchJob, LeadSearchMode, LeadSearchStats, LeadSource } from '../types';
 import { LEAD_JOB_STAGE_LABELS } from '../types';
 import { freshnessLabel } from '../utils/scoring';
 
-export function LeadHunterScreen({ onBack }: { onBack: () => void }) {
+export function LeadHunterScreen({ onBack, onOpenManagement }: { onBack: () => void; onOpenManagement?: () => void }) {
   const { workspace } = useAuth();
   const [rawQuery, setRawQuery] = useState('');
+  const [searchMode, setSearchMode] = useState<LeadSearchMode>('balanced');
   const [analysis, setAnalysis] = useState<LeadSearchAnalysis | null>(null);
   const [sources, setSources] = useState<LeadSource[]>([]);
   const [job, setJob] = useState<LeadSearchJob | null>(null);
@@ -66,7 +67,7 @@ export function LeadHunterScreen({ onBack }: { onBack: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const { requestId } = await createLeadSearch({ workspaceId: workspace.id, rawQuery, analysis });
+      const { requestId } = await createLeadSearch({ workspaceId: workspace.id, rawQuery, analysis, searchMode });
       const nextJob = await startLeadSearch(workspace.id, requestId);
       setJob(nextJob);
       setStats(null);
@@ -86,10 +87,15 @@ export function LeadHunterScreen({ onBack }: { onBack: () => void }) {
         <button onClick={onBack} className="w-10 h-10 rounded-xl bg-ink-900 border border-ink-800 text-ink-300 flex items-center justify-center" aria-label="العودة">
           <ArrowRight size={19} />
         </button>
-        <div>
+        <div className="flex-1">
           <p className="text-brand-400 text-xs mb-1">Lead Hunter</p>
           <h1 className="text-xl font-bold text-ink-50">مركز العملاء</h1>
         </div>
+        {onOpenManagement && (
+          <button onClick={onOpenManagement} className="w-10 h-10 rounded-xl bg-ink-900 border border-ink-800 text-ink-300 flex items-center justify-center" aria-label="إدارة العملاء">
+            <Users size={18} />
+          </button>
+        )}
       </header>
 
       {error && <div className="mb-4"><ErrorBanner message={error} /></div>}
@@ -141,6 +147,24 @@ export function LeadHunterScreen({ onBack }: { onBack: () => void }) {
             <div className="flex items-center gap-2 text-ink-300 text-sm"><Database size={16} className="text-accent-400" /> مصادر البيانات</div>
             <p className="text-ink-500 text-xs mt-2">{enabledSources.length > 0 ? `${enabledSources.length} مصدر مفعّل وسيتم فحصه.` : 'لا يوجد مصدر بيانات مهيأ حاليًا. سيُسجّل البحث دون اختلاق نتائج.'}</p>
           </div>
+          <div className="mt-4">
+            <p className="text-ink-400 text-xs mb-2">نمط البحث</p>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                ['fast', 'سريع'],
+                ['balanced', 'متوازن'],
+                ['deep', 'عميق'],
+              ] as [LeadSearchMode, string][]).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  onClick={() => setSearchMode(mode)}
+                  className={`rounded-xl border px-2 py-2 text-xs font-medium transition-colors ${searchMode === mode ? 'border-brand-500 bg-brand-500/15 text-brand-300' : 'border-ink-800 bg-ink-900 text-ink-400'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <Button onClick={handleStart} disabled={busy} className="w-full mt-4">
             {busy ? <><Spinner size={16} /> جارٍ بدء البحث</> : <><Search size={17} /> بدء البحث</>}
           </Button>
@@ -153,11 +177,18 @@ export function LeadHunterScreen({ onBack }: { onBack: () => void }) {
 }
 
 function JobProgress({ job, stats, leads }: { job: LeadSearchJob; stats: LeadSearchStats | null; leads: Lead[] }) {
-  const stages = ['analyzing', 'selecting_sources', 'searching', 'collecting', 'cleaning', 'deduplicating', 'qualifying', 'scoring'];
+  const stages = ['understanding', 'planning', 'searching', 'analyzing', 'verifying', 'qualifying', 'ranking'];
+  const noSourceStages = ['not_configured', 'no_source_configured'];
+  // A job that finished without any configured connector is NOT a real
+  // completed search — never label it "اكتمل" as if leads were actually
+  // found (§22). progress_stage carries the honest reason instead.
+  const isNoSource = job.status === 'completed' && noSourceStages.includes(job.progress_stage);
+  const statusLabel = isNoSource ? LEAD_JOB_STAGE_LABELS[job.progress_stage] : (LEAD_JOB_STAGE_LABELS[job.status] ?? job.status);
+  const statusColor = job.status === 'failed' ? 'danger' : isNoSource ? 'warning' : job.status === 'completed' ? 'brand' : 'accent';
   return (
     <div>
       <Card className="mb-4">
-        <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><SlidersHorizontal size={17} className="text-brand-400" /><h2 className="text-ink-100 font-semibold">عملية البحث</h2></div><Badge color={job.status === 'failed' ? 'danger' : job.status === 'completed' ? 'brand' : 'accent'}>{LEAD_JOB_STAGE_LABELS[job.status] ?? job.status}</Badge></div>
+        <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><SlidersHorizontal size={17} className="text-brand-400" /><h2 className="text-ink-100 font-semibold">عملية البحث</h2></div><Badge color={statusColor}>{statusLabel}</Badge></div>
         <div className="h-2 rounded-full bg-ink-800 overflow-hidden"><div className="h-full bg-brand-500 transition-all" style={{ width: `${job.progress_percent}%` }} /></div>
         <p className="text-ink-500 text-xs mt-2">{LEAD_JOB_STAGE_LABELS[job.progress_stage] ?? 'جارٍ التنفيذ'} — {job.progress_percent}%</p>
         <div className="grid grid-cols-2 gap-2 mt-4">

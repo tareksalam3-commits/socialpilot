@@ -36,17 +36,141 @@ export function freshnessLabel(lastVerifiedAt: string | null): string {
   return 'قديمة جدًا';
 }
 
+/**
+ * Data Quality factors and weights. Kept as the single source of truth for
+ * "جودة البيانات" — every caller (intake pipeline, admin panel, exports)
+ * must go through dataQualityAssessment/dataQualityScore instead of
+ * re-deriving quality logic elsewhere.
+ */
+const DATA_QUALITY_FACTORS: Array<{
+  key: string;
+  weight: number;
+  present: (lead: Partial<Lead>) => boolean;
+  labelPresent: string;
+  labelMissing: string;
+}> = [
+  {
+    key: 'completeness_name',
+    weight: 15,
+    present: (l) => Boolean(l.full_name || l.first_name),
+    labelPresent: 'الاسم متوفر',
+    labelMissing: 'الاسم غير متوفر',
+  },
+  {
+    key: 'location',
+    weight: 15,
+    present: (l) => Boolean(l.country || l.governorate || l.city),
+    labelPresent: 'بيانات الموقع متوفرة',
+    labelMissing: 'بيانات الموقع ناقصة',
+  },
+  {
+    key: 'occupation',
+    weight: 10,
+    present: (l) => Boolean(l.occupation || l.job_title || l.industry),
+    labelPresent: 'المهنة أو الوظيفة متوفرة',
+    labelMissing: 'المهنة أو الوظيفة غير متوفرة',
+  },
+  {
+    key: 'contact_phone',
+    weight: 20,
+    present: (l) => Boolean(l.business_phone || l.public_contact_phone),
+    labelPresent: 'يوجد رقم هاتف',
+    labelMissing: 'لا يوجد رقم هاتف',
+  },
+  {
+    key: 'contact_email',
+    weight: 10,
+    present: (l) => Boolean(l.business_email || l.public_email),
+    labelPresent: 'يوجد بريد إلكتروني',
+    labelMissing: 'لا يوجد بريد إلكتروني',
+  },
+  {
+    key: 'source_quality',
+    weight: 10,
+    present: (l) => Boolean(l.source_url || l.professional_url || l.social_url),
+    labelPresent: 'المصدر موثّق برابط',
+    labelMissing: 'لا يوجد رابط مصدر موثّق',
+  },
+  {
+    key: 'verification',
+    weight: 10,
+    present: (l) => Boolean(l.last_verified_at),
+    labelPresent: 'تم التحقق من البيانات',
+    labelMissing: 'لم يتم التحقق من البيانات بعد',
+  },
+  {
+    key: 'freshness',
+    weight: 10,
+    present: (l) => {
+      const at = l.last_verified_at || l.collected_at;
+      if (!at) return false;
+      const ageDays = Math.floor((Date.now() - new Date(at).getTime()) / 86_400_000);
+      return ageDays <= 90;
+    },
+    labelPresent: 'البيانات حديثة (خلال 90 يومًا)',
+    labelMissing: 'البيانات قديمة أو غير مؤرّخة',
+  },
+];
+
+export function dataQualityAssessment(lead: Partial<Lead>): { score: number; reasons: string[] } {
+  let score = 0;
+  const reasons: string[] = [];
+  for (const factor of DATA_QUALITY_FACTORS) {
+    const isPresent = factor.present(lead);
+    if (isPresent) score += factor.weight;
+    reasons.push(isPresent ? factor.labelPresent : factor.labelMissing);
+  }
+  return { score: Math.min(100, score), reasons };
+}
+
 export function dataQualityScore(lead: Partial<Lead>): number {
-  const weights: Array<[boolean, number]> = [
-    [Boolean(lead.full_name || lead.first_name), 20],
-    [Boolean(lead.country || lead.governorate || lead.city), 15],
-    [Boolean(lead.occupation || lead.job_title || lead.industry), 15],
-    [Boolean(lead.business_phone || lead.public_contact_phone), 20],
-    [Boolean(lead.business_email || lead.public_email), 10],
-    [Boolean(lead.source_url || lead.professional_url || lead.social_url), 10],
-    [Boolean(lead.last_verified_at || lead.collected_at), 10],
-  ];
-  return weights.reduce((sum, [present, weight]) => sum + (present ? weight : 0), 0);
+  return dataQualityAssessment(lead).score;
+}
+
+/**
+ * Context-free lead score used at intake time (manual/CSV/API/CRM import,
+ * or before any search request exists). This does NOT replace scoreLead()
+ * below, which scores a lead against a specific search query's criteria —
+ * it is the base CRM score used in Lead Management, exports, and campaigns
+ * for leads that were never attached to a search request.
+ */
+export function scoreLeadIntake(lead: Partial<Lead>): { score: number; priority: LeadPriority; reasons: string[] } {
+  let score = 0;
+  const reasons: string[] = [];
+
+  if (lead.governorate || lead.city) {
+    score += 20;
+    reasons.push('بيانات الموقع متوفرة');
+  }
+  if (lead.occupation || lead.job_title) {
+    score += 20;
+    reasons.push('المهنة أو الوظيفة متوفرة');
+  }
+  const hasContact = Boolean(lead.business_phone || lead.public_contact_phone || lead.business_email || lead.public_email);
+  if (hasContact) {
+    score += 25;
+    reasons.push('توجد وسيلة تواصل فعلية');
+  }
+  const quality = lead.data_quality_score ?? dataQualityScore(lead);
+  const qualityContribution = Math.round((quality / 100) * 20);
+  if (qualityContribution > 0) {
+    score += qualityContribution;
+    reasons.push('جودة البيانات تدعم الدرجة');
+  }
+  const freshAt = lead.last_verified_at || lead.collected_at;
+  if (freshAt) {
+    const ageDays = Math.floor((Date.now() - new Date(freshAt).getTime()) / 86_400_000);
+    if (ageDays <= 30) {
+      score += 15;
+      reasons.push('بيانات حديثة (خلال 30 يومًا)');
+    } else if (ageDays <= 180) {
+      score += 8;
+      reasons.push('بيانات متوسطة الحداثة');
+    }
+  }
+
+  const capped = Math.min(100, score);
+  return { score: capped, priority: leadPriority(capped), reasons };
 }
 
 export function leadPriority(score: number): LeadPriority {

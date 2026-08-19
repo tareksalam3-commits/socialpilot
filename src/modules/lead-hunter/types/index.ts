@@ -66,6 +66,9 @@ export type LeadSearchJob = {
   max_retries: number;
   last_error: string | null;
   source_stats: Array<Record<string, unknown>>;
+  queries_used?: string[];
+  rounds_completed?: number;
+  stop_reason?: string | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -104,8 +107,77 @@ export type Lead = {
   status: 'new' | 'qualified' | 'contacted' | 'converted' | 'suppressed' | 'invalid' | 'archived';
   consent_status: 'unknown' | 'not_required' | 'pending' | 'consented' | 'denied';
   do_not_contact: boolean;
+  notes: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type LeadTag = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  color: string | null;
+  created_at: string;
+};
+
+export type LeadCampaign = {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  name: string;
+  status: 'draft' | 'active' | 'paused' | 'completed' | 'archived';
+  search_criteria: Record<string, unknown>;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  member_count?: number;
+};
+
+export type LeadCampaignMember = {
+  id: string;
+  workspace_id: string;
+  campaign_id: string;
+  lead_id: string;
+  status: 'pending' | 'contacted' | 'qualified' | 'converted' | 'excluded';
+  notes: string | null;
+  created_at: string;
+  lead?: Lead;
+};
+
+export type LeadListFilters = {
+  search?: string;
+  status?: Lead['status'];
+  governorate?: string;
+  city?: string;
+  minQuality?: number;
+  minScore?: number;
+  tagId?: string;
+  includeDoNotContact?: boolean;
+};
+
+export type LeadSortBy = 'updated_at' | 'lead_score' | 'data_quality_score';
+
+export type LeadIntakeRawInput = {
+  full_name?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  age?: number | string | null;
+  gender?: string | null;
+  occupation?: string | null;
+  job_title?: string | null;
+  industry?: string | null;
+  employer?: string | null;
+  country?: string | null;
+  governorate?: string | null;
+  city?: string | null;
+  district?: string | null;
+  business_phone?: string | null;
+  public_contact_phone?: string | null;
+  business_email?: string | null;
+  public_email?: string | null;
+  professional_url?: string | null;
+  social_url?: string | null;
+  notes?: string | null;
 };
 
 export type LeadSearchStats = {
@@ -118,14 +190,22 @@ export type LeadSearchStats = {
 
 export const LEAD_JOB_STAGE_LABELS: Record<string, string> = {
   queued: 'في الانتظار',
-  analyzing: 'تحليل الطلب',
+  understanding: 'أفهم طلبك...',
+  planning: 'أضع خطة البحث...',
+  analyzing: 'أحلل النتائج...',
   selecting_sources: 'اختيار المصادر',
-  searching: 'البحث عن العملاء',
+  searching: 'أبحث عن المرشحين...',
   collecting: 'جمع البيانات',
   cleaning: 'تنظيف البيانات',
   deduplicating: 'إزالة التكرارات',
-  qualifying: 'تحليل العملاء',
+  verifying: 'أتحقق من البيانات...',
+  qualifying: 'أستبعد النتائج غير المطابقة...',
+  ranking: 'أرتب أفضل العملاء...',
   scoring: 'حساب درجات العملاء',
   completed: 'اكتمل',
   failed: 'فشل',
+  not_configured: 'لا توجد مصادر بحث خارجي مهيأة بعد',
+  no_source_configured: 'لم يتم تفعيل أي مصدر بيانات',
 };
+
+export type LeadSearchMode = 'fast' | 'balanced' | 'deep';

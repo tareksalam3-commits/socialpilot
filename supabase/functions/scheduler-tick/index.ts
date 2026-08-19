@@ -448,6 +448,8 @@ async function publishCalendarItem(item: CalendarItem): Promise<'published' | 's
       entity_id: item.variant_id,
       detail: { platform, post_id: result.id, triggered_by: 'scheduler' },
     });
+
+    return 'published';
   } catch (err) {
     const message = err instanceof Error ? err.message : 'فشل النشر';
 

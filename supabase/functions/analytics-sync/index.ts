@@ -247,6 +247,23 @@ async function reconcilePublishedJobs(workspaceId: string): Promise<{ reconciled
   return { reconciled, evidence };
 }
 
+// X's public_metrics use API-specific field names. Map them to the same metric vocabulary
+// used by Facebook/Instagram/LinkedIn (impressions, likes, comments, shares, saved) so the
+// dashboard's cross-platform aggregation, engagement totals, and KPI cards recognize them.
+// retweet_count and quote_count both represent a repost/quote-style share and are summed
+// into a single "shares" value instead of overwriting each other under one metric key.
+function normalizeXMetrics(raw: Record<string, unknown>): Record<string, number> {
+  const num = (value: unknown): number => (typeof value === 'number' ? value : Number(value ?? 0)) || 0;
+  const normalized: Record<string, number> = {
+    impressions: num(raw.impression_count),
+    likes: num(raw.like_count),
+    comments: num(raw.reply_count),
+    shares: num(raw.retweet_count) + num(raw.quote_count),
+    saved: num(raw.bookmark_count),
+  };
+  return Object.fromEntries(Object.entries(normalized).filter(([, value]) => Number.isFinite(value)));
+}
+
 async function syncX(job: Job): Promise<number> {
   if (!job.external_post_id) return 0;
   const context = await variantContext(job);
@@ -255,9 +272,10 @@ async function syncX(job: Job): Promise<number> {
   const response = await fetchWithRetry(`https://api.twitter.com/2/tweets/${encodeURIComponent(job.external_post_id)}?tweet.fields=public_metrics,created_at`, { headers: { Authorization: `Bearer ${token}` } });
   const body = await response.json();
   if (!response.ok || !body.data) throw new Error(body?.detail ?? 'X insights request failed');
-  const metrics = body.data.public_metrics ?? {};
+  const metrics = normalizeXMetrics(body.data.public_metrics ?? {});
   const timestamp = body.data.created_at ?? job.published_at ?? new Date().toISOString();
   const rows = Object.entries(metrics).map(([metric, value]) => makeRow(job, context.contentId, 'x', 'x_api', metric, value, timestamp)).filter((row): row is InsightRow => Boolean(row));
+  if (!rows.length) throw new Error('X returned no post-level metrics for this post');
   return upsertRows(rows);
 }
 
@@ -328,14 +346,25 @@ async function syncLinkedIn(job: Job): Promise<number> {
   const token = await accessTokenFor(account, 'LinkedIn');
   const externalUrn = job.external_post_id.startsWith('urn:li:') ? job.external_post_id : `urn:li:share:${job.external_post_id}`;
   const entityType = externalUrn.startsWith('urn:li:ugcPost:') ? 'ugc' : 'share';
-  const metrics = ['IMPRESSION', 'MEMBERS_REACHED', 'RESHARE', 'REACTION', 'COMMENT'];
+  // Map LinkedIn's queryType constants to the same plural metric vocabulary the other
+  // platforms use (impressions, reach, shares, reactions, comments). Storing the raw
+  // lowercased API name ("impression", "members_reached", ...) previously meant these
+  // rows never matched METRIC_LABELS/ENGAGEMENT_METRICS in the dashboard and were
+  // effectively invisible even though the sync itself succeeded.
+  const metrics: Array<[string, string]> = [
+    ['IMPRESSION', 'impressions'],
+    ['MEMBERS_REACHED', 'reach'],
+    ['RESHARE', 'shares'],
+    ['REACTION', 'reactions'],
+    ['COMMENT', 'comments'],
+  ];
   const rows: InsightRow[] = [];
 
-  for (const metric of metrics) {
+  for (const [queryType, metric] of metrics) {
     const url = new URL('https://api.linkedin.com/rest/memberCreatorPostAnalytics');
     url.searchParams.set('q', 'entity');
     url.searchParams.set('entity', `(${entityType}:${externalUrn})`);
-    url.searchParams.set('queryType', metric);
+    url.searchParams.set('queryType', queryType);
     url.searchParams.set('aggregation', 'TOTAL');
     const response = await fetchWithRetry(url.toString(), {
       headers: {
@@ -345,9 +374,9 @@ async function syncLinkedIn(job: Job): Promise<number> {
         'Linkedin-Version': LINKEDIN_API_VERSION,
       },
     });
-    const body = await readJsonResponse(response, `LinkedIn ${metric} analytics request failed`);
+    const body = await readJsonResponse(response, `LinkedIn ${queryType} analytics request failed`);
     const item = (body.elements as Array<Record<string, unknown>> | undefined)?.[0];
-    const row = makeRow(job, context.contentId, 'linkedin', 'linkedin_member_creator_post_analytics', metric.toLowerCase(), item?.count, job.published_at ?? new Date().toISOString());
+    const row = makeRow(job, context.contentId, 'linkedin', 'linkedin_member_creator_post_analytics', metric, item?.count, job.published_at ?? new Date().toISOString());
     if (row) rows.push(row);
   }
 
