@@ -88,13 +88,17 @@ type SettingsRow = {
 // additive service-role bypass in `authorize()` for exactly this case.
 const AI_GATEWAY_URL = `${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/ai-gateway`;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const AI_GATEWAY_TIMEOUT_MS = 20_000;
 
 function buildAiCaller(workspaceId: string, userId: string): AICaller {
   return async (step, payload) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), AI_GATEWAY_TIMEOUT_MS);
     try {
       const res = await fetch(AI_GATEWAY_URL, {
         method: 'POST',
         headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           intent: 'research_agent_reasoning',
           workspaceId,
@@ -114,9 +118,11 @@ function buildAiCaller(workspaceId: string, userId: string): AICaller {
         __ai_fallback_log: Array.isArray(body.fallbackLog) ? body.fallbackLog : [],
       };
     } catch {
-      // AI Gateway unreachable — the loop treats this as ai_unavailable for
-      // the step in question and never fabricates a decision (§21, §28).
+      // AI Gateway unreachable or timed out — the loop treats this as
+      // ai_unavailable for the step and never fabricates a decision.
       return null;
+    } finally {
+      clearTimeout(timer);
     }
   };
 }
@@ -189,8 +195,24 @@ async function writeAudit(workspaceId: string, userId: string, action: string, e
 // for the loop itself; this function does the DB IO around it.
 // ---------------------------------------------------------------------------
 
+const JOB_WATCHDOG_MS = 240_000;
+
 async function updateStage(jobId: string, stage: string, percent: number) {
-  await supabase.from('lead_search_jobs').update({ progress_stage: stage, progress_percent: percent }).eq('id', jobId);
+  await supabase.from('lead_search_jobs').update({ progress_stage: stage, progress_percent: percent }).eq('id', jobId).eq('status', 'running');
+}
+
+async function runProcessJobWithWatchdog(job: JobRow, userId: string): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      processJob(job, userId),
+      new Promise<void>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('انتهت مهلة تنفيذ Job البحث قبل الوصول إلى نتيجة نهائية.')), JOB_WATCHDOG_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function processJob(job: JobRow, userId: string) {
@@ -352,7 +374,7 @@ async function processJob(job: JobRow, userId: string) {
     search_memory: loopResult.searchMemory,
     search_summary: loopResult.searchSummary,
     completed_at: new Date().toISOString(),
-  }).eq('id', job.id);
+  }).eq('id', job.id).eq('status', 'running');
 
   await supabase.from('lead_search_requests').update({
     status: 'completed',
@@ -361,7 +383,7 @@ async function processJob(job: JobRow, userId: string) {
     duplicate_count: loopResult.totals.duplicates,
     invalid_count: loopResult.totals.rejected,
     qualified_count: savedCount,
-  }).eq('id', job.search_request_id);
+  }).eq('id', job.search_request_id).eq('status', 'running');
 
   const body = noSourceStage
     ? 'تم فهم الطلب ووضع خطة بحث فعلية، لكن لا يوجد مصدر بحث مصرّح به ومهيأ حاليًا — لم يتم اختلاق أي نتائج.'
@@ -581,10 +603,10 @@ Deno.serve(async (req: Request) => {
         job = created as JobRow;
       }
       await writeAudit(workspaceId, userId, 'SearchStarted', 'lead_search_job', job.id, { search_request_id });
-      const runPromise = processJob(job, userId).catch(async (error) => {
+      const runPromise = runProcessJobWithWatchdog(job, userId).catch(async (error) => {
         const message = error instanceof Error ? error.message : 'تعذر تنفيذ البحث.';
-        await supabase.from('lead_search_jobs').update({ status: 'failed', last_error: message, completed_at: new Date().toISOString() }).eq('id', job!.id);
-        await supabase.from('lead_search_requests').update({ status: 'failed' }).eq('id', search_request_id);
+        await supabase.from('lead_search_jobs').update({ status: 'failed', progress_stage: 'failed', last_error: message, completed_at: new Date().toISOString() }).eq('id', job!.id).eq('status', 'running');
+        await supabase.from('lead_search_requests').update({ status: 'failed' }).eq('id', search_request_id).eq('status', 'running');
         await writeAudit(workspaceId, userId, 'SearchFailed', 'lead_search_job', job!.id, { error: message });
       });
       const runtime = (globalThis as { EdgeRuntime?: { waitUntil: (promise: Promise<unknown>) => void } }).EdgeRuntime;

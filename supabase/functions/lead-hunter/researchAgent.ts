@@ -434,6 +434,23 @@ function normalizedToolCall(value: unknown): ResearchToolCall | null {
   return { id: typeof row.id === 'string' ? row.id.slice(0, 80) : undefined, name, arguments: rawArgs };
 }
 
+const AI_CALL_TIMEOUT_MS = 25_000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  if (timeoutMs <= 0) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function searchOptionsForTool(args: Record<string, unknown>, constraints: LoopInput['searchConstraints'], capabilities: LoopInput['sourceCapabilities']): SearchExecutionOptions {
   const caps = (capabilities?.searxng_search ?? {}) as Record<string, unknown>;
   const list = (value: unknown) => Array.isArray(value) ? value.map(String).filter(Boolean) : [];
@@ -452,6 +469,13 @@ function searchOptionsForTool(args: Record<string, unknown>, constraints: LoopIn
 export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
   const { spec, mode } = input;
   const startedAt = Date.now();
+  const hardDeadline = startedAt + Math.max(30_000, input.maxRuntimeMs);
+  const isPastDeadline = () => Date.now() >= hardDeadline;
+  const callAi = async <T extends Record<string, unknown>>(step: AIStep, payload: Record<string, unknown>): Promise<T | null> => {
+    if (isPastDeadline()) return null;
+    const remaining = hardDeadline - Date.now();
+    return await withTimeout(input.aiCall(step, payload), Math.min(AI_CALL_TIMEOUT_MS, remaining)) as T | null;
+  };
   const enabledSources = input.sources.filter((s) => s.enabled);
   const sourceStats: SourceRoundStat[] = [];
   const queriesUsed: string[] = [];
@@ -515,13 +539,13 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
   const seedQueries = generateQueries(spec, mode);
 
   while (round < input.maxRounds && accepted.length < spec.requestedCount) {
-    if (Date.now() - startedAt > input.maxRuntimeMs) { stopReason = 'time_budget_exhausted'; break; }
+    if (isPastDeadline()) { stopReason = 'time_budget_exhausted'; break; }
     if (queriesIssued >= input.maxQueries) { stopReason = 'search_budget_exhausted'; break; }
     round += 1;
     await input.onProgress?.('planning', Math.min(20 + round * 4, 30));
 
     // --- PLAN (§1 THINK/PLAN, §15 learn from previous round) ---
-    const planDecision = await input.aiCall('plan_round', {
+    const planDecision = await callAi<PlanRoundDecision>('plan_round', {
       spec, mode, round, requestedCount: spec.requestedCount,
       alreadyQualified: accepted.length,
       seedQueries,
@@ -530,7 +554,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
       previousReview,
       searchConstraints: input.searchConstraints ?? {},
       sourceCapabilities: input.sourceCapabilities ?? {},
-    }) as PlanRoundDecision | null;
+    });
 
     trackAi(planDecision);
     let effectivePlanDecision = planDecision;
@@ -579,7 +603,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
       }
     }
     if (roundToolResults.length > 0) {
-      const followUp = await input.aiCall('plan_round', { spec, mode, round, requestedCount: spec.requestedCount, alreadyQualified: accepted.length, seedQueries, queriesUsedSoFar: queriesUsed, queryPerformance, previousReview, searchConstraints: input.searchConstraints ?? {}, sourceCapabilities: input.sourceCapabilities ?? {}, tool_results: roundToolResults, tool_execution_complete: true });
+      const followUp = await callAi<PlanRoundDecision>('plan_round', { spec, mode, round, requestedCount: spec.requestedCount, alreadyQualified: accepted.length, seedQueries, queriesUsedSoFar: queriesUsed, queryPerformance, previousReview, searchConstraints: input.searchConstraints ?? {}, sourceCapabilities: input.sourceCapabilities ?? {}, tool_results: roundToolResults, tool_execution_complete: true });
       trackAi(followUp);
       if (followUp && Array.isArray((followUp as PlanRoundDecision).queries) && (followUp as PlanRoundDecision).queries.length > 0) effectivePlanDecision = followUp as PlanRoundDecision;
     }
@@ -625,6 +649,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
     // --- SEARCH + OBSERVE (§1 SEARCH/OBSERVE, real tool calls) ---
     for (const query of roundQueries) {
+      if (isPastDeadline()) { stopReason = 'time_budget_exhausted'; break; }
       if (queriesIssued >= input.maxQueries) { stopReason = 'search_budget_exhausted'; break; }
       queriesIssued += 1;
       queriesUsed.push(query);
@@ -633,6 +658,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
       await input.onProgress?.('searching', Math.min(35 + round * 5, 55));
       for (const source of enabledSources) {
+        if (isPastDeadline()) { stopReason = 'time_budget_exhausted'; break; }
         const connector = CONNECTOR_REGISTRY.get(source.connector_key);
         sourcesUsed.add(source.connector_key);
         if (!connector) {
@@ -668,7 +694,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
         // --- ANALYZE / READ (§1 ANALYZE, §4, §9 evidence-based extraction) ---
         await input.onProgress?.('analyzing', Math.min(55 + round * 4, 68));
-        const extraction = await input.aiCall('extract_candidates', { spec, results: raw }) as ({ candidates: ExtractedCandidate[] } & Record<string, unknown>) | null;
+        const extraction = await callAi<{ candidates: ExtractedCandidate[] } & Record<string, unknown>>('extract_candidates', { spec, results: raw });
         trackAi(extraction);
         if (!extraction?.candidates?.length) {
           // AI unavailable or found nothing extractable — every raw result is
@@ -690,6 +716,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
         }
 
         for (let i = 0; i < extraction.candidates.length; i++) {
+          if (isPastDeadline()) { stopReason = 'time_budget_exhausted'; break; }
           const item = extraction.candidates[i];
           const sourceRow = raw[i];
           const ledgerEntry: CandidateLedgerEntry = {
@@ -766,7 +793,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
                 } catch { /* failover source is optional */ }
               }
             }
-            verified = await input.aiCall('verify_candidate', { spec, candidate: normalized, evidence: item.evidence, corroboration }) as (VerifyDecision & Record<string, unknown>) | null;
+            verified = await callAi<VerifyDecision & Record<string, unknown>>('verify_candidate', { spec, candidate: normalized, evidence: item.evidence, corroboration });
             trackAi(verified);
             totals.verified += 1;
             if (verified?.verdict !== 'confirmed') {
@@ -803,15 +830,17 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
       }
     }
 
+    if (isPastDeadline()) { stopReason = 'time_budget_exhausted'; break; }
+
     // --- REVIEW / ADAPT / STOP (§1 REVIEW/STOP, §14, §19 quality plateau) ---
     await input.onProgress?.('final_review', Math.min(82 + round * 3, 92));
     const roundAccepted = accepted.slice(roundStartAccepted);
     const roundQuality = roundAccepted.length > 0 ? roundAccepted.reduce((sum, item) => sum + item.dataQuality.score, 0) / roundAccepted.length : 0;
-    const review = await input.aiCall('round_review', {
+    const review = await callAi<RoundReviewDecision & Record<string, unknown>>('round_review', {
       spec, round, roundFound, roundQualified, roundRejected, roundDuplicates,
       totalQualified: accepted.length, requestedCount: spec.requestedCount,
       previousRoundQualified: previousRoundQualified === Infinity ? null : previousRoundQualified,
-    }) as (RoundReviewDecision & Record<string, unknown>) | null;
+    });
     trackAi(review);
 
     strategyNotes.push({
