@@ -126,6 +126,13 @@ function Settings({ data, mutate }: { data: Record<string, unknown>; mutate: (ac
   const [maxFetches, setMaxFetches] = useState(String(settings.max_fetches ?? 40));
   const [maxCandidates, setMaxCandidates] = useState(String(settings.max_candidates_per_round ?? 200));
   const [maxRuntime, setMaxRuntime] = useState(String(settings.max_runtime_seconds ?? 900));
+  const [categories, setCategories] = useState(Array.isArray(settings.search_categories) ? (settings.search_categories as unknown[]).join(', ') : 'general');
+  const [languages, setLanguages] = useState(Array.isArray(settings.search_languages) ? (settings.search_languages as unknown[]).join(', ') : 'ar-EG, en-US');
+  const [engines, setEngines] = useState(Array.isArray(settings.search_allowed_engines) ? (settings.search_allowed_engines as unknown[]).join(', ') : '');
+  const [allowSocial, setAllowSocial] = useState(settings.allow_social_search !== false);
+  const [allowSite, setAllowSite] = useState(settings.allow_site_search !== false);
+  const [timeRange, setTimeRange] = useState(String(settings.default_time_range ?? ''));
+  const parseList = (value: string) => value.split(',').map((item) => item.trim()).filter(Boolean);
   return <div className="flex flex-col gap-3">
     <Card>
       <h2 className="text-ink-100 font-semibold mb-2">مصدر البحث المجاني — SearXNG</h2>
@@ -133,7 +140,9 @@ function Settings({ data, mutate }: { data: Record<string, unknown>; mutate: (ac
       <Input value={searxngUrl} onChange={setSearxngUrl} placeholder="https://searxng.example.com" />
       <div className="grid grid-cols-2 gap-2 mt-2"><Input value={maxQueries} onChange={setMaxQueries} placeholder="Max Queries" type="text" /><Input value={maxFetches} onChange={setMaxFetches} placeholder="Max Fetches" type="text" /><Input value={maxCandidates} onChange={setMaxCandidates} placeholder="Max Candidates / Round" type="text" /><Input value={maxRuntime} onChange={setMaxRuntime} placeholder="Max Runtime (sec)" type="text" /></div>
       <Select value={searchMode} onChange={setSearchMode} options={[{ value: 'fast', label: 'بحث سريع' }, { value: 'balanced', label: 'بحث متوازن' }, { value: 'deep', label: 'بحث عميق' }]} />
-      <Button className="mt-3" onClick={() => void mutate(() => leadHunterAdmin.updateSettings({ searxng_base_url: searxngUrl.trim() || null, default_search_mode: searchMode, max_queries: Number(maxQueries), max_fetches: Number(maxFetches), max_candidates_per_round: Number(maxCandidates), max_runtime_seconds: Number(maxRuntime) }))}>حفظ إعدادات الباحث</Button>
+      <div className="grid gap-2 mt-2"><Input value={categories} onChange={setCategories} placeholder="Categories المسموحة: general, news" /><Input value={languages} onChange={setLanguages} placeholder="Languages: ar-EG, en-US" /><Input value={engines} onChange={setEngines} placeholder="Engines اختيارية — اتركها فارغة للاكتشاف" /><Input value={timeRange} onChange={setTimeRange} placeholder="Time range اختياري: day/week/month/year" /></div>
+      <div className="grid grid-cols-2 gap-2 mt-2"><button onClick={() => setAllowSocial(!allowSocial)} className="rounded-xl border border-ink-700 bg-ink-900 p-3 text-xs text-ink-300">البحث الاجتماعي العام: {allowSocial ? 'مسموح' : 'موقوف'}</button><button onClick={() => setAllowSite(!allowSite)} className="rounded-xl border border-ink-700 bg-ink-900 p-3 text-xs text-ink-300">Site-specific search: {allowSite ? 'مسموح' : 'موقوف'}</button></div>
+      <Button className="mt-3" onClick={() => void mutate(() => leadHunterAdmin.updateSettings({ searxng_base_url: searxngUrl.trim() || null, default_search_mode: searchMode, max_queries: Number(maxQueries), max_fetches: Number(maxFetches), max_candidates_per_round: Number(maxCandidates), max_runtime_seconds: Number(maxRuntime), search_categories: parseList(categories), search_languages: parseList(languages), search_allowed_engines: parseList(engines), allow_social_search: allowSocial, allow_site_search: allowSite, default_time_range: timeRange.trim() || null }))}>حفظ إعدادات الباحث</Button>
       <p className="text-ink-600 text-[11px] mt-2">لا يتم حفظ أو عرض أي API key في هذه الشاشة. SearXNG لا يحتاج مفتاحًا في النسخة الأساسية.</p>
     </Card>
     <Card><h2 className="text-ink-100 font-semibold mb-3">Feature Flags وKill Switch</h2>{[...flags, 'kill_switch'].map((key) => <button key={key} onClick={() => mutate(() => leadHunterAdmin.updateSettings({ [key]: !settings[key] }), key === 'kill_switch' ? 'تغيير Kill Switch؟ سيمنع عمليات البحث الجديدة.' : undefined)} className="w-full flex items-center justify-between py-3 border-b border-ink-800 last:border-0"><span className="text-ink-300 text-sm" dir="ltr">{key}</span><Badge color={settings[key] ? key === 'kill_switch' ? 'danger' : 'brand' : 'neutral'}>{settings[key] ? 'مفعّل' : 'معطّل'}</Badge></button>)}</Card>

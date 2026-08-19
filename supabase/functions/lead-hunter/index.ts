@@ -18,7 +18,7 @@ import {
   type AICaller,
 } from './researchAgent.ts';
 import { createSerperConnector } from './connectors/serper.ts';
-import { createSearXNGConnector } from './connectors/searxng.ts';
+import { createSearXNGConnector, discoverSearXNGCapabilities } from './connectors/searxng.ts';
 
 // Register real search connectors once at module load (§20, §22 — the
 // connector is a tool, shared across every workspace's job in this
@@ -69,6 +69,13 @@ type SettingsRow = {
   max_queries: number;
   max_fetches: number;
   searxng_base_url: string | null;
+  search_categories?: string[];
+  search_languages?: string[];
+  search_allowed_engines?: string[];
+  allow_social_search?: boolean;
+  allow_site_search?: boolean;
+  default_time_range?: string | null;
+  searxng_capabilities?: Record<string, unknown>;
 };
 
 // ---------------------------------------------------------------------------
@@ -194,7 +201,7 @@ async function processJob(job: JobRow, userId: string) {
 
   const [{ data: request }, { data: settingsRow }, { data: sources }] = await Promise.all([
     supabase.from('lead_search_requests').select('id,parsed_query,raw_query,requested_count,objective,search_mode').eq('id', job.search_request_id).maybeSingle(),
-    supabase.from('lead_hunter_settings').select('data_quality_threshold,max_rounds_fast,max_rounds_balanced,max_rounds_deep,max_candidates_per_round,max_runtime_seconds,max_queries,max_fetches,searxng_base_url').eq('id', true).maybeSingle(),
+    supabase.from('lead_hunter_settings').select('data_quality_threshold,max_rounds_fast,max_rounds_balanced,max_rounds_deep,max_candidates_per_round,max_runtime_seconds,max_queries,max_fetches,searxng_base_url,search_categories,search_languages,search_allowed_engines,allow_social_search,allow_site_search,default_time_range,searxng_capabilities').eq('id', true).maybeSingle(),
     supabase.from('lead_sources').select('id,name,connector_key,enabled,status,priority,config').eq('workspace_id', job.workspace_id).order('priority', { ascending: true }).limit(100),
   ]);
 
@@ -204,7 +211,7 @@ async function processJob(job: JobRow, userId: string) {
   }
 
   const settings = (settingsRow ?? {
-    data_quality_threshold: 60, max_rounds_fast: 1, max_rounds_balanced: 3, max_rounds_deep: 6, max_candidates_per_round: 200, max_runtime_seconds: 900, max_queries: 24, max_fetches: 40, searxng_base_url: null,
+    data_quality_threshold: 60, max_rounds_fast: 1, max_rounds_balanced: 3, max_rounds_deep: 6,     max_candidates_per_round: 200, max_runtime_seconds: 900, max_queries: 24, max_fetches: 40, searxng_base_url: null, search_categories: ['general'], search_languages: ['ar-EG', 'en-US'], search_allowed_engines: [], allow_social_search: true, allow_site_search: true, default_time_range: null, searxng_capabilities: {},
   }) as SettingsRow;
   const mode = (['fast', 'balanced', 'deep'].includes(String(request.search_mode)) ? request.search_mode : (settings.default_search_mode ?? 'balanced')) as SearchModeName;
   const maxRounds = mode === 'fast' ? settings.max_rounds_fast : mode === 'deep' ? settings.max_rounds_deep : settings.max_rounds_balanced;
@@ -225,6 +232,15 @@ async function processJob(job: JobRow, userId: string) {
   const sourceRows = (sources ?? []) as SourceRow[];
   const enabledSources = sourceRows.filter((source) => source.enabled && source.status !== 'disabled');
   const credentials = await resolveSourceCredentials(enabledSources, settings.searxng_base_url ?? null);
+  const sourceCapabilities: Record<string, Record<string, unknown>> = {};
+  const searxngSource = enabledSources.find((source) => source.connector_key === 'searxng_search');
+  if (searxngSource) {
+    const capabilities = await discoverSearXNGCapabilities(credentials.get('searxng_search')?.baseUrl ?? settings.searxng_base_url ?? null);
+    sourceCapabilities.searxng_search = capabilities as unknown as Record<string, unknown>;
+    const now = new Date().toISOString();
+    await supabase.from('lead_hunter_settings').update({ searxng_capabilities: capabilities, searxng_last_health_at: now, searxng_last_health_status: capabilities.status, searxng_last_health_error: capabilities.status === 'healthy' ? null : capabilities.message }).eq('id', true);
+    await supabase.from('lead_sources').update({ status: capabilities.status, last_health_at: now, last_error: capabilities.status === 'healthy' ? null : capabilities.message }).eq('id', searxngSource.id);
+  }
 
   await updateStage(job.id, 'searching', 35);
   const loopResult = await runResearchLoop({
@@ -239,6 +255,8 @@ async function processJob(job: JobRow, userId: string) {
     isDuplicate: async (candidate) => (await fetchDuplicateCandidates(job.workspace_id, candidate)).length > 0,
     aiCall: buildAiCaller(job.workspace_id, userId),
     onProgress: (stage, percent) => updateStage(job.id, stage, percent),
+    searchConstraints: { categories: settings.search_categories ?? ['general'], languages: settings.search_languages ?? ['ar-EG', 'en-US'], engines: settings.search_allowed_engines ?? [], allowSocialSearch: settings.allow_social_search !== false, allowSiteSearch: settings.allow_site_search !== false, defaultTimeRange: settings.default_time_range ?? null },
+    sourceCapabilities,
   });
 
   // Candidate ledger (§7: Candidate ≠ Lead) — every raw result the loop

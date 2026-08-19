@@ -1,4 +1,5 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4';
+import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
+import { discoverSearXNGCapabilities, searxngSearch, SearXNGError } from './lead-hunter/connectors/searxng.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -62,19 +63,15 @@ async function getScoring() {
   return data ?? null;
 }
 
-async function checkSearxng(baseUrl: string | null): Promise<{ status: 'healthy' | 'degraded' | 'error' | 'not_configured'; message: string }> {
-  const normalized = String(baseUrl ?? '').trim().replace(/\/+$/, '');
-  if (!normalized) return { status: 'not_configured', message: 'لم يتم ضبط SearXNG URL.' };
+async function checkSearxng(baseUrl: string | null): Promise<Record<string, unknown>> {
+  const capabilities = await discoverSearXNGCapabilities(baseUrl);
+  if (capabilities.status !== 'healthy') return capabilities as unknown as Record<string, unknown>;
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    const response = await fetch(`${normalized}/search?q=SocialPilot&format=json&language=en-US&pageno=1`, { headers: { Accept: 'application/json' }, signal: controller.signal });
-    clearTimeout(timer);
-    if (!response.ok) return { status: 'error', message: `SearXNG HTTP ${response.status}.` };
-    const payload = await response.json() as { results?: unknown[] };
-    return Array.isArray(payload.results) ? { status: 'healthy', message: `SearXNG متصل (${payload.results.length} نتيجة فحص).` } : { status: 'degraded', message: 'استجابة SearXNG لا تحتوي على results array.' };
+    const results = await searxngSearch('SocialPilot Lead Hunter test', { apiKey: null, baseUrl }, { language: 'en-US', page: 1, safe_search: 1 });
+    return { ...capabilities, status: results.length > 0 ? 'healthy' : 'degraded', testQuery: 'SocialPilot Lead Hunter test', resultCount: results.length, enginesObserved: Array.from(new Set(results.flatMap((item) => item.engines ?? (item.engine ? [item.engine] : [])))) };
   } catch (error) {
-    return { status: 'error', message: error instanceof Error ? error.message : 'تعذر الاتصال بـSearXNG.' };
+    const code = error instanceof SearXNGError ? error.code : 'SOURCE_ERROR';
+    return { ...capabilities, status: code === 'NOT_CONFIGURED' ? 'not_configured' : 'error', errorCode: code, message: error instanceof Error ? error.message : 'تعذر تنفيذ البحث التجريبي.' };
   }
 }
 
@@ -198,10 +195,10 @@ Deno.serve(async (req: Request) => {
         const result = await checkSearxng(typeof config.base_url === 'string' ? config.base_url : (settings?.searxng_base_url as string | null));
         const now = new Date().toISOString();
         await supabase.from('lead_sources').update({ status: result.status === 'healthy' ? 'healthy' : result.status, last_health_at: now, last_error: result.status === 'healthy' ? null : result.message }).eq('id', sourceId);
-        await supabase.from('lead_hunter_settings').update({ searxng_last_health_at: now, searxng_last_health_status: result.status, searxng_last_health_error: result.status === 'healthy' ? null : result.message }).eq('id', true);
+        await supabase.from('lead_hunter_settings').update({ searxng_capabilities: result, searxng_last_health_at: now, searxng_last_health_status: result.status, searxng_last_health_error: result.status === 'healthy' ? null : result.message }).eq('id', true);
         await supabase.from('lead_hunter_source_runs').insert({ workspace_id: source.workspace_id, source_id: sourceId, status: result.status === 'healthy' ? 'success' : result.status === 'not_configured' ? 'not_configured' : 'error', success: result.status === 'healthy', finished_at: now, error_message: result.status === 'healthy' ? null : result.message });
         await adminLog(userId, 'source_tested', 'lead_source', sourceId, {}, { status: result.status, message: result.message }, result.status === 'healthy' ? 'info' : 'warning');
-        return json(200, { ok: result.status === 'healthy', status: result.status, message: result.message });
+        return json(200, { ok: result.status === 'healthy', ...result });
       }
       const { data: secret } = await supabase.from('lead_source_secrets').select('source_id').eq('source_id', sourceId).maybeSingle();
       const status = 'not_configured';
@@ -320,6 +317,14 @@ Deno.serve(async (req: Request) => {
         if (patch[key] !== undefined && (!Number.isFinite(Number(patch[key])) || Number(patch[key]) <= 0 || Number(patch[key]) > 100000)) return json(400, { error: `قيمة ${key} غير صالحة.` });
         if (patch[key] !== undefined) patch[key] = Number(patch[key]);
       }
+      for (const key of ['search_categories', 'search_languages', 'search_allowed_engines']) {
+        if (patch[key] !== undefined && (!Array.isArray(patch[key]) || (patch[key] as unknown[]).some((value) => typeof value !== 'string' || String(value).length > 120))) return json(400, { error: `قيمة ${key} غير صالحة.` });
+        if (Array.isArray(patch[key])) patch[key] = Array.from(new Set((patch[key] as unknown[]).map(String).filter(Boolean))).slice(0, 50);
+      }
+      for (const key of ['allow_social_search', 'allow_site_search']) {
+        if (patch[key] !== undefined && typeof patch[key] !== 'boolean') return json(400, { error: `قيمة ${key} غير صالحة.` });
+      }
+      if (patch.default_time_range !== undefined && patch.default_time_range !== null && String(patch.default_time_range).length > 32) return json(400, { error: 'default_time_range غير صالح.' });
       const { data, error } = await supabase.from('lead_hunter_settings').update({ ...patch, updated_by: userId, updated_at: new Date().toISOString() }).eq('id', true).select('*').single();
       if (error) throw error;
       await adminLog(userId, 'settings_updated', 'lead_hunter_settings', undefined, current ?? {}, patch);

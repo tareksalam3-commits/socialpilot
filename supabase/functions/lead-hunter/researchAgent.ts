@@ -247,7 +247,7 @@ export type SourceCredentials = { apiKey: string | null; baseUrl?: string | null
 
 export interface LeadSourceConnector {
   readonly key: string;
-  search(query: string, spec: SearchSpecification, credentials: SourceCredentials): Promise<RawCandidate[]>;
+  search(query: string, spec: SearchSpecification, credentials: SourceCredentials, options?: SearchExecutionOptions): Promise<RawCandidate[]>;
   fetchPublicPage?(url: string): Promise<{ text: string; finalUrl: string } | null>;
   healthCheck?(credentials: SourceCredentials): Promise<{ status: string; message: string }>;
   normalize(record: RawCandidate): Promise<LeadRecord>;
@@ -266,8 +266,27 @@ export type AIStep = 'plan_round' | 'extract_candidates' | 'verify_candidate' | 
 
 export type AICaller = (step: AIStep, payload: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
 
+export type SearchExecutionOptions = {
+  query?: string;
+  language?: string;
+  page?: number;
+  time_range?: string | null;
+  categories?: string[];
+  engines?: string[];
+  safe_search?: number | boolean;
+};
+
 export type PlanRoundDecision = {
+  strategy?: string;
   queries: string[];
+  categories?: string[];
+  engines?: string[];
+  language?: string;
+  time_range?: string | null;
+  reason?: string;
+  target_information?: string[];
+  expected_result_type?: string;
+  next_action?: string;
   reasoning: string;
   deprioritized_queries?: string[];
 };
@@ -287,6 +306,7 @@ export type VerifyDecision = {
 
 export type RoundReviewDecision = {
   decision: 'continue' | 'stop';
+  next_action?: 'CONTINUE_SAME_STRATEGY' | 'REFINE_QUERY' | 'CHANGE_STRATEGY' | 'CHANGE_CATEGORY' | 'CHANGE_ENGINE' | 'VERIFY' | 'SEARCH_MISSING_FIELD' | 'STOP' | string;
   stop_reason?: string;
   quality_signal: 'improving' | 'stable' | 'declining';
   note: string;
@@ -320,6 +340,12 @@ export type RoundStrategyNote = {
   strategy_source: 'ai' | 'fallback_deterministic';
   queries: string[];
   reasoning: string;
+  strategy?: string;
+  categories?: string[];
+  engines?: string[];
+  language?: string;
+  time_range?: string | null;
+  next_action?: string;
   found: number;
   qualified: number;
   rejected: number;
@@ -339,6 +365,8 @@ export type LoopInput = {
   isDuplicate: (candidate: LeadRecord) => Promise<boolean>;
   aiCall: AICaller;
   onProgress?: (stage: string, percent: number) => Promise<void>;
+  searchConstraints?: { categories?: string[]; languages?: string[]; engines?: string[]; allowSocialSearch?: boolean; allowSiteSearch?: boolean; defaultTimeRange?: string | null };
+  sourceCapabilities?: Record<string, Record<string, unknown>>;
 };
 
 export type LoopOutput = {
@@ -378,6 +406,8 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
   const missingFields = new Set<string>();
   const sourcesUsed = new Set<string>();
   const strategiesUsed = new Set<string>();
+  const categoriesUsed = new Set<string>();
+  const enginesUsed = new Set<string>();
   const successfulQueries: string[] = [];
   const weakQueries: string[] = [];
   const aiProvidersUsed = new Set<string>();
@@ -409,6 +439,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
   let round = 0;
   let previousRoundQualified = Infinity;
+  let previousReview: RoundReviewDecision | null = null;
   let stopReason = 'max_rounds_reached';
   const seedQueries = generateQueries(spec, mode);
 
@@ -425,10 +456,35 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
       seedQueries,
       queriesUsedSoFar: queriesUsed,
       queryPerformance,
+      previousReview,
+      searchConstraints: input.searchConstraints ?? {},
+      sourceCapabilities: input.sourceCapabilities ?? {},
     }) as PlanRoundDecision | null;
 
     trackAi(planDecision);
     const strategySource: 'ai' | 'fallback_deterministic' = planDecision?.queries?.length ? 'ai' : 'fallback_deterministic';
+    const capabilities = (input.sourceCapabilities?.searxng_search ?? {}) as Record<string, unknown>;
+    const constraints = input.searchConstraints ?? {};
+    const knownList = (value: unknown): string[] => Array.isArray(value) ? value.map(String) : [];
+    const allowedValues = (requested: unknown, allowed: unknown, known: boolean): string[] | undefined => {
+      if (!known || !Array.isArray(requested)) return undefined;
+      const available = knownList(allowed);
+      const constrained = available.filter((value) => (requested as unknown[]).map(String).includes(value));
+      return constrained.length ? constrained : undefined;
+    };
+    const plannedCategories = allowedValues(planDecision?.categories, capabilities.categories, capabilities.categoriesKnown === true);
+    const plannedEngines = allowedValues(planDecision?.engines, capabilities.engines, capabilities.enginesKnown === true);
+    const plannedLanguage = capabilities.languagesKnown === true && knownList(capabilities.languages).includes(String(planDecision?.language ?? '')) ? String(planDecision?.language) : undefined;
+    const plannedTimeRange = capabilities.timeRangeKnown === true && planDecision?.time_range ? String(planDecision.time_range) : undefined;
+    plannedCategories?.forEach((value) => categoriesUsed.add(value));
+    plannedEngines?.forEach((value) => enginesUsed.add(value));
+    const searchOptions: SearchExecutionOptions = {
+      language: plannedLanguage ?? (capabilities.languagesKnown === true && constraints.languages?.length ? constraints.languages[0] : undefined),
+      time_range: plannedTimeRange ?? (capabilities.timeRangeKnown === true ? constraints.defaultTimeRange ?? undefined : undefined),
+      categories: plannedCategories,
+      engines: plannedEngines,
+      safe_search: 1,
+    };
     const roundQueries = (strategySource === 'ai' ? planDecision!.queries : seedQueries)
       .filter((q) => typeof q === 'string' && q.trim().length > 0)
       .filter((q, index, all) => all.indexOf(q) === index && !queriesUsed.includes(q))
@@ -461,7 +517,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
         }
         let raw: RawCandidate[] = [];
         try {
-          raw = (await connector.search(query, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl })).slice(0, input.maxCandidatesPerRound);
+          raw = (await connector.search(query, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl }, source.connector_key === 'searxng_search' ? searchOptions : undefined)).slice(0, input.maxCandidatesPerRound);
           if (raw.length > 0) successfulQueries.push(query);
           else weakQueries.push(query);
           if (connector.fetchPublicPage) {
@@ -635,6 +691,12 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
     strategyNotes.push({
       round, strategy_source: strategySource, queries: roundQueries, reasoning,
+      strategy: planDecision?.strategy,
+      categories: searchOptions.categories,
+      engines: searchOptions.engines,
+      language: searchOptions.language,
+      time_range: searchOptions.time_range,
+      next_action: review?.next_action,
       found: roundFound, qualified: roundQualified, rejected: roundRejected, duplicates: roundDuplicates,
       review,
     });
@@ -648,6 +710,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
     if (review?.decision === 'stop') { stopReason = review.stop_reason || 'ai_decided_stop'; break; }
 
+    previousReview = review;
     previousRoundQualified = roundQualified;
     previousRoundQuality = roundQuality;
   }
@@ -659,6 +722,9 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     queriesUsed,
     sourcesUsed: Array.from(sourcesUsed),
     strategiesUsed: Array.from(strategiesUsed),
+    categoriesUsed: Array.from(categoriesUsed),
+    enginesUsed: Array.from(enginesUsed),
+    sourceCapabilities: input.sourceCapabilities ?? {},
     candidatesSeen: totals.found,
     rejectedCandidates: totals.rejected,
     rejectionReasons: rejectedReasons.slice(0, 100),
@@ -684,6 +750,16 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     averageMatchScore: averageMatchScore === null ? null : Math.round(averageMatchScore * 10) / 10,
     averageDataQuality: averageDataQuality === null ? null : Math.round(averageDataQuality * 10) / 10,
     sourcesUsed: Array.from(sourcesUsed),
+    strategiesUsed: Array.from(strategiesUsed),
+    categoriesUsed: Array.from(categoriesUsed),
+    enginesUsed: Array.from(enginesUsed),
+    sourceCapabilities: input.sourceCapabilities ?? {},
+    strongQueries: Array.from(new Set(successfulQueries)),
+    weakQueries: Array.from(new Set(weakQueries)),
+    relevantRate: totals.found ? Math.round(((totals.found - totals.rejected) / totals.found) * 1000) / 10 : null,
+    qualifiedRate: totals.found ? Math.round((totals.qualified / totals.found) * 1000) / 10 : null,
+    duplicateRate: totals.found ? Math.round((totals.duplicates / totals.found) * 1000) / 10 : null,
+    verificationRate: totals.verified ? Math.round(((totals.verified - totals.verificationConflicts) / totals.verified) * 1000) / 10 : null,
     searchRounds: round,
     stopReason,
     aiProvidersUsed: Array.from(aiProvidersUsed),

@@ -412,10 +412,13 @@ async function executeIntent(
 استعلامات اقتراحية أولية (وليست إلزامية، فكّر بحرية): ${JSON.stringify(runtimeContext.seedQueries)}
 كل الاستعلامات المستخدمة سابقًا في هذه المهمة: ${JSON.stringify(runtimeContext.queriesUsedSoFar)}
 أداء كل استعلام حتى الآن (issued/qualified/rejected): ${JSON.stringify(runtimeContext.queryPerformance)}
-فكّر: أي استعلامات كانت جيدة فارفع الاعتماد عليها بصيغة مختلفة أعمق، وأيها كانت ضعيفة (رفض كثير/عدد قليل) فاستبعدها أو غيّر صياغتها جذريًا (مصطلح مهني مختلف، تركيبة موقع مختلفة، صفحات مهنية عامة، إلخ). لا تكرر استعلامًا فشل بنفس الصياغة.
+مراجعة الجولة السابقة وقرارها: ${JSON.stringify(runtimeContext.previousReview ?? null)}
+قيود البحث الاختيارية: ${JSON.stringify(runtimeContext.searchConstraints ?? {})}
+قدرات المصادر المكتشفة فعليًا فقط: ${JSON.stringify(runtimeContext.sourceCapabilities ?? {})}
+فكّر: أي استعلامات كانت جيدة فارفع الاعتماد عليها بصيغة مختلفة أعمق، وأيها كانت ضعيفة فاستبعدها أو غيّر استراتيجيتها جذريًا. اختر WHERE/HOW/WHY/WHAT_TO_VERIFY، ولا تدّعي فئة أو محركًا أو لغة أو time_range إلا إذا كانت capability معروفة في البيانات المرسلة. إذا كان البحث الاجتماعي العام مفيدًا ومسموحًا، استخدم category متاحة أو site-specific query عامة دون منصة ثابتة في الكود.
 أعد JSON فقط:
-{ "queries": ["استعلام 1", "استعلام 2"], "reasoning": "لماذا اخترت هذه الاستعلامات تحديدًا بناءً على ما سبق", "deprioritized_queries": ["استعلامات قررت عدم تكرارها ولماذا ضمنيًا"] }
-بحد أقصى 8 استعلامات.`;
+{ "strategy": "public_professional_discovery|social_public_discovery|verification|missing_field_search|refine_query|general_web_discovery", "queries": ["استعلام 1", "استعلام 2"], "categories": ["فئة معروفة فقط"], "engines": ["محرك معروف فقط"], "language": "لغة معروفة فقط أو null", "time_range": "قيمة مدعومة فقط أو null", "reason": "لماذا اخترت أين وكيف تبحث", "target_information": ["المعلومات المطلوب إثباتها"], "expected_result_type": "نوع النتائج المتوقع", "next_action": "CONTINUE_SAME_STRATEGY|REFINE_QUERY|CHANGE_STRATEGY|CHANGE_CATEGORY|CHANGE_ENGINE|VERIFY|SEARCH_MISSING_FIELD|STOP", "reasoning": "تحليل مختصر قابل للعرض وليس Chain of Thought", "deprioritized_queries": ["استعلامات لن تكررها"] }
+بحد أقصى 8 استعلامات، وبحد أقصى 3 فئات و5 محركات.`;
         const r = await callLLM(intent, sys, prompt, true);
         const parsed = parseJsonLoose<Record<string, unknown>>(r.content, () => ({ queries: [], reasoning: 'تعذر التخطيط عبر AI لهذه الجولة.' }));
         return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };
@@ -460,7 +463,7 @@ public_contact_phone/public_email = وسيلة اتصال عامة ظاهرة ف
 إجمالي المؤهلين حتى الآن: ${runtimeContext.totalQualified} من أصل ${runtimeContext.requestedCount} مطلوب.
 مؤهلو الجولة السابقة (null إن لم توجد جولة سابقة): ${runtimeContext.previousRoundQualified}.
 هل تستمر لجولة أخرى (وسنغيّر الاستراتيجية تلقائيًا في التخطيط القادم)، أم تتوقف الآن؟ توقف إذا: الجودة تنهار (مقارنة بالجولة السابقة)، أو لا ترى استراتيجية بحث جديدة مفيدة، أو العدد المطلوب أصبح شبه مستحيل الوصول إليه بجودة معقولة.
-أعد JSON فقط: { "decision": "continue" | "stop", "stop_reason": "سبب مختصر إن توقفت", "quality_signal": "improving" | "stable" | "declining", "note": "ملاحظة مختصرة تُعرض للمستخدم" }`;
+أعد JSON فقط: { "decision": "continue" | "stop", "next_action": "CONTINUE_SAME_STRATEGY|REFINE_QUERY|CHANGE_STRATEGY|CHANGE_CATEGORY|CHANGE_ENGINE|VERIFY|SEARCH_MISSING_FIELD|STOP", "stop_reason": "سبب مختصر إن توقفت", "quality_signal": "improving" | "stable" | "declining", "note": "ملاحظة مختصرة تُعرض للمستخدم" }`;
         const r = await callLLM(intent, sys, prompt, true);
         const parsed = parseJsonLoose<Record<string, unknown>>(r.content, () => ({ decision: 'continue', quality_signal: 'stable', note: 'تعذرت مراجعة AI لهذه الجولة؛ استمرار افتراضي ضمن سقف الجولات.' }));
         return { result: parsed, tokensIn: r.tokensIn, tokensOut: r.tokensOut, meta: r };

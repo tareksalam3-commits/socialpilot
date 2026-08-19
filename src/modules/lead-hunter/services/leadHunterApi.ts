@@ -119,6 +119,16 @@ export async function getLeadStats(workspaceId: string, searchRequestId: string)
     aiProvidersUsed: Array.isArray(summary.aiProvidersUsed) ? summary.aiProvidersUsed.map(String) : [],
     aiModelsUsed: Array.isArray(summary.aiModelsUsed) ? summary.aiModelsUsed.map(String) : [],
     aiFallbacks: Number(summary.aiFallbacks ?? 0),
+    strategiesUsed: Array.isArray(summary.strategiesUsed) ? summary.strategiesUsed.map(String) : [],
+    categoriesUsed: Array.isArray(summary.categoriesUsed) ? summary.categoriesUsed.map(String) : [],
+    enginesUsed: Array.isArray(summary.enginesUsed) ? summary.enginesUsed.map(String) : [],
+    strongQueries: Array.isArray(summary.strongQueries) ? summary.strongQueries.map(String) : [],
+    weakQueries: Array.isArray(summary.weakQueries) ? summary.weakQueries.map(String) : [],
+    relevantRate: typeof summary.relevantRate === 'number' ? summary.relevantRate : null,
+    qualifiedRate: typeof summary.qualifiedRate === 'number' ? summary.qualifiedRate : null,
+    duplicateRate: typeof summary.duplicateRate === 'number' ? summary.duplicateRate : null,
+    verificationRate: typeof summary.verificationRate === 'number' ? summary.verificationRate : null,
+    sourceCapabilities: (summary.sourceCapabilities as Record<string, unknown> | undefined) ?? {},
   };
 }
 

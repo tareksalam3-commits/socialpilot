@@ -198,6 +198,16 @@ export type LeadSearchStats = {
   aiProvidersUsed?: string[];
   aiModelsUsed?: string[];
   aiFallbacks?: number;
+  strategiesUsed?: string[];
+  categoriesUsed?: string[];
+  enginesUsed?: string[];
+  strongQueries?: string[];
+  weakQueries?: string[];
+  relevantRate?: number | null;
+  qualifiedRate?: number | null;
+  duplicateRate?: number | null;
+  verificationRate?: number | null;
+  sourceCapabilities?: Record<string, unknown>;
 };
 
 export const LEAD_JOB_STAGE_LABELS: Record<string, string> = {
