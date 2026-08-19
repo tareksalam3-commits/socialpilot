@@ -252,13 +252,47 @@ async function processJob(job: JobRow, userId: string) {
 
   await updateStage(job.id, 'planning', 20);
 
-  const sourceRows = (sources ?? []) as SourceRow[];
+  let sourceRows = (sources ?? []) as SourceRow[];
+
+  // §1/§2/§3 — SearXNG is the built-in primary search provider: a valid
+  // lead_hunter_settings.searxng_base_url is sufficient on its own to search.
+  // A workspace never has to manually create a lead_sources row first. If no
+  // row exists yet for this workspace, provision exactly one (upsert on the
+  // (workspace_id, connector_key) unique constraint, so re-running this never
+  // creates a duplicate) so the rest of the pipeline — credentials, health
+  // check, candidate-ledger source_id — has a real row to work with.
+  const hasSearxngRow = sourceRows.some((s) => s.connector_key === 'searxng_search');
+  const normalizedSearxngBaseUrl = (() => {
+    const raw = (settings.searxng_base_url ?? '').trim();
+    if (!raw) return null;
+    try {
+      const parsed = new URL(raw);
+      return ['http:', 'https:'].includes(parsed.protocol) ? parsed.toString().replace(/\/+$/, '') : null;
+    } catch { return null; }
+  })();
+  if (!hasSearxngRow && normalizedSearxngBaseUrl) {
+    const { data: provisioned } = await supabase.from('lead_sources')
+      .upsert({
+        workspace_id: job.workspace_id,
+        name: 'SearXNG (أساسي)',
+        connector_key: 'searxng_search',
+        source_type: 'public_directory',
+        enabled: true,
+        priority: 0,
+        status: 'not_configured',
+        config: {},
+      }, { onConflict: 'workspace_id,connector_key' })
+      .select('id,name,connector_key,enabled,status,priority,config')
+      .single();
+    if (provisioned) sourceRows = [...sourceRows, provisioned as SourceRow];
+  }
+
   const enabledSources = sourceRows.filter((source) => source.enabled && source.status !== 'disabled');
-  const credentials = await resolveSourceCredentials(enabledSources, settings.searxng_base_url ?? null);
+  const credentials = await resolveSourceCredentials(enabledSources, normalizedSearxngBaseUrl);
   const sourceCapabilities: Record<string, Record<string, unknown>> = {};
   const searxngSource = enabledSources.find((source) => source.connector_key === 'searxng_search');
   if (searxngSource) {
-    const capabilities = await discoverSearXNGCapabilities(credentials.get('searxng_search')?.baseUrl ?? settings.searxng_base_url ?? null);
+    const capabilities = await discoverSearXNGCapabilities(credentials.get('searxng_search')?.baseUrl ?? normalizedSearxngBaseUrl);
     sourceCapabilities.searxng_search = capabilities as unknown as Record<string, unknown>;
     const now = new Date().toISOString();
     await supabase.from('lead_hunter_settings').update({ searxng_capabilities: capabilities, searxng_last_health_at: now, searxng_last_health_status: capabilities.status, searxng_last_health_error: capabilities.status === 'healthy' ? null : capabilities.message }).eq('id', true);
@@ -359,11 +393,27 @@ async function processJob(job: JobRow, userId: string) {
     }
   }
 
+  // §22 — status must reflect whether a search actually ran. NOT_CONFIGURED
+  // (no working search provider) is a real failure, not a quiet "completed":
+  // the job's `status` (the column the rest of the product filters/alerts
+  // on) is set to 'failed' so it can never be mistaken for a successful run
+  // with zero results. `progress_stage` still carries the specific reason
+  // (not_configured / no_source_configured / completed / completed_no_results)
+  // for the UI to render precisely.
   const noSourceStage = loopResult.stopReason === 'NOT_CONFIGURED';
-  const finalStage = noSourceStage ? (enabledSources.length > 0 ? 'not_configured' : 'no_source_configured') : 'completed';
+  const finalStatus = noSourceStage ? 'failed' : 'completed';
+  const finalStage = noSourceStage
+    ? (enabledSources.length > 0 ? 'not_configured' : 'no_source_configured')
+    : (savedCount > 0 ? 'completed' : 'completed_no_results');
+  const finalLastError = noSourceStage
+    ? (enabledSources.length > 0
+      ? 'لا يوجد مصدر بحث صالح ومهيأ حاليًا (تحقق من SearXNG أو مصادر أخرى مفعّلة).'
+      : 'لا توجد مصادر بحث مفعّلة لهذا الـWorkspace ولم يتم ضبط SearXNG.')
+    : null;
 
   await supabase.from('lead_search_jobs').update({
-    status: 'completed',
+    status: finalStatus,
+    last_error: finalLastError,
     progress_percent: 100,
     progress_stage: finalStage,
     source_stats: loopResult.sourceStats,
@@ -377,7 +427,7 @@ async function processJob(job: JobRow, userId: string) {
   }).eq('id', job.id).eq('status', 'running');
 
   await supabase.from('lead_search_requests').update({
-    status: 'completed',
+    status: finalStatus,
     total_found: loopResult.totals.found,
     valid_count: loopResult.totals.found - loopResult.totals.rejected,
     duplicate_count: loopResult.totals.duplicates,
