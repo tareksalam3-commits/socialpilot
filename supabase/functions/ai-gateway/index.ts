@@ -117,14 +117,25 @@ async function authorize(req: Request, workspaceId: string, onBehalfOfUserId?: s
 // ---------------------------------------------------------------------------
 
 const TASK_CAPABILITIES: Record<Intent, CapabilityRequest['requiredCapabilities']> = {
-  generate_brand_dna: ['reasoning', 'structured_output'],
+  generate_brand_dna: ['structured_output'],
   create_content: ['text_generation', 'structured_output'],
-  create_content_plan: ['reasoning', 'structured_output'],
-  analyze_performance: ['reasoning', 'structured_output'],
+  create_content_plan: ['structured_output'],
+  analyze_performance: ['structured_output'],
   suggest_ideas: ['text_generation', 'structured_output'],
   general_advice: ['text_generation', 'structured_output'],
-  understand_lead_query: ['reasoning', 'structured_output'],
-  research_agent_reasoning: ['reasoning', 'structured_output'],
+  understand_lead_query: ['structured_output'],
+  research_agent_reasoning: ['text_generation'],
+};
+
+const TASK_PREFERRED_CAPABILITIES: Record<Intent, CapabilityRequest['preferredCapabilities']> = {
+  generate_brand_dna: ['reasoning'],
+  create_content: [],
+  create_content_plan: ['reasoning'],
+  analyze_performance: ['reasoning'],
+  suggest_ideas: [],
+  general_advice: [],
+  understand_lead_query: ['reasoning'],
+  research_agent_reasoning: ['reasoning'],
 };
 
 function looksLikeJson(content: string): boolean {
@@ -147,11 +158,13 @@ async function callLLM(
   userPrompt: string,
   jsonMode = false
 ): Promise<{ content: string; tokensIn: number; tokensOut: number; provider: string; model: string; fallbackCount: number; fallbackLog: Array<{ provider: string; model: string; error: string }> }> {
+  const nativeJsonMode = intent === 'research_agent_reasoning' ? false : jsonMode;
   const result = await routeAndRun(supabase, {
     requiredCapabilities: TASK_CAPABILITIES[intent],
+    preferredCapabilities: TASK_PREFERRED_CAPABILITIES[intent],
     systemPrompt,
     userPrompt,
-    jsonMode,
+    jsonMode: nativeJsonMode,
     validate: jsonMode ? looksLikeJson : undefined,
   });
   return {
@@ -743,6 +756,7 @@ Deno.serve(async (req: Request) => {
           model: meta.model,
           provider: meta.provider,
           fallbackCount: meta.fallbackCount,
+          fallbackLog: meta.fallbackLog,
           latencyMs,
           result,
         }),

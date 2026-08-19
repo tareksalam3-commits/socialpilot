@@ -412,6 +412,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
   const weakQueries: string[] = [];
   const aiProvidersUsed = new Set<string>();
   const aiModelsUsed = new Set<string>();
+  const aiFallbackLog: Array<{ provider: string; model: string; error: string }> = [];
   let aiFallbacks = 0;
   const trackAi = (value: unknown) => {
     if (!value || typeof value !== 'object') return;
@@ -419,6 +420,16 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     if (typeof meta.__ai_provider === 'string' && meta.__ai_provider) aiProvidersUsed.add(meta.__ai_provider);
     if (typeof meta.__ai_model === 'string' && meta.__ai_model) aiModelsUsed.add(meta.__ai_model);
     aiFallbacks += Number(meta.__ai_fallback_count ?? 0) || 0;
+    if (Array.isArray(meta.__ai_fallback_log)) {
+      for (const item of meta.__ai_fallback_log) {
+        if (!item || typeof item !== 'object') continue;
+        const row = item as Record<string, unknown>;
+        const provider = String(row.provider ?? 'unknown');
+        const model = String(row.model ?? 'unknown');
+        const error = String(row.error ?? 'unknown');
+        if (!aiFallbackLog.some((entry) => entry.provider === provider && entry.model === model && entry.error === error)) aiFallbackLog.push({ provider, model, error });
+      }
+    }
   };
   let fetchesUsed = 0;
   let queriesIssued = 0;
@@ -739,6 +750,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     aiProvidersUsed: Array.from(aiProvidersUsed),
     aiModelsUsed: Array.from(aiModelsUsed),
     aiFallbacks,
+    aiFallbackLog: aiFallbackLog.slice(0, 100),
   };
   const searchSummary = {
     requested: spec.requestedCount,
@@ -765,6 +777,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     aiProvidersUsed: Array.from(aiProvidersUsed),
     aiModelsUsed: Array.from(aiModelsUsed),
     aiFallbacks,
+    aiFallbackLog: aiFallbackLog.slice(0, 100),
   };
   return { accepted, candidateLedger, queriesUsed, roundsCompleted: round, stopReason, sourceStats, strategyNotes, searchMemory, searchSummary, totals };
 

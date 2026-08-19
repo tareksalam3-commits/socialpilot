@@ -198,6 +198,7 @@ export type LeadSearchStats = {
   aiProvidersUsed?: string[];
   aiModelsUsed?: string[];
   aiFallbacks?: number;
+  aiFallbackLog?: Array<{ provider: string; model: string; error: string }>;
   strategiesUsed?: string[];
   categoriesUsed?: string[];
   enginesUsed?: string[];

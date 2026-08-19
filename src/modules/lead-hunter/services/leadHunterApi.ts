@@ -119,6 +119,7 @@ export async function getLeadStats(workspaceId: string, searchRequestId: string)
     aiProvidersUsed: Array.isArray(summary.aiProvidersUsed) ? summary.aiProvidersUsed.map(String) : [],
     aiModelsUsed: Array.isArray(summary.aiModelsUsed) ? summary.aiModelsUsed.map(String) : [],
     aiFallbacks: Number(summary.aiFallbacks ?? 0),
+    aiFallbackLog: Array.isArray(summary.aiFallbackLog) ? summary.aiFallbackLog.map((item) => ({ provider: String(item?.provider ?? 'unknown'), model: String(item?.model ?? 'unknown'), error: String(item?.error ?? 'unknown') })) : [],
     strategiesUsed: Array.isArray(summary.strategiesUsed) ? summary.strategiesUsed.map(String) : [],
     categoriesUsed: Array.isArray(summary.categoriesUsed) ? summary.categoriesUsed.map(String) : [],
     enginesUsed: Array.isArray(summary.enginesUsed) ? summary.enginesUsed.map(String) : [],

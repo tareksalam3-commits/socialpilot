@@ -12,8 +12,11 @@ import { getAdapter, ProviderCallError, type ChatResult } from './providers.ts';
 
 export type RoutingPolicy = 'smart_balanced' | 'free_first' | 'lowest_cost' | 'best_quality' | 'fastest';
 
+export type CapabilityName = 'text_generation' | 'vision' | 'reasoning' | 'tool_calling' | 'structured_output';
+
 export type CapabilityRequest = {
-  requiredCapabilities: Array<'text_generation' | 'vision' | 'reasoning' | 'tool_calling' | 'structured_output'>;
+  requiredCapabilities: CapabilityName[];
+  preferredCapabilities?: CapabilityName[];
 };
 
 type CandidateModel = {
@@ -28,6 +31,9 @@ type CandidateModel = {
   failure_count: number;
   circuit_state: string;
   circuit_opened_at: string | null;
+  reasoning: boolean;
+  tool_calling: boolean;
+  structured_output: boolean;
 };
 
 type ProviderRow = {
@@ -40,10 +46,10 @@ type ProviderRow = {
 
 // Statuses that mean "try the next candidate" rather than "stop and report
 // the error" — matches spec's Failover vs Non-Failover error classes.
-const FAILOVER_STATUSES = new Set([401, 403, 408, 409, 429, 500, 502, 503, 504]);
+const FAILOVER_STATUSES = new Set([400, 401, 403, 404, 408, 409, 422, 429, 500, 502, 503, 504]);
 const CIRCUIT_OPEN_COOLDOWN_MS = 5 * 60 * 1000;
 const CONSECUTIVE_FAILURES_TO_OPEN = 5;
-const MAX_ATTEMPTS = 6;
+const MAX_ATTEMPTS = 12;
 
 export type RunResult = {
   content: string;
@@ -129,6 +135,9 @@ async function loadCandidates(
       failure_count: m.failure_count,
       circuit_state: m.circuit_state,
       circuit_opened_at: m.circuit_opened_at,
+      reasoning: m.reasoning,
+      tool_calling: m.tool_calling,
+      structured_output: m.structured_output,
     }));
 
   return { candidates, providers };
@@ -147,7 +156,8 @@ function rankCandidates(
   candidates: CandidateModel[],
   providers: Map<string, ProviderRow>,
   policy: RoutingPolicy,
-  allowPaidFallback: boolean
+  allowPaidFallback: boolean,
+  preferredCapabilities: CapabilityName[] = []
 ): CandidateModel[] {
   let pool = candidates.filter((m) => {
     const provider = providers.get(m.provider_key);
@@ -165,6 +175,7 @@ function rankCandidates(
   }
 
   const providerPriority = (m: CandidateModel) => providers.get(m.provider_key)?.priority ?? 999;
+  const preferenceScore = (m: CandidateModel) => preferredCapabilities.reduce((score, capability) => score + (capability === 'reasoning' ? Number(m.reasoning) : capability === 'tool_calling' ? Number(m.tool_calling) : capability === 'structured_output' ? Number(m.structured_output) : 0), 0);
 
   const comparators: Record<RoutingPolicy, (a: CandidateModel, b: CandidateModel) => number> = {
     free_first: (a, b) =>
@@ -182,7 +193,14 @@ function rankCandidates(
     fastest: (a, b) => (a.avg_latency_ms ?? 99999) - (b.avg_latency_ms ?? 99999) || b.quality_score - a.quality_score,
   };
 
-  return [...pool].sort(comparators[policy]);
+  const sorted = [...pool].sort((a, b) => comparators[policy](a, b) || preferenceScore(b) - preferenceScore(a));
+  const firstByProvider: CandidateModel[] = [];
+  for (const candidate of sorted) {
+    if (!firstByProvider.some((item) => item.provider_key === candidate.provider_key)) firstByProvider.push(candidate);
+  }
+  const diversified = [...firstByProvider];
+  for (const candidate of sorted) if (!diversified.includes(candidate)) diversified.push(candidate);
+  return diversified;
 }
 
 async function loadPolicy(supabase: SupabaseClient): Promise<{ policy: RoutingPolicy; allowPaidFallback: boolean }> {
@@ -248,7 +266,7 @@ export async function routeAndRun(
     loadPolicy(supabase),
   ]);
 
-  const ranked = rankCandidates(candidates, providers, policy, allowPaidFallback).slice(0, MAX_ATTEMPTS);
+  const ranked = rankCandidates(candidates, providers, policy, allowPaidFallback, req.preferredCapabilities ?? []).slice(0, MAX_ATTEMPTS);
   if (ranked.length === 0) throw new NoModelAvailableError();
 
   const fallbackLog: RunResult['fallbackLog'] = [];
