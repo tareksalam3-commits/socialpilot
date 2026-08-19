@@ -670,14 +670,14 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
           raw = (toolRawByKey.get(`${source.connector_key}::${query}`) ?? (await connector.search(query, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl }, source.connector_key === 'searxng_search' ? searchOptions : undefined))).slice(0, input.maxCandidatesPerRound);
           if (raw.length > 0) successfulQueries.push(query);
           else weakQueries.push(query);
-          if (connector.fetchPublicPage) {
-            for (const result of raw.slice(0, Math.min(5, input.maxFetches - fetchesUsed))) {
-              if (!result.source_url || fetchesUsed >= input.maxFetches) break;
-              fetchesUsed += 1;
-              const fetched = fetchedPagesByUrl.get(String(result.source_url));
-              const page = fetched ?? await connector.fetchPublicPage(String(result.source_url));
-              if (page?.text) result._public_page_text = page.text;
-            }
+          // Do not fetch every SERP result automatically. Public pages are
+          // fetched only when the AI explicitly requests fetch_public_page;
+          // otherwise a single round can spend minutes opening 5 pages per
+          // query before extraction even begins.
+          for (const result of raw) {
+            if (!result.source_url) continue;
+            const fetched = fetchedPagesByUrl.get(String(result.source_url));
+            if (fetched?.text) result._public_page_text = fetched.text;
           }
           sourceStats.push({ round, source: source.connector_key, status: raw.length > 0 ? 'ok' : 'no_results', query, records_found: raw.length });
         } catch (error) {
