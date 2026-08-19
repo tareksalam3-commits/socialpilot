@@ -310,7 +310,9 @@ const AGENTS = {
 3) ميّز بوضوح بين شركة/صفحة عامة/مقال وبين فرد حقيقي؛ ارفض غير الأفراد.
 4) إذا كانت جولة بحث سابقة أنتجت نتائج ضعيفة أو غير مطابقة (شركات بدل أفراد، نتائج بلا موقع، إلخ)، غيّر الاستراتيجية فعليًا في الجولة التالية بدل تكرار نفس الاستعلامات.
 5) الجودة أهم من العدد: عدد قليل من المرشحين الممتازين أفضل من عدد كبير من المرشحين الضعاف.
-6) أرجع JSON فقط بالصيغة المطلوبة بالضبط في كل استدعاء دون أي نص خارجها.`,
+6) أرجع JSON فقط بالصيغة المطلوبة بالضبط في كل استدعاء دون أي نص خارجها.
+7) في plan_round يمكنك طلب أدوات حقيقية من التطبيق: search_web لجلب نتائج ويب، وfetch_public_page لقراءة صفحة عامة. لا تطلب الأداة إلا عندما تحتاجها، ولا تضع أكثر من 4 tool_calls في الجولة.
+8) tool_calls ليست Chain of Thought؛ أعد فقط سببًا مختصرًا قابلًا للعرض، ولا تستخدم روابط داخلية أو localhost.`,
 };
 
 // ---------------------------------------------------------------------------
@@ -428,9 +430,10 @@ async function executeIntent(
 مراجعة الجولة السابقة وقرارها: ${JSON.stringify(runtimeContext.previousReview ?? null)}
 قيود البحث الاختيارية: ${JSON.stringify(runtimeContext.searchConstraints ?? {})}
 قدرات المصادر المكتشفة فعليًا فقط: ${JSON.stringify(runtimeContext.sourceCapabilities ?? {})}
+نتائج الأدوات التي نفذها التطبيق في هذه الجولة: ${JSON.stringify(runtimeContext.tool_results ?? [])}
 فكّر: أي استعلامات كانت جيدة فارفع الاعتماد عليها بصيغة مختلفة أعمق، وأيها كانت ضعيفة فاستبعدها أو غيّر استراتيجيتها جذريًا. اختر WHERE/HOW/WHY/WHAT_TO_VERIFY، ولا تدّعي فئة أو محركًا أو لغة أو time_range إلا إذا كانت capability معروفة في البيانات المرسلة. إذا كان البحث الاجتماعي العام مفيدًا ومسموحًا، استخدم category متاحة أو site-specific query عامة دون منصة ثابتة في الكود.
 أعد JSON فقط:
-{ "strategy": "public_professional_discovery|social_public_discovery|verification|missing_field_search|refine_query|general_web_discovery", "queries": ["استعلام 1", "استعلام 2"], "categories": ["فئة معروفة فقط"], "engines": ["محرك معروف فقط"], "language": "لغة معروفة فقط أو null", "time_range": "قيمة مدعومة فقط أو null", "reason": "لماذا اخترت أين وكيف تبحث", "target_information": ["المعلومات المطلوب إثباتها"], "expected_result_type": "نوع النتائج المتوقع", "next_action": "CONTINUE_SAME_STRATEGY|REFINE_QUERY|CHANGE_STRATEGY|CHANGE_CATEGORY|CHANGE_ENGINE|VERIFY|SEARCH_MISSING_FIELD|STOP", "reasoning": "تحليل مختصر قابل للعرض وليس Chain of Thought", "deprioritized_queries": ["استعلامات لن تكررها"] }
+{ "strategy": "public_professional_discovery|social_public_discovery|verification|missing_field_search|refine_query|general_web_discovery", "queries": ["استعلام 1", "استعلام 2"], "categories": ["فئة معروفة فقط"], "engines": ["محرك معروف فقط"], "language": "لغة معروفة فقط أو null", "time_range": "قيمة مدعومة فقط أو null", "reason": "لماذا اخترت أين وكيف تبحث", "target_information": ["المعلومات المطلوب إثباتها"], "expected_result_type": "نوع النتائج المتوقع", "next_action": "CONTINUE_SAME_STRATEGY|REFINE_QUERY|CHANGE_STRATEGY|CHANGE_CATEGORY|CHANGE_ENGINE|VERIFY|SEARCH_MISSING_FIELD|STOP", "reasoning": "تحليل مختصر قابل للعرض وليس Chain of Thought", "deprioritized_queries": ["استعلامات لن تكررها"], "tool_calls": [{ "id": "tool-1", "name": "search_web|fetch_public_page", "arguments": { "query": "استعلام آمن", "url": "https://public.example/page", "source": "serper_search", "categories": [], "engines": [], "language": null, "time_range": null } }] }
 بحد أقصى 8 استعلامات، وبحد أقصى 3 فئات و5 محركات.`;
         const r = await callLLM(intent, sys, prompt, true);
         const parsed = parseJsonLoose<Record<string, unknown>>(r.content, () => ({ queries: [], reasoning: 'تعذر التخطيط عبر AI لهذه الجولة.' }));

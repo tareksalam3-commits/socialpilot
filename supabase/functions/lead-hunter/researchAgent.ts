@@ -276,6 +276,24 @@ export type SearchExecutionOptions = {
   safe_search?: number | boolean;
 };
 
+export type ResearchToolCall = {
+  id?: string;
+  name: 'search_web' | 'fetch_public_page';
+  arguments: Record<string, unknown>;
+};
+
+export type ResearchToolResult = {
+  id: string;
+  name: ResearchToolCall['name'];
+  ok: boolean;
+  source?: string;
+  query?: string;
+  result_count?: number;
+  results?: RawCandidate[];
+  page?: { text: string; finalUrl: string } | null;
+  error?: string;
+};
+
 export type PlanRoundDecision = {
   strategy?: string;
   queries: string[];
@@ -289,6 +307,7 @@ export type PlanRoundDecision = {
   next_action?: string;
   reasoning: string;
   deprioritized_queries?: string[];
+  tool_calls?: ResearchToolCall[];
 };
 
 export type ExtractedCandidate = {
@@ -379,6 +398,8 @@ export type LoopOutput = {
   strategyNotes: RoundStrategyNote[];
   searchMemory: Record<string, unknown>;
   searchSummary: Record<string, unknown>;
+  toolCalls: ResearchToolCall[];
+  toolResults: ResearchToolResult[];
   totals: { found: number; duplicates: number; rejected: number; qualified: number; verified: number; verificationConflicts: number };
 };
 
@@ -391,6 +412,43 @@ function externalIdFor(url: string | undefined, index: number): string {
   }
 }
 
+function safePublicUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 2048) return null;
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    if (host === 'localhost' || host.endsWith('.local') || host === '::1' || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function normalizedToolCall(value: unknown): ResearchToolCall | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  const name = row.name === 'search_web' || row.name === 'fetch_public_page' ? row.name : null;
+  if (!name) return null;
+  const rawArgs = row.arguments && typeof row.arguments === 'object' ? row.arguments as Record<string, unknown> : {};
+  return { id: typeof row.id === 'string' ? row.id.slice(0, 80) : undefined, name, arguments: rawArgs };
+}
+
+function searchOptionsForTool(args: Record<string, unknown>, constraints: LoopInput['searchConstraints'], capabilities: LoopInput['sourceCapabilities']): SearchExecutionOptions {
+  const caps = (capabilities?.searxng_search ?? {}) as Record<string, unknown>;
+  const list = (value: unknown) => Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+  const requestedCategories = list(args.categories);
+  const requestedEngines = list(args.engines);
+  const availableCategories = list(caps.categories);
+  const availableEngines = list(caps.engines);
+  const categories = caps.categoriesKnown === true && requestedCategories.length ? requestedCategories.filter((item) => availableCategories.includes(item)) : undefined;
+  const engines = caps.enginesKnown === true && requestedEngines.length ? requestedEngines.filter((item) => availableEngines.includes(item)) : undefined;
+  const requestedLanguage = typeof args.language === 'string' ? args.language : undefined;
+  const language = caps.languagesKnown === true && list(caps.languages).includes(requestedLanguage ?? '') ? requestedLanguage : caps.languagesKnown === true ? constraints?.languages?.[0] : undefined;
+  const timeRange = caps.timeRangeKnown === true && typeof args.time_range === 'string' ? args.time_range : caps.timeRangeKnown === true ? constraints?.defaultTimeRange ?? undefined : undefined;
+  return { categories: categories?.length ? categories.slice(0, 3) : undefined, engines: engines?.length ? engines.slice(0, 5) : undefined, language, time_range: timeRange, safe_search: 1 };
+}
+
 export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
   const { spec, mode } = input;
   const startedAt = Date.now();
@@ -400,6 +458,8 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
   const accepted: LoopOutput['accepted'] = [];
   const candidateLedger: CandidateLedgerEntry[] = [];
   const strategyNotes: RoundStrategyNote[] = [];
+  const toolCalls: ResearchToolCall[] = [];
+  const toolResults: ResearchToolResult[] = [];
   const totals = { found: 0, duplicates: 0, rejected: 0, qualified: 0, verified: 0, verificationConflicts: 0 };
   const queryPerformance: Record<string, { issued: number; qualified: number; rejected: number }> = {};
   const rejectedReasons: string[] = [];
@@ -442,9 +502,9 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     }
     return {
       accepted, candidateLedger, queriesUsed, roundsCompleted: 0, stopReason: 'NOT_CONFIGURED', sourceStats, strategyNotes,
-      searchMemory: { sourcesUsed: [], strategiesUsed: [], candidatesSeen: 0, rejectedCandidates: 0, rejectionReasons: [], verifiedCandidates: 0, duplicates: 0, missingFields: [], successfulQueries: [], weakQueries: [], searchRounds: 0 },
-      searchSummary: { requested: spec.requestedCount, candidates: 0, verified: 0, qualified: 0, rejected: 0, duplicates: 0, averageMatchScore: null, averageDataQuality: null, sourcesUsed: [], searchRounds: 0 },
-      totals,
+      searchMemory: { sourcesUsed: [], strategiesUsed: [], candidatesSeen: 0, rejectedCandidates: 0, rejectionReasons: [], verifiedCandidates: 0, duplicates: 0, missingFields: [], successfulQueries: [], weakQueries: [], searchRounds: 0, toolCalls: [], toolResults: [] },
+      searchSummary: { requested: spec.requestedCount, candidates: 0, verified: 0, qualified: 0, rejected: 0, duplicates: 0, averageMatchScore: null, averageDataQuality: null, sourcesUsed: [], searchRounds: 0, toolCalls: [], toolResults: [] },
+      toolCalls, toolResults, totals,
     };
   }
 
@@ -473,7 +533,58 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     }) as PlanRoundDecision | null;
 
     trackAi(planDecision);
-    const strategySource: 'ai' | 'fallback_deterministic' = planDecision?.queries?.length ? 'ai' : 'fallback_deterministic';
+    let effectivePlanDecision = planDecision;
+    const toolRawByKey = new Map<string, RawCandidate[]>();
+    const fetchedPagesByUrl = new Map<string, { text: string; finalUrl: string }>();
+    const roundToolResults: ResearchToolResult[] = [];
+    const requestedTools = (planDecision?.tool_calls ?? []).map(normalizedToolCall).filter((item): item is ResearchToolCall => item !== null).slice(0, 4);
+    let toolSearchesIssued = 0;
+    for (const toolCall of requestedTools) {
+      toolCalls.push(toolCall);
+      const args = toolCall.arguments;
+      const requestedSource = typeof args.source === 'string' ? args.source : 'serper_search';
+      const source = enabledSources.find((item) => item.connector_key === requestedSource) ?? enabledSources.find((item) => item.connector_key === 'serper_search') ?? enabledSources[0];
+      const connector = source ? CONNECTOR_REGISTRY.get(source.connector_key) : undefined;
+      if (!source || !connector) {
+        const result: ResearchToolResult = { id: toolCall.id ?? `tool-${toolCalls.length}`, name: toolCall.name, ok: false, source: requestedSource, error: 'لا يوجد مصدر Web مفعّل لهذا الطلب.' };
+        roundToolResults.push(result); toolResults.push(result); continue;
+      }
+      if (toolCall.name === 'search_web') {
+        const query = typeof args.query === 'string' ? args.query.trim().slice(0, 500) : '';
+        if (!query || queriesIssued + toolSearchesIssued >= input.maxQueries) {
+          const result: ResearchToolResult = { id: toolCall.id ?? `tool-${toolCalls.length}`, name: toolCall.name, ok: false, source: source.connector_key, query, error: !query ? 'أداة البحث تحتاج query نصيًا.' : 'تم استنفاد ميزانية البحث.' };
+          roundToolResults.push(result); toolResults.push(result); continue;
+        }
+        toolSearchesIssued += 1;
+        try {
+          const raw = (await connector.search(query, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl }, source.connector_key === 'searxng_search' ? searchOptionsForTool(args, input.searchConstraints, input.sourceCapabilities) : undefined)).slice(0, input.maxCandidatesPerRound);
+          toolRawByKey.set(`${source.connector_key}::${query}`, raw);
+          const result: ResearchToolResult = { id: toolCall.id ?? `tool-${toolCalls.length}`, name: toolCall.name, ok: true, source: source.connector_key, query, result_count: raw.length, results: raw.slice(0, 25) };
+          roundToolResults.push(result); toolResults.push(result);
+        } catch (error) {
+          const result: ResearchToolResult = { id: toolCall.id ?? `tool-${toolCalls.length}`, name: toolCall.name, ok: false, source: source.connector_key, query, error: error instanceof Error ? error.message : 'تعذر تنفيذ Web Search.' };
+          roundToolResults.push(result); toolResults.push(result);
+        }
+      } else {
+        const url = safePublicUrl(args.url);
+        if (!url || !connector.fetchPublicPage || fetchesUsed >= input.maxFetches) {
+          const result: ResearchToolResult = { id: toolCall.id ?? `tool-${toolCalls.length}`, name: toolCall.name, ok: false, source: source.connector_key, error: !url ? 'الرابط ليس Public HTTP(S).' : fetchesUsed >= input.maxFetches ? 'تم استنفاد ميزانية fetch.' : 'المصدر لا يدعم fetch_public_page.' };
+          roundToolResults.push(result); toolResults.push(result); continue;
+        }
+        fetchesUsed += 1;
+        const page = await connector.fetchPublicPage(url);
+        if (page) fetchedPagesByUrl.set(url, page);
+        const result: ResearchToolResult = { id: toolCall.id ?? `tool-${toolCalls.length}`, name: toolCall.name, ok: Boolean(page), source: source.connector_key, page, error: page ? undefined : 'تعذر قراءة الصفحة العامة.' };
+        roundToolResults.push(result); toolResults.push(result);
+      }
+    }
+    if (roundToolResults.length > 0) {
+      const followUp = await input.aiCall('plan_round', { spec, mode, round, requestedCount: spec.requestedCount, alreadyQualified: accepted.length, seedQueries, queriesUsedSoFar: queriesUsed, queryPerformance, previousReview, searchConstraints: input.searchConstraints ?? {}, sourceCapabilities: input.sourceCapabilities ?? {}, tool_results: roundToolResults, tool_execution_complete: true });
+      trackAi(followUp);
+      if (followUp && Array.isArray((followUp as PlanRoundDecision).queries) && (followUp as PlanRoundDecision).queries.length > 0) effectivePlanDecision = followUp as PlanRoundDecision;
+    }
+    const planningDecision = effectivePlanDecision;
+    const strategySource: 'ai' | 'fallback_deterministic' = planningDecision?.queries?.length ? 'ai' : 'fallback_deterministic';
     const capabilities = (input.sourceCapabilities?.searxng_search ?? {}) as Record<string, unknown>;
     const constraints = input.searchConstraints ?? {};
     const knownList = (value: unknown): string[] => Array.isArray(value) ? value.map(String) : [];
@@ -483,10 +594,10 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
       const constrained = available.filter((value) => (requested as unknown[]).map(String).includes(value));
       return constrained.length ? constrained : undefined;
     };
-    const plannedCategories = allowedValues(planDecision?.categories, capabilities.categories, capabilities.categoriesKnown === true);
-    const plannedEngines = allowedValues(planDecision?.engines, capabilities.engines, capabilities.enginesKnown === true);
-    const plannedLanguage = capabilities.languagesKnown === true && knownList(capabilities.languages).includes(String(planDecision?.language ?? '')) ? String(planDecision?.language) : undefined;
-    const plannedTimeRange = capabilities.timeRangeKnown === true && planDecision?.time_range ? String(planDecision.time_range) : undefined;
+    const plannedCategories = allowedValues(planningDecision?.categories, capabilities.categories, capabilities.categoriesKnown === true);
+    const plannedEngines = allowedValues(planningDecision?.engines, capabilities.engines, capabilities.enginesKnown === true);
+    const plannedLanguage = capabilities.languagesKnown === true && knownList(capabilities.languages).includes(String(planningDecision?.language ?? '')) ? String(planningDecision?.language) : undefined;
+    const plannedTimeRange = capabilities.timeRangeKnown === true && planningDecision?.time_range ? String(planningDecision.time_range) : undefined;
     plannedCategories?.forEach((value) => categoriesUsed.add(value));
     plannedEngines?.forEach((value) => enginesUsed.add(value));
     const searchOptions: SearchExecutionOptions = {
@@ -496,13 +607,15 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
       engines: plannedEngines,
       safe_search: 1,
     };
-    const roundQueries = (strategySource === 'ai' ? planDecision!.queries : seedQueries)
+    const toolQueries = roundToolResults.filter((item) => item.ok && item.name === 'search_web' && item.query).map((item) => String(item.query));
+    const plannedQueries = [...(strategySource === 'ai' ? planningDecision!.queries : seedQueries), ...toolQueries];
+    const roundQueries = plannedQueries
       .filter((q) => typeof q === 'string' && q.trim().length > 0)
       .filter((q, index, all) => all.indexOf(q) === index && !queriesUsed.includes(q))
       .slice(0, Math.min(MODE_QUERY_BUDGET[mode], input.maxQueries - queriesIssued));
     strategiesUsed.add(strategySource === 'ai' ? 'ai_adaptive' : 'deterministic_seed');
     roundQueries.forEach((q) => { if (queryPerformance[q]?.qualified > 0) successfulQueries.push(q); });
-    const reasoning = planDecision?.reasoning ?? 'استعلامات احتياطية ثابتة (AI Gateway غير متاح لهذه الجولة).';
+    const reasoning = planningDecision?.reasoning ?? 'استعلامات احتياطية ثابتة (AI Gateway غير متاح لهذه الجولة).';
 
     const roundStartAccepted = accepted.length;
     let roundQualified = 0;
@@ -528,14 +641,15 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
         }
         let raw: RawCandidate[] = [];
         try {
-          raw = (await connector.search(query, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl }, source.connector_key === 'searxng_search' ? searchOptions : undefined)).slice(0, input.maxCandidatesPerRound);
+          raw = (toolRawByKey.get(`${source.connector_key}::${query}`) ?? (await connector.search(query, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl }, source.connector_key === 'searxng_search' ? searchOptions : undefined))).slice(0, input.maxCandidatesPerRound);
           if (raw.length > 0) successfulQueries.push(query);
           else weakQueries.push(query);
           if (connector.fetchPublicPage) {
             for (const result of raw.slice(0, Math.min(5, input.maxFetches - fetchesUsed))) {
               if (!result.source_url || fetchesUsed >= input.maxFetches) break;
               fetchesUsed += 1;
-              const page = await connector.fetchPublicPage(String(result.source_url));
+              const fetched = fetchedPagesByUrl.get(String(result.source_url));
+              const page = fetched ?? await connector.fetchPublicPage(String(result.source_url));
               if (page?.text) result._public_page_text = page.text;
             }
           }
@@ -702,7 +816,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
     strategyNotes.push({
       round, strategy_source: strategySource, queries: roundQueries, reasoning,
-      strategy: planDecision?.strategy,
+      strategy: planningDecision?.strategy,
       categories: searchOptions.categories,
       engines: searchOptions.engines,
       language: searchOptions.language,
@@ -751,6 +865,8 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     aiModelsUsed: Array.from(aiModelsUsed),
     aiFallbacks,
     aiFallbackLog: aiFallbackLog.slice(0, 100),
+    toolCalls: toolCalls.slice(0, 100),
+    toolResults: toolResults.slice(0, 100),
   };
   const searchSummary = {
     requested: spec.requestedCount,
@@ -778,7 +894,9 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     aiModelsUsed: Array.from(aiModelsUsed),
     aiFallbacks,
     aiFallbackLog: aiFallbackLog.slice(0, 100),
+    toolCalls: toolCalls.slice(0, 100),
+    toolResults: toolResults.slice(0, 100),
   };
-  return { accepted, candidateLedger, queriesUsed, roundsCompleted: round, stopReason, sourceStats, strategyNotes, searchMemory, searchSummary, totals };
+  return { accepted, candidateLedger, queriesUsed, roundsCompleted: round, stopReason, sourceStats, strategyNotes, searchMemory, searchSummary, toolCalls, toolResults, totals };
 
 }
