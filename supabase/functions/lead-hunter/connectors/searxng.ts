@@ -40,9 +40,11 @@ export type SearXNGCapabilities = {
   timeRangeKnown: boolean;
 };
 
+export type SearXNGErrorCode = 'NOT_CONFIGURED' | 'SOURCE_ERROR' | 'RATE_LIMITED' | 'TIMEOUT' | 'NO_RESULTS' | 'PERMISSION_ERROR' | 'JSON_NOT_ENABLED';
+
 export class SearXNGError extends Error {
-  readonly code: 'NOT_CONFIGURED' | 'SOURCE_ERROR' | 'RATE_LIMITED' | 'TIMEOUT' | 'NO_RESULTS' | 'PERMISSION_ERROR' | 'JSON_NOT_ENABLED';
-  constructor(code: SearXNGError['code'], message = code) {
+  readonly code: SearXNGErrorCode;
+  constructor(code: SearXNGErrorCode, message?: string) {
     super(message);
     this.name = 'SearXNGError';
     this.code = code;
@@ -145,8 +147,6 @@ export async function discoverSearXNGCapabilities(baseUrlValue: string | null | 
     const enginesFromResults = Array.from(new Set((payload.results as SearXNGResult[]).flatMap((item) => item.engines ?? (item.engine ? [item.engine] : []))));
     if (enginesFromResults.length) Object.assign(discovered, { enginesKnown: true, engines: enginesFromResults });
 
-    // /config is optional and instance-specific. We only mark fields known when
-    // the returned JSON explicitly contains them; failure leaves them unknown.
     try {
       const configResponse = await fetchWithRetry(`${baseUrl}/config`, { headers: { Accept: 'application/json' } }, 5_000);
       if (configResponse.ok) {
@@ -184,7 +184,7 @@ export function createSearXNGConnector(): LeadSourceConnector {
     key: 'searxng_search',
     async search(query: string, _spec: SearchSpecification, credentials: SourceCredentials, options?: SearXNGSearchOptions): Promise<RawCandidate[]> {
       const results = await searxngSearch(query, credentials, options);
-      return results.map((item) => ({ source_url: item.url ?? null, evidence: item.content ?? '', _search_title: item.title ?? '', _search_engine: item.engine ?? item.engines?.join(',') ?? '', _published_date: item.publishedDate ?? null, _search_query: query, _search_options: options ?? {} }));
+      return results.map((item) => ({ ...(item.url ? { source_url: item.url } : {}), evidence: item.content ?? '', _search_title: item.title ?? '', _search_engine: item.engine ?? item.engines?.join(',') ?? '', _published_date: item.publishedDate ?? null, _search_query: query, _search_options: options ?? {} }));
     },
     async fetchPublicPage(url: string): Promise<{ text: string; finalUrl: string } | null> { return fetchPublicPage(url); },
     async normalize(record: RawCandidate): Promise<LeadRecord> { return { source_url: record.source_url, notes: record.evidence }; },
