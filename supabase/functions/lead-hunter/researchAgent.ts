@@ -1,28 +1,3 @@
-/**
- * AI Research Agent — Lead Hunter
- * ================================
- * The "brain": Understand → Plan → Search → Observe → Analyze → Question →
- * Adapt → Search again → Verify → Reject → Rank → Review → Stop.
- *
- * This file owns reasoning and orchestration only. It never talks to
- * secrets or the database directly (index.ts still owns all DB IO and
- * decrypts source credentials); it receives an `aiCall` function (real
- * calls to the AI Gateway, injected by index.ts) and a registered
- * `LeadSourceConnector` per enabled source, and drives a bounded
- * multi-round loop that actually reads what came back before deciding
- * what to do next.
- *
- * IMPORTANT — honesty over completeness (§21, §28, §33):
- * - If no connector is registered for any enabled source: stop with
- *   NOT_CONFIGURED. Zero fabricated leads.
- * - If the AI Gateway itself is unavailable for a given round: that round
- *   is recorded as `strategy_source: 'ai_unavailable'` and falls back to
- *   deterministic query generation for search only — raw search results
- *   are NEVER promoted to leads without a real AI extraction pass, because
- *   turning a SERP snippet into a structured person record requires
- *   reading it, not template-matching it (§4, §9, §11).
- */
-
 import {
   dataQualityAssessment,
   scoreLeadIntake,
@@ -32,10 +7,6 @@ import {
   type RawLeadInput,
   type LeadIntakeMeta,
 } from './pipeline.ts';
-
-// ---------------------------------------------------------------------------
-// Structured Search Specification (§3, §4) — unchanged from prior version.
-// ---------------------------------------------------------------------------
 
 export type ParsedLeadQuery = {
   location?: { country?: string | null; governorate?: string | null; city?: string | null; district?: string | null };
@@ -100,7 +71,6 @@ export function buildSpecification(query: ParsedLeadQuery): SearchSpecification 
   };
 }
 
-/** A candidate is rejected outright if it violates a stated Hard Requirement. Unknown = not rejected (§11: UNKNOWN beats an invented value). */
 export function meetsHardRequirements(spec: SearchSpecification, candidate: LeadRecord): { ok: boolean; reasons: string[] } {
   const reasons: string[] = [];
   let ok = true;
@@ -121,10 +91,6 @@ export function meetsHardRequirements(spec: SearchSpecification, candidate: Lead
     if (candidateOccupation.length === 0) { ok = false; reasons.push('المهنة/الوظيفة المطلوبة غير مثبتة بدليل.'); }
     else if (!matches) { ok = false; reasons.push('المهنة/الوظيفة لا تطابق أيًا من المطلوب.'); }
   }
-  // Contact availability, when requested, is a Hard Requirement (§2 example:
-  // "وسيلة اتصال عامة أو مهنية متاحة"). Any one channel (phone or email,
-  // public or professional) satisfies it — the user asked for reachability,
-  // not a specific channel.
   if (spec.soft.contactPhone || spec.soft.contactEmail) {
     const hasPhone = Boolean(candidate.public_contact_phone || candidate.business_phone);
     const hasEmail = Boolean(candidate.public_email || candidate.business_email);
@@ -132,13 +98,6 @@ export function meetsHardRequirements(spec: SearchSpecification, candidate: Lead
   }
   return { ok, reasons };
 }
-
-// ---------------------------------------------------------------------------
-// Deterministic fallback query generation (§6) — used only as a seed for
-// round 1 and as a safety fallback when the AI Gateway is unavailable for
-// a round (never as a silent substitute for AI judgement — see
-// `strategy_source` on every round in LoopOutput.rounds).
-// ---------------------------------------------------------------------------
 
 const LOCATION_VARIANTS: Record<string, string[]> = {
   'الغربية': ['Gharbia', 'Gharbeya'],
@@ -201,10 +160,6 @@ export function generateQueries(spec: SearchSpecification, mode: SearchModeName)
   return deduped.slice(0, MODE_QUERY_BUDGET[mode]);
 }
 
-// ---------------------------------------------------------------------------
-// Research Plan (§5)
-// ---------------------------------------------------------------------------
-
 export type ResearchPlan = {
   mode: SearchModeName;
   targetCount: number;
@@ -234,16 +189,9 @@ export function buildResearchPlan(spec: SearchSpecification, mode: SearchModeNam
   };
 }
 
-// ---------------------------------------------------------------------------
-// Source Connector contract (§20, §22) — tools, not the brain.
-// ---------------------------------------------------------------------------
+export type RawCandidate = Record<string, unknown> & { source_url?: string | null; evidence?: string };
 
-export type RawCandidate = Record<string, unknown> & { source_url?: string; evidence?: string };
-
-// Credentials are passed per-call, never held as connector/module state —
-// a connector instance is shared across every workspace's job in this
-// isolate, and API keys must never leak across a concurrent job boundary.
-export type SourceCredentials = { apiKey: string | null; baseUrl?: string | null };
+export type SourceCredentials = { apiKey: string | null; baseUrl?: string | null; workspaceId?: string; userId?: string };
 
 export interface LeadSourceConnector {
   readonly key: string;
@@ -255,12 +203,6 @@ export interface LeadSourceConnector {
 }
 
 export const CONNECTOR_REGISTRY: Map<string, LeadSourceConnector> = new Map();
-
-// ---------------------------------------------------------------------------
-// AI Gateway bridge — injected by index.ts (§1, §4, §10, §15, §18, §19).
-// researchAgent.ts never builds an HTTP request itself; it only asks for a
-// decision and reads back structured JSON, or null if the AI is down.
-// ---------------------------------------------------------------------------
 
 export type AIStep = 'plan_round' | 'extract_candidates' | 'verify_candidate' | 'round_review';
 
@@ -331,10 +273,6 @@ export type RoundReviewDecision = {
   note: string;
 };
 
-// ---------------------------------------------------------------------------
-// The Research Loop (§1, §7, §14, §15, §18, §19, §24)
-// ---------------------------------------------------------------------------
-
 export type SourceRoundStat = {
   round: number;
   source: string;
@@ -345,8 +283,8 @@ export type SourceRoundStat = {
 };
 
 export type CandidateLedgerEntry = {
-  source_id: string; // connector_key, used by index.ts to resolve the lead_sources row
-  external_id: string; // stable hash of source_url used for lead_source_records.external_id
+  source_id: string;
+  external_id: string;
   source_url: string | null;
   raw_record: Record<string, unknown>;
   extraction_status: 'collected' | 'normalized' | 'validated' | 'rejected' | 'failed';
@@ -380,7 +318,7 @@ export type LoopInput = {
   maxFetches: number;
   maxCandidatesPerRound: number;
   maxRuntimeMs: number;
-  sources: Array<{ source_id?: string; connector_key: string; enabled: boolean; apiKey: string | null; baseUrl?: string | null }>;
+  sources: Array<{ source_id?: string; connector_key: string; enabled: boolean; apiKey: string | null; baseUrl?: string | null; workspaceId?: string; userId?: string }>;
   isDuplicate: (candidate: LeadRecord) => Promise<boolean>;
   aiCall: AICaller;
   onProgress?: (stage: string, percent: number) => Promise<void>;
@@ -403,7 +341,7 @@ export type LoopOutput = {
   totals: { found: number; duplicates: number; rejected: number; qualified: number; verified: number; verificationConflicts: number };
 };
 
-function externalIdFor(url: string | undefined, index: number): string {
+function externalIdFor(url: string | null | undefined, index: number): string {
   if (!url) return `no-url-${index}-${Date.now()}`;
   try {
     return url.slice(0, 500);
@@ -544,7 +482,6 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     round += 1;
     await input.onProgress?.('planning', Math.min(20 + round * 4, 30));
 
-    // --- PLAN (§1 THINK/PLAN, §15 learn from previous round) ---
     const planDecision = await callAi<PlanRoundDecision>('plan_round', {
       spec, mode, round, requestedCount: spec.requestedCount,
       alreadyQualified: accepted.length,
@@ -581,7 +518,7 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
         }
         toolSearchesIssued += 1;
         try {
-          const raw = (await connector.search(query, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl }, source.connector_key === 'searxng_search' ? searchOptionsForTool(args, input.searchConstraints, input.sourceCapabilities) : undefined)).slice(0, input.maxCandidatesPerRound);
+          const raw = (await connector.search(query, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl, workspaceId: source.workspaceId, userId: source.userId }, source.connector_key === 'searxng_search' ? searchOptionsForTool(args, input.searchConstraints, input.sourceCapabilities) : undefined)).slice(0, input.maxCandidatesPerRound);
           toolRawByKey.set(`${source.connector_key}::${query}`, raw);
           const result: ResearchToolResult = { id: toolCall.id ?? `tool-${toolCalls.length}`, name: toolCall.name, ok: true, source: source.connector_key, query, result_count: raw.length, results: raw.slice(0, 25) };
           roundToolResults.push(result); toolResults.push(result);
@@ -647,7 +584,6 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
     let roundDuplicates = 0;
     let roundFound = 0;
 
-    // --- SEARCH + OBSERVE (§1 SEARCH/OBSERVE, real tool calls) ---
     for (const query of roundQueries) {
       if (isPastDeadline()) { stopReason = 'time_budget_exhausted'; break; }
       if (queriesIssued >= input.maxQueries) { stopReason = 'search_budget_exhausted'; break; }
@@ -667,13 +603,9 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
         }
         let raw: RawCandidate[] = [];
         try {
-          raw = (toolRawByKey.get(`${source.connector_key}::${query}`) ?? (await connector.search(query, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl }, source.connector_key === 'searxng_search' ? searchOptions : undefined))).slice(0, input.maxCandidatesPerRound);
+          raw = (toolRawByKey.get(`${source.connector_key}::${query}`) ?? (await connector.search(query, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl, workspaceId: source.workspaceId, userId: source.userId }, source.connector_key === 'searxng_search' ? searchOptions : undefined))).slice(0, input.maxCandidatesPerRound);
           if (raw.length > 0) successfulQueries.push(query);
           else weakQueries.push(query);
-          // Do not fetch every SERP result automatically. Public pages are
-          // fetched only when the AI explicitly requests fetch_public_page;
-          // otherwise a single round can spend minutes opening 5 pages per
-          // query before extraction even begins.
           for (const result of raw) {
             if (!result.source_url) continue;
             const fetched = fetchedPagesByUrl.get(String(result.source_url));
@@ -692,14 +624,10 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
         totals.found += raw.length;
         if (raw.length === 0) continue;
 
-        // --- ANALYZE / READ (§1 ANALYZE, §4, §9 evidence-based extraction) ---
         await input.onProgress?.('analyzing', Math.min(55 + round * 4, 68));
         const extraction = await callAi<{ candidates: ExtractedCandidate[] } & Record<string, unknown>>('extract_candidates', { spec, results: raw });
         trackAi(extraction);
         if (!extraction?.candidates?.length) {
-          // AI unavailable or found nothing extractable — every raw result is
-          // still logged as a collected-but-unprocessed candidate (§7:
-          // Candidate ≠ Lead), never silently promoted.
           raw.forEach((r, i) => {
             candidateLedger.push({
               source_id: source.connector_key,
@@ -715,14 +643,6 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
           continue;
         }
 
-        // §13 — extraction.candidates is not guaranteed to be positionally
-        // aligned with `raw` (the AI may skip, merge, or reorder results), so
-        // never index raw[i] blindly. Resolve each candidate's origin row by
-        // the source_url its own evidence cites — that's the only honest link
-        // between a person and the page they were found on. A candidate whose
-        // evidence doesn't point at a URL we actually searched is not safely
-        // attributable to any single result and is rejected rather than
-        // silently pinned to the wrong person's source.
         const rawByUrl = new Map<string, RawCandidate>();
         for (const r of raw) { if (r.source_url) rawByUrl.set(String(r.source_url), r); }
 
@@ -798,8 +718,6 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
             continue;
           }
 
-          // --- VERIFY (§1 VERIFY, §10) — only for candidates that would
-          // otherwise be accepted, and only up to the mode's verify budget.
           await input.onProgress?.('verifying', Math.min(68 + round * 3, 78));
           let verified: VerifyDecision | null = null;
           const verifyBudgetLeft = MODE_VERIFY_BUDGET[mode] - totals.verified;
@@ -808,13 +726,13 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
             let corroboration: RawCandidate[] = [];
             if (connectorForVerify && normalized.full_name) {
               const verifyQuery = [normalized.full_name, normalized.governorate ?? normalized.city].filter(Boolean).join(' ');
-              try { corroboration = (await connectorForVerify.search(verifyQuery, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl })).slice(0, 5); } catch { /* leave empty — verification stays inconclusive */ }
+              try { corroboration = (await connectorForVerify.search(verifyQuery, spec, { apiKey: source.apiKey, baseUrl: source.baseUrl, workspaceId: source.workspaceId, userId: source.userId })).slice(0, 5); } catch { /* leave empty — verification stays inconclusive */ }
               for (const otherSource of enabledSources) {
                 if (otherSource.connector_key === source.connector_key) continue;
                 const otherConnector = CONNECTOR_REGISTRY.get(otherSource.connector_key);
                 if (!otherConnector) continue;
                 try {
-                  const additional = await otherConnector.search(verifyQuery, spec, { apiKey: otherSource.apiKey, baseUrl: otherSource.baseUrl });
+                  const additional = await otherConnector.search(verifyQuery, spec, { apiKey: otherSource.apiKey, baseUrl: otherSource.baseUrl, workspaceId: otherSource.workspaceId, userId: otherSource.userId });
                   corroboration = [...corroboration, ...additional.slice(0, 5)];
                 } catch { /* failover source is optional */ }
               }
@@ -843,10 +761,6 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
             continue;
           }
 
-          // §10: age is only ever a Failure when the user actually asked for an age
-          // range. No range requested → ageMatch stays null (unknown, not a strike
-          // against the candidate). Range requested but candidate's age is unknown →
-          // also null (UNKNOWN beats a fabricated match/mismatch, §32).
           const ageRequested = spec.soft.ageMin !== null || spec.soft.ageMax !== null;
           const ageKnown = normalized.age !== null && normalized.age !== undefined;
           const ageMatch = !ageRequested
@@ -869,7 +783,6 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
     if (isPastDeadline()) { stopReason = 'time_budget_exhausted'; break; }
 
-    // --- REVIEW / ADAPT / STOP (§1 REVIEW/STOP, §14, §19 quality plateau) ---
     await input.onProgress?.('final_review', Math.min(82 + round * 3, 92));
     const roundAccepted = accepted.slice(roundStartAccepted);
     const roundQuality = roundAccepted.length > 0 ? roundAccepted.reduce((sum, item) => sum + item.dataQuality.score, 0) / roundAccepted.length : 0;
@@ -894,8 +807,6 @@ export async function runResearchLoop(input: LoopInput): Promise<LoopOutput> {
 
     if (accepted.length >= spec.requestedCount) { stopReason = 'target_reached'; break; }
 
-    // Quality plateau is based on the actual data-quality signal, not only on
-    // whether a round happened to produce zero records.
     if (round > 1 && previousRoundQuality > 0 && roundQuality < previousRoundQuality * 0.75) { stopReason = 'quality_plateau'; break; }
     if (roundQualified === 0 && previousRoundQualified === 0) { stopReason = 'quality_plateau'; break; }
 

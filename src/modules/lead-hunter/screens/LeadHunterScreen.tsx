@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, BrainCircuit, Check, Database, Search, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowRight, BrainCircuit, Check, Database, Search, SlidersHorizontal, Users } from 'lucide-react';
 import { Badge, Button, Card, EmptyState, ErrorBanner, ScreenLoader, Spinner } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { analyzeLeadQuery, createLeadSearch, getLeadSearchJob, getLeadStats, listLeadSources, listLeads, startLeadSearch } from '../services/leadHunterApi';
+import { analyzeLeadQuery, createLeadSearch, getActiveLeadSearchJob, getLeadSearchJob, getLeadStats, listLeadSources, listLeads, startLeadSearch } from '../services/leadHunterApi';
 import type { Lead, LeadSearchAnalysis, LeadSearchJob, LeadSearchMode, LeadSearchStats, LeadSource } from '../types';
 import { LEAD_JOB_STAGE_LABELS } from '../types';
 import { freshnessLabel } from '../utils/scoring';
@@ -24,26 +24,69 @@ export function LeadHunterScreen({ onBack, onOpenManagement }: { onBack: () => v
     listLeadSources(workspace.id).then(setSources).catch(() => setSources([]));
   }, [workspace]);
 
+  const loadJobResults = useCallback(async (currentJob: LeadSearchJob) => {
+    if (!workspace) return;
+    try {
+      const [nextStats, nextLeads] = await Promise.all([
+        getLeadStats(workspace.id, currentJob.search_request_id),
+        listLeads(workspace.id, currentJob.search_request_id),
+      ]);
+      setStats(nextStats);
+      setLeads(nextLeads);
+    } catch {
+      // Results can be temporarily unavailable while the job is still writing.
+    }
+  }, [workspace]);
+
+  const refreshJob = useCallback(async (jobId: string) => {
+    if (!workspace) return;
+    try {
+      const next = await getLeadSearchJob(workspace.id, jobId);
+      setJob(next);
+      if (['completed', 'failed', 'cancelled'].includes(next.status)) await loadJobResults(next);
+    } catch {
+      // Keep the current progress visible; the next refresh can recover.
+    }
+  }, [workspace, loadJobResults]);
+
   useEffect(() => {
-    if (!workspace || !job || !['queued', 'running'].includes(job.status)) return;
-    const timer = window.setInterval(async () => {
+    if (!workspace) return;
+    let cancelled = false;
+    const restore = async () => {
       try {
-        const next = await getLeadSearchJob(workspace.id, job.id);
-        setJob(next);
-        if (['completed', 'failed', 'cancelled'].includes(next.status)) {
-          const [nextStats, nextLeads] = await Promise.all([
-            getLeadStats(workspace.id, next.search_request_id),
-            listLeads(workspace.id, next.search_request_id),
-          ]);
-          setStats(nextStats);
-          setLeads(nextLeads);
-        }
+        const savedJobId = window.localStorage.getItem(`socialpilot:lead-job:${workspace.id}`);
+        const restored = savedJobId
+          ? await getLeadSearchJob(workspace.id, savedJobId).catch(() => null)
+          : await getActiveLeadSearchJob(workspace.id);
+        if (cancelled || !restored) return;
+        setJob(restored);
+        if (['completed', 'failed', 'cancelled'].includes(restored.status)) await loadJobResults(restored);
       } catch {
-        // Keep the current progress visible; the next poll can recover.
+        // Restoration is best-effort; a new search can still be started.
       }
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [workspace, job]);
+    };
+    void restore();
+    return () => { cancelled = true; };
+  }, [workspace, loadJobResults]);
+
+  useEffect(() => {
+    const activeJobId = job?.id;
+    const activeJobStatus = job?.status;
+    if (!workspace || !activeJobId || !['queued', 'running'].includes(activeJobStatus ?? '')) return;
+    const poll = () => { void refreshJob(activeJobId); };
+    const timer = window.setInterval(poll, 2000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') poll();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pageshow', poll);
+    poll();
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pageshow', poll);
+    };
+  }, [workspace, job?.id, job?.status, refreshJob]);
 
   const enabledSources = sources.filter((source) => source.enabled && source.status !== 'disabled');
   const summary = useMemo(() => analysis?.summary ?? [], [analysis]);
@@ -69,6 +112,7 @@ export function LeadHunterScreen({ onBack, onOpenManagement }: { onBack: () => v
     try {
       const { requestId } = await createLeadSearch({ workspaceId: workspace.id, rawQuery, analysis, searchMode });
       const nextJob = await startLeadSearch(workspace.id, requestId);
+      window.localStorage.setItem(`socialpilot:lead-job:${workspace.id}`, nextJob.id);
       setJob(nextJob);
       setStats(null);
       setLeads([]);
@@ -121,10 +165,6 @@ export function LeadHunterScreen({ onBack, onOpenManagement }: { onBack: () => v
             <Button onClick={handleAnalyze} disabled={busy || !rawQuery.trim()} className="w-full mt-3">
               {busy ? <><Spinner size={16} /> جارٍ تحليل الطلب</> : <><Search size={17} /> تحليل الطلب</>}
             </Button>
-          </Card>
-          <Card className="bg-ink-900/60">
-            <div className="flex items-center gap-2 text-ink-300 text-sm"><ShieldCheck size={17} className="text-brand-400" /> البحث يلتزم بالمصادر المصرح بها فقط</div>
-            <p className="text-ink-500 text-xs leading-6 mt-2">لن يتم تجاوز تسجيل الدخول أو CAPTCHA أو حدود المنصات، ولن تظهر بيانات وهمية عند عدم تهيئة مصدر.</p>
           </Card>
         </>
       )}

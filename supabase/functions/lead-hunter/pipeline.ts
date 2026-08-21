@@ -1,21 +1,3 @@
-/**
- * Lead Intake Pipeline (Edge Function mirror)
- * ============================================
- * MIRRORS: src/modules/lead-hunter/pipeline/leadIntakePipeline.ts
- * and src/modules/lead-hunter/utils/scoring.ts
- *
- * Supabase Edge Functions are deployed one self-contained directory at a
- * time, so this Deno-side copy cannot import the React app's src/ modules
- * directly. The logic here MUST stay identical to the client mirror —
- * if you change normalization/validation/dedup/scoring rules, change both
- * files in the same commit.
- *
- * INPUT → NORMALIZE → VALIDATE → DEDUPLICATE → DATA QUALITY → SCORE
- * SAVE is done by the caller (index.ts) using a real Supabase client, since
- * this file has no DB access of its own — duplicate candidates are passed
- * in already fetched.
- */
-
 export const EGYPT_GOVERNORATES = [
   'القاهرة', 'الجيزة', 'الإسكندرية', 'الدقهلية', 'البحر الأحمر', 'البحيرة', 'الفيوم',
   'الغربية', 'الإسماعيلية', 'المنوفية', 'المنيا', 'القليوبية', 'الوادي الجديد',
@@ -110,10 +92,6 @@ export function scoreLeadIntake(lead: LeadRecord, context: LeadScoringContext = 
   const capped = Math.min(100, score);
   return { score: capped, priority: leadPriority(capped), reasons };
 }
-
-// ---------------------------------------------------------------------------
-// Normalize
-// ---------------------------------------------------------------------------
 
 export type LeadIntakeSourceType = 'manual' | 'csv' | 'excel' | 'api' | 'existing_crm' | 'test' | 'search_engine';
 
@@ -267,10 +245,6 @@ export function validateLead(normalized: LeadRecord, formatIssues: { businessPho
   return { valid: errors.length === 0, errors };
 }
 
-// ---------------------------------------------------------------------------
-// Deduplicate
-// ---------------------------------------------------------------------------
-
 function levenshtein(a: string, b: string): number {
   const rows = a.length + 1;
   const cols = b.length + 1;
@@ -373,10 +347,6 @@ export function mergeLeadUpdates(existing: LeadRecord, incoming: LeadRecord): Le
   if (incoming.collected_at) merged.last_verified_at = incoming.collected_at;
   return merged;
 }
-
-// ---------------------------------------------------------------------------
-// Orchestration
-// ---------------------------------------------------------------------------
 
 export type LeadIntakeResult =
   | { status: 'rejected'; raw: RawLeadInput; errors: string[] }

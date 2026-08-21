@@ -19,7 +19,8 @@ type Intent =
   | 'suggest_ideas'
   | 'general_advice'
   | 'understand_lead_query'
-  | 'research_agent_reasoning';
+  | 'research_agent_reasoning'
+  | 'lead_hunter_web_search';
 
 type RequestBody = {
   intent: Intent;
@@ -125,6 +126,7 @@ const TASK_CAPABILITIES: Record<Intent, CapabilityRequest['requiredCapabilities'
   general_advice: ['text_generation', 'structured_output'],
   understand_lead_query: ['structured_output'],
   research_agent_reasoning: ['text_generation'],
+  lead_hunter_web_search: ['web_search'],
 };
 
 const TASK_PREFERRED_CAPABILITIES: Record<Intent, CapabilityRequest['preferredCapabilities']> = {
@@ -136,6 +138,7 @@ const TASK_PREFERRED_CAPABILITIES: Record<Intent, CapabilityRequest['preferredCa
   general_advice: [],
   understand_lead_query: ['reasoning'],
   research_agent_reasoning: ['reasoning'],
+  lead_hunter_web_search: [],
 };
 
 function looksLikeJson(content: string): boolean {
@@ -178,6 +181,36 @@ async function callLLM(
   };
 }
 
+// lead_hunter_web_search bypasses callLLM entirely: it isn't asking a model
+// to reason in prose or JSON, it's asking OpenRouter's `web` plugin (see
+// providers.ts) to run a real search and hand back citations. This is the
+// concrete answer to "use the AI models already in the app to search
+// themselves" — no SearXNG/Serper connector involved, the search happens
+// inside the same AI Gateway every other Lead Hunter reasoning step goes
+// through.
+async function callLLMWebSearch(
+  query: string,
+  maxResults: number
+): Promise<{ citations: Array<{ url: string; title: string; content: string }>; tokensIn: number; tokensOut: number; provider: string; model: string; fallbackCount: number; fallbackLog: Array<{ provider: string; model: string; error: string }> }> {
+  const result = await routeAndRun(supabase, {
+    requiredCapabilities: TASK_CAPABILITIES.lead_hunter_web_search,
+    preferredCapabilities: [],
+    systemPrompt: 'You are a web search tool. Respond briefly summarizing what you found; the caller only uses the citations, not this text.',
+    userPrompt: query,
+    jsonMode: false,
+    webSearchOptions: { maxResults },
+  });
+  return {
+    citations: result.citations ?? [],
+    tokensIn: result.tokensIn,
+    tokensOut: result.tokensOut,
+    provider: result.providerUsed,
+    model: result.modelUsed,
+    fallbackCount: result.fallbackCount,
+    fallbackLog: result.fallbackLog,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Context Assembly — gather only relevant brand + memory context per intent
 // ---------------------------------------------------------------------------
@@ -186,10 +219,10 @@ async function assembleContext(workspaceId: string, intent: Intent): Promise<{
   brand: Record<string, unknown> | null;
   memory: { key: string; value: string; type: string }[];
 }> {
-  const needsBrand = intent !== 'generate_brand_dna';
-  const needsMemory = intent !== 'generate_brand_dna';
+  const needsBrand = intent !== 'generate_brand_dna' && intent !== 'lead_hunter_web_search';
+  const needsMemory = intent !== 'generate_brand_dna' && intent !== 'lead_hunter_web_search';
 
-  const tasks: Promise<unknown>[] = [];
+  const tasks: PromiseLike<unknown>[] = [];
 
   if (needsBrand) {
     tasks.push(
@@ -335,6 +368,8 @@ function planAgents(intent: Intent): string[] {
       return ['lead_intelligence'];
     case 'research_agent_reasoning':
       return ['research_researcher'];
+    case 'lead_hunter_web_search':
+      return ['web_search_tool'];
     case 'general_advice':
       return ['analytics_advisor'];
     default:
@@ -486,6 +521,29 @@ public_contact_phone/public_email = وسيلة اتصال عامة ظاهرة ف
       }
 
       return { result: { error: 'unknown_step' }, tokensIn: 0, tokensOut: 0, meta: { provider: 'none', model: 'none', fallbackCount: 0, fallbackLog: [] } };
+    }
+
+    case 'lead_hunter_web_search': {
+      // §"استخدام نماذج الذكاء الاصطناعي الموجودة فى التطبيق فى البحث بنفسها":
+      // no external search engine here at all — the model itself (via
+      // OpenRouter's `web` plugin, see providers.ts/router.ts) performs the
+      // search and hands back citations, which we reshape into the same
+      // {results:[{title,link,snippet}]} envelope every other Lead Hunter
+      // connector already returns, so researchAgent.ts doesn't need to know
+      // the difference.
+      const query = String(message ?? '').trim();
+      const maxResults = Math.min(20, Math.max(1, Number(runtimeContext.maxResults ?? 8)));
+      if (!query) {
+        return { result: { results: [], error: 'EMPTY_QUERY' }, tokensIn: 0, tokensOut: 0, meta: { provider: 'none', model: 'none', fallbackCount: 0, fallbackLog: [] } };
+      }
+      const r = await callLLMWebSearch(query, maxResults);
+      const results = r.citations.map((c) => ({ title: c.title, link: c.url, snippet: c.content }));
+      return {
+        result: { results },
+        tokensIn: r.tokensIn,
+        tokensOut: r.tokensOut,
+        meta: { provider: r.provider, model: r.model, fallbackCount: r.fallbackCount, fallbackLog: r.fallbackLog },
+      };
     }
 
     case 'generate_brand_dna': {

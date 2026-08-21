@@ -19,14 +19,15 @@ import {
 } from './researchAgent.ts';
 import { createSerperConnector } from './connectors/serper.ts';
 import { createSearXNGConnector, discoverSearXNGCapabilities } from './connectors/searxng.ts';
+import { createAiWebSearchConnector } from './connectors/ai-web-search.ts';
 
-// Register real search connectors once at module load (§20, §22 — the
-// connector is a tool, shared across every workspace's job in this
-// isolate). It is stateless: every call carries its own decrypted API key
-// as an argument (see resolveSourceCredentials below), so concurrent jobs
-// from different workspaces never share or leak a key.
+const AI_GATEWAY_URL = `${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/ai-gateway`;
+const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const AI_GATEWAY_TIMEOUT_MS = 20_000;
+
 CONNECTOR_REGISTRY.set('serper_search', createSerperConnector());
 CONNECTOR_REGISTRY.set('searxng_search', createSearXNGConnector());
+CONNECTOR_REGISTRY.set('ai_web_search', createAiWebSearchConnector(AI_GATEWAY_URL, SERVICE_ROLE_KEY));
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -75,20 +76,9 @@ type SettingsRow = {
   allow_social_search?: boolean;
   allow_site_search?: boolean;
   default_time_range?: string | null;
+  default_search_mode?: SearchModeName;
   searxng_capabilities?: Record<string, unknown>;
 };
-
-// ---------------------------------------------------------------------------
-// AI Gateway bridge (§1, §4, §10, §15, §18, §19) — the research loop is
-// AI-code, not AI-decoration: every plan/extract/verify/review step is a
-// real call to the same AI Gateway every other agent in the product goes
-// through (ai-gateway/index.ts), never a second parallel "AI" implemented
-// inline here. Background jobs have no live user session, so they
-// authenticate with the service role key; ai-gateway/index.ts has an
-// additive service-role bypass in `authorize()` for exactly this case.
-const AI_GATEWAY_URL = `${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/ai-gateway`;
-const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-const AI_GATEWAY_TIMEOUT_MS = 20_000;
 
 function buildAiCaller(workspaceId: string, userId: string): AICaller {
   return async (step, payload) => {
@@ -118,8 +108,6 @@ function buildAiCaller(workspaceId: string, userId: string): AICaller {
         __ai_fallback_log: Array.isArray(body.fallbackLog) ? body.fallbackLog : [],
       };
     } catch {
-      // AI Gateway unreachable or timed out — the loop treats this as
-      // ai_unavailable for the step and never fabricates a decision.
       return null;
     } finally {
       clearTimeout(timer);
@@ -143,19 +131,12 @@ async function resolveSourceCredentials(sources: SourceRow[], searxngBaseUrl: st
   return byConnectorKey;
 }
 
-// Arabic labels for these stage keys live in one place on the frontend:
-// src/modules/lead-hunter/types/index.ts → LEAD_JOB_STAGE_LABELS (§30).
-
 const LEAD_STATUSES = ['new', 'qualified', 'contacted', 'converted', 'suppressed', 'invalid', 'archived'];
 const IMPORT_SOURCE_TYPES: LeadIntakeSourceType[] = ['manual', 'csv', 'excel', 'api', 'existing_crm', 'test'];
 const CANDIDATE_COLUMNS = 'id,full_name,governorate,city,business_phone,public_contact_phone,business_email,public_email,professional_url,social_url';
 const MAX_BATCH_IMPORT = 2000;
 const MAX_EXPORT_ROWS = 5000;
 
-// Full set of real columns Lead Hunter export can show. Every entry exists
-// on `leads` today — the actual display formatting (Arabic headers, phone
-// as text, date formatting, RTL layout) happens client-side; see
-// src/modules/lead-hunter/services/leadExport.ts.
 const EXPORT_COLUMNS = [
   'full_name', 'business_phone', 'public_contact_phone', 'business_email', 'public_email',
   'governorate', 'city', 'district', 'occupation', 'job_title', 'industry', 'employer',
@@ -189,12 +170,6 @@ async function writeAudit(workspaceId: string, userId: string, action: string, e
   await supabase.from('lead_audit_logs').insert({ workspace_id: workspaceId, user_id: userId, action, entity, entity_id: entityId, detail });
 }
 
-// ---------------------------------------------------------------------------
-// Search job processing — AI Research Agent (understand → plan → search
-// loop → analyze → verify → qualify → score → rank). See researchAgent.ts
-// for the loop itself; this function does the DB IO around it.
-// ---------------------------------------------------------------------------
-
 const JOB_WATCHDOG_MS = 240_000;
 
 async function updateStage(jobId: string, stage: string, percent: number) {
@@ -224,7 +199,7 @@ async function processJob(job: JobRow, userId: string) {
 
   const [{ data: request }, { data: settingsRow }, { data: sources }] = await Promise.all([
     supabase.from('lead_search_requests').select('id,parsed_query,raw_query,requested_count,objective,search_mode').eq('id', job.search_request_id).maybeSingle(),
-    supabase.from('lead_hunter_settings').select('data_quality_threshold,max_rounds_fast,max_rounds_balanced,max_rounds_deep,max_candidates_per_round,max_runtime_seconds,max_queries,max_fetches,searxng_base_url,search_categories,search_languages,search_allowed_engines,allow_social_search,allow_site_search,default_time_range,searxng_capabilities').eq('id', true).maybeSingle(),
+    supabase.from('lead_hunter_settings').select('data_quality_threshold,max_rounds_fast,max_rounds_balanced,max_rounds_deep,max_candidates_per_round,max_runtime_seconds,max_queries,max_fetches,searxng_base_url,search_categories,search_languages,search_allowed_engines,allow_social_search,allow_site_search,default_time_range,default_search_mode,searxng_capabilities').eq('id', true).maybeSingle(),
     supabase.from('lead_sources').select('id,name,connector_key,enabled,status,priority,config').eq('workspace_id', job.workspace_id).order('priority', { ascending: true }).limit(100),
   ]);
 
@@ -254,13 +229,6 @@ async function processJob(job: JobRow, userId: string) {
 
   let sourceRows = (sources ?? []) as SourceRow[];
 
-  // §1/§2/§3 — SearXNG is the built-in primary search provider: a valid
-  // lead_hunter_settings.searxng_base_url is sufficient on its own to search.
-  // A workspace never has to manually create a lead_sources row first. If no
-  // row exists yet for this workspace, provision exactly one (upsert on the
-  // (workspace_id, connector_key) unique constraint, so re-running this never
-  // creates a duplicate) so the rest of the pipeline — credentials, health
-  // check, candidate-ledger source_id — has a real row to work with.
   const hasSearxngRow = sourceRows.some((s) => s.connector_key === 'searxng_search');
   const normalizedSearxngBaseUrl = (() => {
     const raw = (settings.searxng_base_url ?? '').trim();
@@ -280,6 +248,24 @@ async function processJob(job: JobRow, userId: string) {
         enabled: true,
         priority: 0,
         status: 'not_configured',
+        config: {},
+      }, { onConflict: 'workspace_id,connector_key' })
+      .select('id,name,connector_key,enabled,status,priority,config')
+      .single();
+    if (provisioned) sourceRows = [...sourceRows, provisioned as SourceRow];
+  }
+
+  const hasAiWebSearchRow = sourceRows.some((s) => s.connector_key === 'ai_web_search');
+  if (!hasAiWebSearchRow) {
+    const { data: provisioned } = await supabase.from('lead_sources')
+      .upsert({
+        workspace_id: job.workspace_id,
+        name: 'بحث الذكاء الاصطناعي (مدمج)',
+        connector_key: 'ai_web_search',
+        source_type: 'public_directory',
+        enabled: true,
+        priority: 1,
+        status: 'healthy',
         config: {},
       }, { onConflict: 'workspace_id,connector_key' })
       .select('id,name,connector_key,enabled,status,priority,config')
@@ -308,7 +294,7 @@ async function processJob(job: JobRow, userId: string) {
     maxFetches: Math.max(0, settings.max_fetches ?? 40),
     maxCandidatesPerRound: settings.max_candidates_per_round ?? 200,
     maxRuntimeMs: Math.max(30_000, (settings.max_runtime_seconds ?? 900) * 1000),
-    sources: enabledSources.map((s) => ({ source_id: s.id, connector_key: s.connector_key, enabled: s.enabled, ...(credentials.get(s.connector_key) ?? { apiKey: null, baseUrl: null }) })),
+    sources: enabledSources.map((s) => ({ source_id: s.id, connector_key: s.connector_key, enabled: s.enabled, workspaceId: job.workspace_id, userId, ...(credentials.get(s.connector_key) ?? { apiKey: null, baseUrl: null }) })),
     isDuplicate: async (candidate) => (await fetchDuplicateCandidates(job.workspace_id, candidate)).length > 0,
     aiCall: buildAiCaller(job.workspace_id, userId),
     onProgress: (stage, percent) => updateStage(job.id, stage, percent),
@@ -316,11 +302,6 @@ async function processJob(job: JobRow, userId: string) {
     sourceCapabilities,
   });
 
-  // Candidate ledger (§7: Candidate ≠ Lead) — every raw result the loop
-  // touched this job, whatever happened to it, goes into the existing
-  // lead_source_records table (collected/normalized/validated/rejected).
-  // This was always the schema's intended purpose; the loop just wasn't
-  // writing to it before.
   if (loopResult.candidateLedger.length > 0) {
     const sourceIdByConnectorKey = new Map(enabledSources.map((s) => [s.connector_key, s.id]));
     const ledgerRows = loopResult.candidateLedger
@@ -348,8 +329,6 @@ async function processJob(job: JobRow, userId: string) {
   await updateStage(job.id, 'qualifying', 75);
   await updateStage(job.id, 'ranking', 85);
 
-  // Save + rank accepted candidates through the existing intake pipeline —
-  // no parallel save path, per §25.
   let rank = 0;
   let savedCount = 0;
   for (const candidate of loopResult.accepted) {
@@ -361,8 +340,6 @@ async function processJob(job: JobRow, userId: string) {
         lead_id: saved.id, rank, inclusion_status: saved.status === 'suppressed' ? 'suppressed' : 'included',
         deduplication_status: 'not_match', data_quality_score: candidate.dataQuality.score,
       });
-      // Link the candidate ledger row to the lead it became, so a lead can
-      // always be traced back to its original evidence (§7, §9).
       if (candidate.lead.source_url) {
         await supabase.from('lead_source_records')
           .update({ normalized_lead_id: saved.id, extraction_status: 'validated' })
@@ -393,13 +370,6 @@ async function processJob(job: JobRow, userId: string) {
     }
   }
 
-  // §22 — status must reflect whether a search actually ran. NOT_CONFIGURED
-  // (no working search provider) is a real failure, not a quiet "completed":
-  // the job's `status` (the column the rest of the product filters/alerts
-  // on) is set to 'failed' so it can never be mistaken for a successful run
-  // with zero results. `progress_stage` still carries the specific reason
-  // (not_configured / no_source_configured / completed / completed_no_results)
-  // for the UI to render precisely.
   const noSourceStage = loopResult.stopReason === 'NOT_CONFIGURED';
   const finalStatus = noSourceStage ? 'failed' : 'completed';
   const finalStage = noSourceStage
@@ -456,12 +426,6 @@ async function processJob(job: JobRow, userId: string) {
     strategy_notes: loopResult.strategyNotes, search_memory: loopResult.searchMemory, search_summary: loopResult.searchSummary, totals: loopResult.totals,
   });
 }
-
-// ---------------------------------------------------------------------------
-// Lead intake — shared by add_lead / import_leads. Uses the pipeline in
-// pipeline.ts for normalize/validate/dedupe/quality/score; this file only
-// does DB IO (fetch candidates, suppression check, insert/update).
-// ---------------------------------------------------------------------------
 
 async function fetchDuplicateCandidates(workspaceId: string, normalized: LeadRecord): Promise<DuplicateCandidate[]> {
   const byId = new Map<string, DuplicateCandidate>();
@@ -593,10 +557,6 @@ async function runIntake(workspaceId: string, raw: RawLeadInput, meta: LeadIntak
   const saved = await saveAcceptedLead(workspaceId, result.lead, result.dataQuality, result.score);
   return { ...result, leadId: saved.id, savedStatus: saved.status };
 }
-
-// ---------------------------------------------------------------------------
-// HTTP entry point
-// ---------------------------------------------------------------------------
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
@@ -849,15 +809,10 @@ Deno.serve(async (req: Request) => {
       const hasExplicitIds = Array.isArray(leadIds) && leadIds.length > 0;
       if (!hasExplicitIds && !filters) return json(400, { error: 'لا توجد بيانات للتصدير.' });
 
-      // Never trust a client-supplied workspace scope beyond `workspaceId`,
-      // already authorized above — see §24 (no workspace bypass from frontend).
       let dataQuery = supabase.from('leads').select('*').eq('workspace_id', workspaceId);
       if (hasExplicitIds) {
         dataQuery = dataQuery.in('id', leadIds).limit(MAX_EXPORT_ROWS);
       } else {
-        // "Current Filter" / "All Leads" / "Qualified" / "High Score" / etc. —
-        // the caller sends the same filter shape used by Lead Management so the
-        // exported file always matches exactly what the user is looking at.
         const f = filters ?? {};
         if (!f.includeDoNotContact) dataQuery = dataQuery.eq('do_not_contact', false);
         if (f.status) dataQuery = dataQuery.eq('status', String(f.status));
@@ -882,7 +837,6 @@ Deno.serve(async (req: Request) => {
       if (error) return json(500, { error: 'تعذر تحميل بيانات التصدير.' });
       const all = rows ?? [];
       const suppressedCount = all.filter((r) => r.do_not_contact || r.status === 'suppressed').length;
-      // Suppressed / do-not-contact leads never leave the system via export — §8, §18.
       const exportable = all.filter((r) => !r.do_not_contact && r.status !== 'suppressed')
         .sort((a, b) => (b.lead_score ?? -1) - (a.lead_score ?? -1));
 

@@ -29,6 +29,8 @@ const TAB_PATHS: Record<Tab, string> = {
   more: '/app/accounts',
 };
 
+const LAST_APP_PATH_KEY = 'socialpilot:last-app-path';
+
 function tabFromPath(pathname: string): Tab {
   if (pathname === '/app/create') return 'create';
   if (pathname === '/app/content') return 'content';
@@ -38,14 +40,25 @@ function tabFromPath(pathname: string): Tab {
   return 'home';
 }
 
+function initialAppPath(): string {
+  const currentPath = window.location.pathname;
+  if (currentPath.startsWith('/app/')) return currentPath;
+  try {
+    const savedPath = window.localStorage.getItem(LAST_APP_PATH_KEY);
+    return savedPath?.startsWith('/app/') ? savedPath : TAB_PATHS.home;
+  } catch {
+    return TAB_PATHS.home;
+  }
+}
+
 export type AppShellProps = {
   navigate?: (tab: Tab) => void;
 };
 
 export function AppShell() {
   const { workspace } = useAuth();
-  const [tab, setTab] = useState<Tab>(() => tabFromPath(window.location.pathname));
-  const [path, setPath] = useState(() => window.location.pathname);
+  const [path, setPath] = useState(initialAppPath);
+  const [tab, setTab] = useState<Tab>(() => tabFromPath(initialAppPath()));
 
   useEffect(() => {
     const handlePopState = () => {
@@ -55,6 +68,15 @@ export function AppShell() {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LAST_APP_PATH_KEY, path);
+    } catch {
+      // Storage can be unavailable in private browsing; URL state still works.
+    }
+    if (window.location.pathname !== path) window.history.replaceState({}, '', path);
+  }, [path]);
 
   const openPath = (nextPath: string) => {
     setPath(nextPath);

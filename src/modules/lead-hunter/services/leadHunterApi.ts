@@ -80,6 +80,20 @@ export async function getLeadSearchJob(workspaceId: string, jobId: string): Prom
   return data as LeadSearchJob;
 }
 
+/** Restores the newest queued/running search after a remount or app resume. */
+export async function getActiveLeadSearchJob(workspaceId: string): Promise<LeadSearchJob | null> {
+  const { data, error } = await supabase
+    .from('lead_search_jobs')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .in('status', ['queued', 'running'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error('تعذر استعادة مهمة البحث الحالية.');
+  return (data as LeadSearchJob | null) ?? null;
+}
+
 export async function listLeads(workspaceId: string, searchRequestId?: string): Promise<Lead[]> {
   let query = supabase
     .from('lead_search_results')
